@@ -1,0 +1,6 @@
+{
+  "name": "ShopMate AI",
+  "description": "An elite AI-powered merchant dashboard and automated sales assistant for Facebook, Instagram, and WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

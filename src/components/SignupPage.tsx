@@ -30,7 +30,7 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
   };
 
   return (
-    <div className="min-h-screen bg-[#070708] text-[#e2e2e2] font-sans flex overflow-hidden selection:bg-white/10 selection:text-white relative">
+    <div className="min-h-screen bg-[#070708] text-[#e2e2e2] font-sans flex overflow-x-hidden overflow-y-auto selection:bg-white/10 selection:text-white relative">
       {/* Left Sidebar branding (40%) */}
       <aside className="hidden lg:flex lg:w-[40%] bg-[#0c0c0e] flex-col justify-between p-12 relative border-r border-white/[0.06]">
         {/* Ambient top light aura */}

@@ -1,8 +1,6 @@
-# Run and deploy your AI Studio app
+## App Demo
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/9ee3d451-b7bd-4eed-bfdd-dee79c8ba45c
+View the app demo in Google AI Studio: [App Demo Link](https://ai.studio/apps/ca45ede0-e90d-492b-b5d5-453d8582c725)
 
 ## Run Locally
 
@@ -13,3 +11,7 @@ View your app in AI Studio: https://ai.studio/apps/9ee3d451-b7bd-4eed-bfdd-dee79
    `npm install`
 2. Run the app:
    `npm run dev`
+
+## Design Instruction
+
+The [Demo.md](DESIGN.md) file contains the instructions for UI theme

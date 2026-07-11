@@ -37,7 +37,7 @@ export default function AnalyticsDashboard() {
         searchPlaceholder="Search commands..." 
       />
 
-      <div className="max-w-[1440px] mx-auto px-6 md:px-8 lg:px-10 py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
 
       {/* KPI Metrics row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

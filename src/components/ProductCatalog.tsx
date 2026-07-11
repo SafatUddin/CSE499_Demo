@@ -102,7 +102,7 @@ export default function ProductCatalog({
         onSearchChange={setSearchTerm}
       />
 
-      <div className="max-w-[1440px] mx-auto px-6 md:px-8 lg:px-10 py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
 
       {/* Main split grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -200,9 +200,10 @@ export default function ProductCatalog({
             )}
           </AnimatePresence>
 
-          {/* Product Table */}
-          <div className="border border-white/[0.06] rounded-xl overflow-hidden bg-[#0c0c0e]/30 max-h-[440px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-            <table className="w-full text-left border-collapse">
+          {/* Product Table Wrapper to retain rounded borders with scrolling inside */}
+          <div className="border border-white/[0.06] rounded-xl overflow-hidden bg-[#0c0c0e]/30 w-full">
+            <div className="max-h-[480px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 w-full">
+              <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-[#121215] border-b border-white/[0.04] text-[9px] font-sans text-white/40 uppercase tracking-widest font-bold">
                   <th className="p-4">Product</th>
@@ -253,6 +254,7 @@ export default function ProductCatalog({
             </table>
           </div>
         </div>
+      </div>
 
         {/* Right column: AI Persona Configuration (5 Columns) */}
         <div className="lg:col-span-5 bg-[#0c0c0e]/80 border border-white/[0.06] rounded-xl p-5 space-y-5">

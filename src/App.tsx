@@ -22,6 +22,8 @@ import SettingsPage from './components/SettingsPage';
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('landing');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // User Profile State synchronized with localStorage
   const [userProfile, setUserProfile] = useState(() => {
@@ -39,15 +41,21 @@ export default function App() {
     const handleNavigateEvent = (e: Event) => {
       const tab = (e as CustomEvent).detail as Tab;
       setActiveTab(tab);
+      setIsSidebarOpen(false);
     };
     const handleLogoutEvent = () => {
       handleLogout();
     };
+    const handleToggleSidebarEvent = () => {
+      setIsSidebarOpen(prev => !prev);
+    };
     window.addEventListener('shopmate_navigate', handleNavigateEvent);
     window.addEventListener('shopmate_logout', handleLogoutEvent);
+    window.addEventListener('shopmate_toggle_sidebar', handleToggleSidebarEvent);
     return () => {
       window.removeEventListener('shopmate_navigate', handleNavigateEvent);
       window.removeEventListener('shopmate_logout', handleLogoutEvent);
+      window.removeEventListener('shopmate_toggle_sidebar', handleToggleSidebarEvent);
     };
   }, []);
 
@@ -68,17 +76,20 @@ export default function App() {
   // Navigation controller
   const handleNavigate = (tab: Tab) => {
     setActiveTab(tab);
+    setIsSidebarOpen(false);
   };
 
   // Auth simulators
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setActiveTab('inbox');
+    setIsSidebarOpen(false);
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setActiveTab('landing');
+    setIsSidebarOpen(false);
   };
 
   // Product mutations
@@ -241,10 +252,14 @@ export default function App() {
             activeTab={activeTab} 
             onNavigate={handleNavigate} 
             onLogout={handleLogout} 
+            isOpen={isSidebarOpen}
+            onClose={() => setIsSidebarOpen(false)}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
           />
 
           {/* Core Content Area */}
-          <main className="flex-grow pl-64 min-h-screen bg-[#060608] flex flex-col min-w-0 w-full overflow-x-hidden">
+          <main className={`flex-grow pl-0 ${isSidebarCollapsed ? 'md:pl-16' : 'md:pl-64'} h-screen bg-[#060608] flex flex-col min-w-0 w-full overflow-hidden transition-all duration-300`}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -252,7 +267,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className="w-full flex-grow flex flex-col"
+                className={`w-full flex-grow flex flex-col ${activeTab === 'inbox' ? 'overflow-hidden h-full' : 'overflow-y-auto h-full scrollbar-thin scrollbar-thumb-white/10'}`}
               >
                 {renderPageContent()}
               </motion.div>

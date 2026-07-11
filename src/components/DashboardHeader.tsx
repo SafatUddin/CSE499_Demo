@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Settings, LogOut, ChevronDown, MessageSquare, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { Bell, Search, Settings, LogOut, ChevronDown, MessageSquare, AlertCircle, CheckCircle, X, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface DashboardHeaderProps {
@@ -117,23 +117,32 @@ export default function DashboardHeader({
 
   return (
     <header className="w-full border-b border-white/[0.06] bg-[#060608]/50 backdrop-blur-md sticky top-0 z-40 select-none">
-      <div className="max-w-[1440px] mx-auto px-6 md:px-8 lg:px-10 py-5 flex items-center justify-between w-full">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-3.5 sm:py-5 flex items-center justify-between w-full gap-3">
         {/* Page Title */}
-        <h1 className="text-[22px] font-sans font-extrabold tracking-tight text-white uppercase">
-          {title}
-        </h1>
+        <div className="flex items-center gap-2 min-w-0">
+          <button 
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('shopmate_toggle_sidebar'))}
+            className="md:hidden p-1.5 -ml-1 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer shrink-0"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <h1 className="text-xs sm:text-sm md:text-[22px] font-sans font-extrabold tracking-tight text-white uppercase truncate">
+            {title}
+          </h1>
+        </div>
 
         {/* Right Side Utility Bar */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           {/* Search Bar */}
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/30" />
+          <div className="relative w-28 sm:w-48 md:w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-white/30" />
             <input 
               type="text"
               placeholder={searchPlaceholder}
               value={searchValue}
               onChange={(e) => onSearchChange?.(e.target.value)}
-              className="w-full bg-[#121215] border border-white/[0.06] rounded-lg pl-9 pr-4 py-1.5 font-sans text-xs text-white placeholder-white/30 focus:border-white/20 transition-all outline-none"
+              className="w-full bg-[#121215] border border-white/[0.06] rounded-lg pl-8 pr-3 py-1 font-sans text-[10px] sm:text-xs text-white placeholder-white/30 focus:border-white/20 transition-all outline-none"
             />
           </div>
 

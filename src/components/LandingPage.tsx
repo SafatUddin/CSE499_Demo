@@ -31,7 +31,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
       {/* Top Navigation */}
       <header className="fixed top-0 w-full bg-[#070708]/85 backdrop-blur-md border-b border-white/[0.06] z-50">
-        <div className="max-w-[1200px] mx-auto px-6 py-5 flex justify-between items-center">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-5 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate('landing')}>
             <img 
               className="h-6 w-6 object-contain brightness-100" 
@@ -95,8 +95,8 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </header>
 
       {/* Hero Section */}
-      <section id="features" className="max-w-[1200px] mx-auto px-6 pt-36 pb-16 relative w-full flex-grow flex items-center">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center w-full">
+      <section id="features" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 pt-36 pb-16 relative w-full flex-grow flex items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-24 items-center w-full">
           {/* Left Hero content */}
           <div className="lg:col-span-7 space-y-6">
             <div className="inline-block px-3 py-1 bg-white/[0.04] rounded-full border border-white/[0.08]">
@@ -105,7 +105,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
               </span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-sans font-bold leading-[1.05] text-white tracking-tight">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-sans font-bold leading-[1.05] text-white tracking-tight">
               Turn Every Message into a<br />
               Sale.
             </h1>
@@ -205,8 +205,8 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* KPI Stats Bar */}
-      <section className="w-full bg-[#0a0a0c] border-y border-white/[0.06] py-12">
-        <div className="max-w-[1200px] mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-8">
+      <section className="w-full bg-[#0a0a0c] border-y border-white/[0.06] py-12 lg:py-16">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="text-center space-y-1">
             <div className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">98%</div>
             <div className="font-sans text-[9px] text-white/40 uppercase tracking-[0.2em] font-semibold">Inquiry Accuracy</div>
@@ -227,7 +227,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* Bento Feature Grid Section */}
-      <section id="suite" className="max-w-[1200px] mx-auto px-6 py-24 w-full space-y-16">
+      <section id="suite" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-24 lg:py-32 w-full space-y-16">
         <div className="text-center space-y-2">
           <h2 className="text-3xl font-sans font-bold text-white tracking-tight">The Elite Sales Suite</h2>
           <p className="font-sans text-[10px] text-white/40 uppercase tracking-[0.25em]">Engineered for high-volume commerce and precision automation.</p>
@@ -330,7 +330,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* AI Intelligence Report Banner */}
-      <section className="max-w-[1200px] mx-auto px-6 py-12 w-full">
+      <section className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-12 lg:py-16 w-full">
         <div className="bg-[#0c0c0e] border border-white/[0.07] rounded-lg p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden">
           <div className="absolute -right-24 -top-24 w-80 h-80 bg-white/[0.01] blur-[120px] rounded-full pointer-events-none" />
           
@@ -358,7 +358,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* Social Proof Corporate Names */}
-      <section id="giants" className="max-w-[1200px] mx-auto px-6 py-16 border-t border-white/[0.06] text-center space-y-6">
+      <section id="giants" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-16 lg:py-24 border-t border-white/[0.06] text-center space-y-6">
         <p className="font-sans text-[9px] text-white/40 uppercase tracking-[0.25em] font-bold">Powering Local Retail Giants</p>
         <div className="flex flex-wrap justify-center items-center gap-x-12 gap-y-6 opacity-40 hover:opacity-60 transition-all duration-300">
           <span className="font-sans font-bold text-sm tracking-widest text-white">GLAMOUR BD</span>
@@ -370,7 +370,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* Ready to scale final CTA */}
-      <section className="max-w-[1200px] mx-auto px-6 py-24 text-center space-y-6 relative">
+      <section className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-24 lg:py-32 text-center space-y-6 relative">
         <h2 className="text-4xl sm:text-5xl font-sans font-bold text-white leading-tight tracking-tight">Ready to Scale Your Sales?</h2>
         
         <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
@@ -393,7 +393,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
       {/* Footer */}
       <footer className="w-full bg-[#050506] border-t border-white/[0.06] mt-auto">
-        <div className="max-w-[1200px] mx-auto px-6 py-16 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-16 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
           <div className="space-y-3">
             <div className="flex items-center gap-2.5">
               <img 

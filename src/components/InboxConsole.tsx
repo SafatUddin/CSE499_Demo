@@ -19,7 +19,9 @@ import {
   FileText,
   PhoneCall,
   MoreHorizontal,
-  Zap
+  Zap,
+  ChevronLeft,
+  Info
 } from 'lucide-react';
 import { Conversation, Product, AIPersona, ChatMessage } from '../types';
 import DashboardHeader from './DashboardHeader';
@@ -44,6 +46,7 @@ export default function InboxConsole({
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL CONVERSATIONS');
+  const [mobileView, setMobileView] = useState<'list' | 'chat' | 'info'>('list');
 
   const getChatDisplayName = (chat: Conversation) => {
     if (!chat) return '';
@@ -233,7 +236,7 @@ export default function InboxConsole({
   ];
 
   return (
-    <div className="w-full flex-grow flex flex-col text-left">
+    <div className="w-full flex-grow flex flex-col text-left h-full overflow-hidden">
       {/* Page header with search functionality linked */}
       <DashboardHeader 
         title="SHOPMATE MERCHANT" 
@@ -242,33 +245,33 @@ export default function InboxConsole({
         onSearchChange={setSearchQuery}
       />
 
-      <div className="max-w-[1440px] mx-auto px-6 md:px-8 lg:px-10 py-6 md:py-8 lg:py-10 w-full flex-grow space-y-5 pb-10">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow flex flex-col min-h-0 space-y-5 pb-10 overflow-hidden">
 
-      {/* Channel Filters Row */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 -mt-2 no-scrollbar">
-        {FILTERS.map((f) => {
-          const isActive = activeFilter === f;
-          return (
-            <button
-              key={f}
-              onClick={() => setActiveFilter(f)}
-              className={`text-[9px] font-sans font-bold uppercase tracking-wider px-3.5 py-1.5 rounded-full border shrink-0 transition-all cursor-pointer ${
-                isActive 
-                  ? 'bg-[#121215] border-white text-white' 
-                  : 'bg-transparent border-white/10 text-white/40 hover:text-white hover:border-white/20'
-              }`}
-            >
-              {f}
-            </button>
-          );
-        })}
-      </div>
+        {/* Channel Filters Row */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 -mt-2 no-scrollbar shrink-0">
+          {FILTERS.map((f) => {
+            const isActive = activeFilter === f;
+            return (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`text-[9px] font-sans font-bold uppercase tracking-wider px-3.5 py-1.5 rounded-full border shrink-0 transition-all cursor-pointer ${
+                  isActive 
+                    ? 'bg-[#121215] border-white text-white' 
+                    : 'bg-transparent border-white/10 text-white/40 hover:text-white hover:border-white/20'
+                }`}
+              >
+                {f}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Main Console Box layout */}
-      <div className="bg-[#0c0c0e] border border-white/[0.06] rounded-xl h-[580px] flex overflow-hidden">
+        {/* Main Console Box layout */}
+        <div className="bg-[#0c0c0e] border border-white/[0.06] rounded-xl flex-grow flex overflow-hidden min-h-0 w-full">
         
         {/* 1. Left Thread List */}
-        <aside className="w-[28%] border-r border-white/[0.06] flex flex-col h-full bg-[#0a0a0c]">
+        <aside className={`border-r border-white/[0.06] flex flex-col h-full bg-[#0a0a0c] lg:w-[28%] w-full lg:flex ${mobileView === 'list' ? 'flex' : 'hidden'}`}>
           <header className="p-4 border-b border-white/[0.05] flex items-center justify-between">
             <h3 className="font-sans font-bold text-xs text-white uppercase tracking-wider">
               Conversations
@@ -289,6 +292,7 @@ export default function InboxConsole({
                     if (chat.unread) {
                       onUpdateConversation(chat.id, { unread: false });
                     }
+                    setMobileView('chat');
                   }}
                   className={`w-full text-left p-4 flex gap-3 items-start transition-all cursor-pointer border-l-2 ${
                     isSelected 
@@ -342,9 +346,18 @@ export default function InboxConsole({
         </aside>
 
         {/* 2. Middle Conversation Stream */}
-        <main className="w-[47%] border-r border-white/[0.06] flex flex-col h-full bg-[#0d0d10] relative">
+        <main className={`border-r border-white/[0.06] flex flex-col h-full bg-[#0d0d10] relative lg:w-[47%] w-full lg:flex ${mobileView === 'chat' ? 'flex' : 'hidden'}`}>
           <header className="p-4 border-b border-white/[0.05] flex items-center justify-between bg-[#0a0a0c]">
             <div className="flex items-center gap-3">
+              {/* Back button on mobile */}
+              <button 
+                type="button"
+                onClick={() => setMobileView('list')}
+                className="lg:hidden p-1.5 -ml-1 text-white/50 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer shrink-0"
+              >
+                <ChevronLeft className="h-4.5 w-4.5" />
+              </button>
+
               <div className="w-8 h-8 rounded-full bg-[#18181b] border border-white/10 flex items-center justify-center font-sans text-white text-[11px] font-bold">
                 {activeChat ? getChatDisplayName(activeChat).split(' ').map(n => n[0]).join('') : ''}
               </div>
@@ -361,6 +374,15 @@ export default function InboxConsole({
 
             {/* Utility icons */}
             <div className="flex items-center gap-1.5">
+              {/* Mobile Info toggle */}
+              <button 
+                type="button"
+                onClick={() => setMobileView('info')}
+                className="lg:hidden p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
+                title="View Strategy & Logs"
+              >
+                <Info className="h-4 w-4" />
+              </button>
               <button className="p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer">
                 <PhoneCall className="h-3.5 w-3.5" />
               </button>
@@ -575,7 +597,18 @@ export default function InboxConsole({
         </main>
 
         {/* 3. Right Sidebar */}
-        <aside className="w-[25%] flex flex-col h-full bg-[#0a0a0c] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scroll-smooth">
+        <aside className={`flex flex-col h-full bg-[#0a0a0c] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scroll-smooth lg:w-[25%] w-full lg:flex ${mobileView === 'info' ? 'flex' : 'hidden'}`}>
+          {/* Mobile Back to Chat Header */}
+          <div className="lg:hidden p-4 border-b border-white/[0.05] flex items-center gap-2 bg-[#0a0a0c] shrink-0">
+            <button 
+              type="button"
+              onClick={() => setMobileView('chat')}
+              className="p-1.5 -ml-1 text-white/50 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer shrink-0"
+            >
+              <ChevronLeft className="h-4.5 w-4.5" />
+            </button>
+            <span className="font-sans text-xs font-bold text-white uppercase tracking-wider">Back to Chat</span>
+          </div>
           
           {/* Panel 1: Detected SKU */}
           <section className="p-4 border-b border-white/[0.05] space-y-3.5 shrink-0">

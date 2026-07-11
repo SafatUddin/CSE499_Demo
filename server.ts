@@ -1,32 +1,27 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest } from './server/auth';
+import { ai } from './server/gemini';
+import { generateAgentReply } from './server/agent';
+import { verifyMetaSignature, sendMessengerMessage } from './server/meta';
 
 dotenv.config();
 
-// Initialize Gemini Client
-const apiKey = process.env.GEMINI_API_KEY;
-let ai: GoogleGenAI | null = null;
-
-if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
-  ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
+interface RequestWithRawBody extends express.Request {
+  rawBody?: Buffer;
 }
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req: RequestWithRawBody, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }));
   const PORT = Number(process.env.PORT) || 3000;
 
   const toPublicMerchant = (merchant: { id: string; name: string; email: string; avatarUrl: string | null }) => ({
@@ -276,223 +271,136 @@ async function startServer() {
         return res.status(400).json({ error: 'Message is required' });
       }
 
-      // Format catalog description for the model context
-      const catalogText = catalog
-        .map(
-          (p: any) =>
-            `- Name: ${p.name}, SKU: ${p.sku}, Price: $${p.price}, Inventory: ${p.inventory} units, Status: ${p.status}`
-        )
-        .join('\n');
-
-      const toneText = persona?.tone || 'Direct, helpful, and highly sophisticated.';
-      const styleText =
-        persona?.style === 'bullets'
-          ? 'Use bullet points for lists, specifications, or pricing whenever possible.'
-          : 'Use a fluid, warm, conversational narrative style. Do not use bullets.';
-      const customInst = persona?.customInstructions || '';
-
-      const systemInstruction = `You are ShopMate AI, an elite autonomous sales agent representing the merchant's store.
-Your goal is to answer customer questions with surgical precision, handle complaints or objections, and actively guide the conversation toward adding items to their cart or closing a sale.
-
-You must respond with a JSON object containing the exact properties specified in the response schema:
-1. replyText: Your conversational response to the customer. Maintain your persona.
-2. isComplaint: Set to true if the customer is expressing dissatisfaction, complaining, reporting issues, or requesting refunds/exchanges.
-3. cartAction: An object with 'action' ('add' or 'none') and 'sku' (string). Set action to 'add' if the customer expresses explicit intent to buy, purchase, or add an item to their cart, and specify the product SKU.
-4. suggestedProductsSKUs: An array of strings representing product SKUs to cross-sell or recommend as alternatives based on their interest.
-
-Core Directives:
-1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
-2. Keep your answers concise, engaging, and professional. 
-3. Under no circumstances mention that you are a language model or AI assistant from Google. You are ShopMate AI, built natively for this merchant.
-4. If a product is out of stock (inventory is 0), do not add it to the cart; instead, politely inform the customer and suggest an alternative product that is in stock.
-5. Support multilingual queries naturally (Bangla, English, and "Banglish" - romanized/code-mixed Bangla). Respond in the same language register the customer used.
-
-Tone of Voice:
-${toneText}
-
-Response Style:
-${styleText}
-
-Additional Store Instructions:
-${customInst}
-
-Available Product Catalog:
-${catalogText || 'No products registered in catalog.'}`;
-
-      // Assemble chat format for Gemini API
-      const contentsPayload: any[] = [];
-      
-      // Map history to part structure
-      history.forEach((h: any) => {
-        contentsPayload.push({
-          role: h.sender === 'customer' ? 'user' : 'model',
-          parts: [{ text: h.text }],
-        });
-      });
-
-      // Push latest user message
-      contentsPayload.push({
-        role: 'user',
-        parts: [{ text: message }],
-      });
-
-      // If AI client is configured, run the live model
-      if (ai) {
-        try {
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.5-flash',
-            contents: contentsPayload,
-            config: {
-              systemInstruction,
-              temperature: 0.7,
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  replyText: {
-                    type: Type.STRING,
-                    description: 'The conversational response to the customer. Under no circumstances mention you are an AI from Google.'
-                  },
-                  isComplaint: {
-                    type: Type.BOOLEAN,
-                    description: 'Whether the user is complaining or dissatisfied.'
-                  },
-                  cartAction: {
-                    type: Type.OBJECT,
-                    description: 'Action to build customer cart.',
-                    properties: {
-                      action: {
-                        type: Type.STRING,
-                        description: "Can be 'add' or 'none'. Set to 'add' if customer wants to purchase or checkout."
-                      },
-                      sku: {
-                        type: Type.STRING,
-                        description: 'The exact SKU of the product to add to cart, e.g., NX-402-B.'
-                      }
-                    },
-                    required: ['action', 'sku']
-                  },
-                  suggestedProductsSKUs: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: 'SKUs of relevant products to suggest for cross-sell.'
-                  }
-                },
-                required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs']
-              }
-            },
-          });
-
-          if (response.text) {
-            const parsed = JSON.parse(response.text.trim());
-            return res.json(parsed);
-          }
-        } catch (geminiError: any) {
-          console.error('Gemini call failed, falling back to simulated logic:', geminiError.message);
-          // Fall through to fallback simulator
-        }
-      }
-
-      // High-fidelity local fallback simulation if Gemini is not set up
-      const lowerMsg = message.toLowerCase();
-      let replyText = '';
-      let isComplaint = false;
-      let cartAction = { action: 'none', sku: '' };
-      let suggestedProductsSKUs: string[] = [];
-
-      // Detect complaints
-      if (
-        lowerMsg.includes('broken') ||
-        lowerMsg.includes('scam') ||
-        lowerMsg.includes('worst') ||
-        lowerMsg.includes('refund') ||
-        lowerMsg.includes('fake') ||
-        lowerMsg.includes('cancel') ||
-        lowerMsg.includes('bad') ||
-        lowerMsg.includes('defect') ||
-        lowerMsg.includes('late') ||
-        lowerMsg.includes('unhappy')
-      ) {
-        isComplaint = true;
-        replyText = `I am truly sorry to hear that you are experiencing this issue. Your feedback is extremely important to us. I have logged this immediately as a high-priority support ticket and escalated this conversation to our senior management team for a direct review. We will contact you within the hour to resolve this.`;
-      } 
-      // Detect checkout intents
-      else if (
-        lowerMsg.includes('checkout') ||
-        lowerMsg.includes('buy') ||
-        lowerMsg.includes('order') ||
-        lowerMsg.includes('purchase') ||
-        lowerMsg.includes('add to cart') ||
-        lowerMsg.includes('link')
-      ) {
-        // Try to match a product SKU or name
-        const found = catalog.find((p: any) => 
-          lowerMsg.includes(p.name.toLowerCase().split(' ')[0]) || 
-          lowerMsg.includes(p.sku.toLowerCase())
-        ) || catalog[0];
-
-        if (found) {
-          if (found.inventory <= 0) {
-            replyText = `The ${found.name} is currently out of stock. Would you be interested in any other premium item from our catalog?`;
-          } else {
-            cartAction = { action: 'add', sku: found.sku };
-            replyText = `Excellent choice! I have successfully added the ${found.name} (SKU: ${found.sku}, Price: $${found.price}) to your digital shopping cart. I have generated your order checkout summary below. Tap 'Complete Checkout' to finalize your purchase!`;
-            // Recommend some other SKUs as upsell
-            suggestedProductsSKUs = catalog
-              .filter((p: any) => p.sku !== found.sku)
-              .slice(0, 2)
-              .map((p: any) => p.sku);
-          }
-        } else {
-          replyText = `I'd love to help you purchase! Which specific product would you like me to add to your shopping cart?`;
-        }
-      } 
-      // Handle product specific queries
-      else {
-        const found = catalog.find((p: any) => 
-          lowerMsg.includes(p.name.toLowerCase().split(' ')[0]) || 
-          lowerMsg.includes(p.sku.toLowerCase())
-        );
-
-        if (found) {
-          suggestedProductsSKUs = catalog
-            .filter((p: any) => p.sku !== found.sku)
-            .slice(0, 2)
-            .map((p: any) => p.sku);
-
-          if (persona?.style === 'bullets') {
-            replyText = `Here is the product catalog analysis for the premium ${found.name}:
-• **Price**: $${found.price} USD
-• **SKU**: ${found.sku}
-• **Available Inventory**: ${found.inventory} units in stock
-• **Automation Status**: Certified ${found.status}
-
-Would you like me to add this to your active shopping cart?`;
-          } else {
-            replyText = `Ah, the ${found.name}! That is a remarkable choice. It is currently available in our catalog for $${found.price} with ${found.inventory} units ready for immediate packing and delivery. Standard delivery takes 2-3 business days. Shall I lock this into your cart for you?`;
-          }
-        } else if (lowerMsg.includes('hello') || lowerMsg.includes('hi ') || lowerMsg.includes('hey') || lowerMsg.includes('kemon')) {
-          replyText = `Hello! Welcome to our store. I am ShopMate AI, your dedicated brand ambassador. I speak English, Bangla, and Banglish! How can I elevate your shopping experience today?`;
-          suggestedProductsSKUs = catalog.slice(0, 2).map((p: any) => p.sku);
-        } else if (lowerMsg.includes('shipping') || lowerMsg.includes('deliver') || lowerMsg.includes('pathao')) {
-          replyText = `We provide pristine, high-security packaging and lightning-fast standard shipping (2-3 business days) nationwide. If you order within the hour, your package will be dispatched with top-tier priority!`;
-        } else {
-          // Generic brand ambassador response
-          const first = catalog[0];
-          replyText = `I appreciate you reaching out! Regarding your query, I'd highly recommend taking a look at our featured product: ${first?.name || 'Store Item'} available for just $${first?.price || '0.00'}. Would you like me to share more specifications or add it to your order?`;
-          if (first) suggestedProductsSKUs = [first.sku];
-        }
-      }
-
-      return res.json({
-        replyText,
-        isComplaint,
-        cartAction,
-        suggestedProductsSKUs
-      });
+      const result = await generateAgentReply({ message, history, persona, catalog });
+      return res.json(result);
     } catch (err: any) {
       console.error('Server error handling chat:', err);
       res.status(500).json({ error: 'Failed to process conversation: ' + err.message });
+    }
+  });
+
+  // Meta webhook verification handshake (Messenger/Instagram/WhatsApp all use this same shape)
+  app.get('/webhooks/meta', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+      res.status(200).send(challenge);
+    } else {
+      res.sendStatus(403);
+    }
+  });
+
+  async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string) {
+    const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+    if (!pageAccessToken) {
+      console.error('META_PAGE_ACCESS_TOKEN not set; cannot reply to Messenger');
+      return;
+    }
+
+    // This manual-token test phase has no self-serve "Connect with Facebook" flow yet
+    // (that's Option B in the roadmap), so there's no Channel row created via OAuth.
+    // Attach this Page to whichever store doesn't already have a Facebook channel.
+    let channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', externalId: pageId } });
+    let storeId: string;
+    if (channel) {
+      storeId = channel.storeId;
+    } else {
+      const store = await prisma.store.findFirst({ orderBy: { createdAt: 'asc' } });
+      if (!store) {
+        console.error('No store found to attach the Facebook channel to');
+        return;
+      }
+      storeId = store.id;
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId, type: 'FACEBOOK' } },
+        update: { connected: true, externalId: pageId },
+        create: { storeId, type: 'FACEBOOK', connected: true, externalId: pageId },
+      });
+    }
+
+    let conversation = await prisma.conversation.findFirst({
+      where: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid },
+    });
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid, lastMessageAt: new Date() },
+      });
+    }
+
+    await prisma.message.create({
+      data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText },
+    });
+
+    if (conversation.status !== 'AI_MANAGED') {
+      // Merchant has taken over this conversation manually; don't auto-reply.
+      return;
+    }
+
+    const [store, products, recentMessages] = await Promise.all([
+      prisma.store.findUnique({ where: { id: storeId } }),
+      prisma.product.findMany({ where: { storeId } }),
+      prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' }, take: 20 }),
+    ]);
+    if (!store) return;
+
+    const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
+    const catalog = products.map((p) => ({
+      name: p.name,
+      sku: p.sku,
+      price: Number(p.price),
+      inventory: p.inventory,
+      status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+    }));
+    // Drop the last entry — it's the customer message we just inserted, sent separately below.
+    const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+
+    const result = await generateAgentReply({ message: messageText, history, persona, catalog });
+
+    await prisma.message.create({
+      data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
+    });
+
+    try {
+      await sendMessengerMessage(pageAccessToken, senderPsid, result.replyText);
+    } catch (err) {
+      console.error('Failed to send Messenger reply:', err);
+    }
+  }
+
+  // Meta webhook receiver — signature-verified before any payload is trusted
+  app.post('/webhooks/meta', async (req: RequestWithRawBody, res) => {
+    const signature = req.headers['x-hub-signature-256'] as string | undefined;
+    const appSecret = process.env.META_APP_SECRET;
+
+    if (!appSecret || !req.rawBody || !verifyMetaSignature(req.rawBody, signature, appSecret)) {
+      return res.sendStatus(401);
+    }
+
+    // Acknowledge immediately — Meta expects a fast 200 and will retry on timeout.
+    res.sendStatus(200);
+
+    try {
+      const body = req.body;
+      if (body.object !== 'page') return;
+
+      for (const entry of body.entry || []) {
+        const pageId = entry.id;
+        for (const event of entry.messaging || []) {
+          const senderPsid = event.sender?.id;
+          const messageText = event.message?.text;
+          if (!senderPsid || !messageText || event.message?.is_echo) continue;
+
+          await handleIncomingMessengerMessage(pageId, senderPsid, messageText);
+        }
+      }
+    } catch (err) {
+      console.error('Meta webhook processing error:', err);
     }
   });
 

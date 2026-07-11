@@ -4,7 +4,6 @@ import { Tab, Product, Integration, AIPersona, Conversation, ChatMessage } from 
 import {
   INITIAL_INTEGRATIONS,
   DEFAULT_AI_PERSONA,
-  INITIAL_CONVERSATIONS
 } from './data/mockData';
 import {
   getToken,
@@ -17,6 +16,8 @@ import {
   deleteProduct,
   getPersona,
   updatePersona,
+  listConversations,
+  updateConversationStatus,
   AuthResponse,
   PublicMerchant,
   PublicStore,
@@ -116,15 +117,16 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [persona, setPersona] = useState<AIPersona>(DEFAULT_AI_PERSONA);
-  const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
 
-  // Load real catalog + persona from the backend once we know who's logged in
+  // Load real catalog + persona + conversations from the backend once we know who's logged in
   useEffect(() => {
     if (!merchant) return;
     listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
     getPersona()
       .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions }))
       .catch((err) => console.error('Failed to load persona:', err));
+    listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
   }, [merchant]);
 
   // Navigation controller
@@ -204,16 +206,9 @@ export default function App() {
     }));
   };
 
-  const handleUpdateConversationStatus = (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => {
-    setConversations((prev) => prev.map((chat) => {
-      if (chat.id === chatId) {
-        return {
-          ...chat,
-          status
-        };
-      }
-      return chat;
-    }));
+  const handleUpdateConversationStatus = async (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => {
+    const updated = await updateConversationStatus(chatId, status);
+    setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...updated } : chat)));
   };
 
   // Main page rendering logic based on active tab and authentication
@@ -240,10 +235,8 @@ export default function App() {
     switch (activeTab) {
       case 'inbox':
         return (
-          <InboxConsole 
+          <InboxConsole
             conversations={conversations}
-            products={products}
-            persona={persona}
             onUpdateConversation={handleUpdateConversation}
             onUpdateConversationStatus={handleUpdateConversationStatus}
           />
@@ -281,10 +274,8 @@ export default function App() {
         );
       default:
         return (
-          <InboxConsole 
+          <InboxConsole
             conversations={conversations}
-            products={products}
-            persona={persona}
             onUpdateConversation={handleUpdateConversation}
             onUpdateConversationStatus={handleUpdateConversationStatus}
           />

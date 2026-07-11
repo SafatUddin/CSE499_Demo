@@ -92,7 +92,13 @@ async function main() {
     });
   }
 
-  for (const convo of INITIAL_CONVERSATIONS) {
+  // Only seed a couple of curated demo conversations rather than the full mock set —
+  // enough to show the Inbox has real multi-turn examples without cluttering it.
+  const seedConversations = INITIAL_CONVERSATIONS.filter((c) =>
+    c.customerName === 'Tanvir Rahman' || c.customerName === 'Junaid Ahmed'
+  );
+
+  for (const convo of seedConversations) {
     const created = await prisma.conversation.create({
       data: {
         storeId: store.id,
@@ -120,7 +126,7 @@ async function main() {
   console.log(`  Merchant: ${merchant.email} (password: password123)`);
   console.log(`  Store: ${store.name}`);
   console.log(`  Products: ${INITIAL_PRODUCTS.length}`);
-  console.log(`  Conversations: ${INITIAL_CONVERSATIONS.length}`);
+  console.log(`  Conversations: ${seedConversations.length}`);
 }
 
 main()

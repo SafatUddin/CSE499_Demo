@@ -262,6 +262,174 @@ async function startServer() {
     }
   });
 
+  const CHANNEL_TO_PLATFORM: Record<string, string> = {
+    FACEBOOK: 'facebook',
+    INSTAGRAM: 'instagram',
+    WHATSAPP: 'whatsapp',
+    WIDGET: 'websocket',
+  };
+  const STATUS_TO_FRONTEND: Record<string, string> = {
+    AI_MANAGED: 'AI Managed',
+    ACTIVE: 'Active',
+    CLOSED: 'Closed',
+  };
+  const FRONTEND_TO_STATUS: Record<string, string> = {
+    'AI Managed': 'AI_MANAGED',
+    'Active': 'ACTIVE',
+    'Closed': 'CLOSED',
+  };
+  const SENDER_TO_FRONTEND: Record<string, string> = {
+    CUSTOMER: 'customer',
+    AI: 'ai',
+    MERCHANT: 'merchant',
+  };
+
+  function toPublicConversation(c: any) {
+    const messages = c.messages.map((m: any) => ({
+      id: m.id,
+      sender: SENDER_TO_FRONTEND[m.sender] || 'customer',
+      text: m.text,
+      time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }));
+    const last = messages[messages.length - 1];
+    return {
+      id: c.id,
+      customerName: c.customerName || 'New Customer',
+      platform: CHANNEL_TO_PLATFORM[c.channelType] || 'websocket',
+      lastMessage: last?.text || '',
+      time: last?.time || '',
+      unread: !!last && last.sender === 'customer',
+      status: STATUS_TO_FRONTEND[c.status] || 'AI Managed',
+      messages,
+      isComplaint: c.isComplaint,
+      cart: c.cart || undefined,
+    };
+  }
+
+  // List this store's conversations across all channels
+  app.get('/api/conversations', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversations = await prisma.conversation.findMany({
+        where: { storeId: req.auth!.storeId },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        orderBy: { lastMessageAt: 'desc' },
+      });
+      res.json(conversations.map(toPublicConversation));
+    } catch (err: any) {
+      console.error('List conversations error:', err);
+      res.status(500).json({ error: 'Failed to load conversations' });
+    }
+  });
+
+  // Update a conversation's status (AI Managed / Active / Closed)
+  app.patch('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+      if (!conversation || conversation.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      const { status } = req.body;
+      const mappedStatus = FRONTEND_TO_STATUS[status];
+      if (!mappedStatus) {
+        return res.status(400).json({ error: 'Invalid status' });
+      }
+
+      const updated = await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { status: mappedStatus as any },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      res.json(toPublicConversation(updated));
+    } catch (err: any) {
+      console.error('Update conversation error:', err);
+      res.status(500).json({ error: 'Failed to update conversation' });
+    }
+  });
+
+  // Sends a message into a conversation. `sender: 'merchant'` posts the merchant's own
+  // reply (delivered to the real customer via the channel adapter when applicable, e.g.
+  // Facebook Messenger); omitting it (or 'customer') simulates an incoming customer
+  // message for demo/testing channels that have no real external customer, and triggers
+  // an AI reply if the conversation is AI-managed.
+  app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+      if (!conversation || conversation.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      const { text, sender } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: 'Message text is required' });
+      }
+
+      if (sender === 'merchant') {
+        await prisma.message.create({ data: { conversationId: conversation.id, sender: 'MERCHANT', text } });
+        await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+        if (conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
+          const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+          if (pageAccessToken) {
+            try {
+              await sendMessengerMessage(pageAccessToken, conversation.externalUserId, text);
+            } catch (err) {
+              console.error('Failed to deliver merchant reply to Messenger:', err);
+            }
+          }
+        }
+
+        const updated = await prisma.conversation.findUnique({
+          where: { id: conversation.id },
+          include: { messages: { orderBy: { createdAt: 'asc' } } },
+        });
+        return res.json(toPublicConversation(updated));
+      }
+
+      await prisma.message.create({ data: { conversationId: conversation.id, sender: 'CUSTOMER', text } });
+      await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+      if (conversation.status === 'AI_MANAGED') {
+        const [store, products, recentMessages] = await Promise.all([
+          prisma.store.findUnique({ where: { id: conversation.storeId } }),
+          prisma.product.findMany({ where: { storeId: conversation.storeId } }),
+          prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
+        ]);
+
+        if (store) {
+          const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
+          const catalog = products.map((p) => ({
+            name: p.name,
+            sku: p.sku,
+            price: Number(p.price),
+            inventory: p.inventory,
+            status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+          }));
+          const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+
+          const result = await generateAgentReply({ message: text, history, persona, catalog });
+
+          await prisma.message.create({
+            data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any },
+          });
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
+          });
+        }
+      }
+
+      const updated = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      res.json(toPublicConversation(updated));
+    } catch (err: any) {
+      console.error('Send message error:', err);
+      res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
+
   // API endpoint for AI responses
   app.post('/api/chat', async (req, res) => {
     try {

@@ -23,21 +23,18 @@ import {
   ChevronLeft,
   Info
 } from 'lucide-react';
-import { Conversation, Product, AIPersona, ChatMessage } from '../types';
+import { Conversation, ChatMessage } from '../types';
+import { sendConversationMessage } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
   conversations: Conversation[];
-  products: Product[];
-  persona: AIPersona;
   onUpdateConversation: (chatId: string, updates: Partial<Conversation>) => void;
-  onUpdateConversationStatus: (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => void;
+  onUpdateConversationStatus: (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => Promise<void>;
 }
 
-export default function InboxConsole({ 
-  conversations, 
-  products, 
-  persona, 
+export default function InboxConsole({
+  conversations,
   onUpdateConversation,
   onUpdateConversationStatus
 }: InboxConsoleProps) {
@@ -107,82 +104,56 @@ export default function InboxConsole({
     if (!textToSend.trim() || !activeChat) return;
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    // Add customer's message to state
-    const customerMsg: ChatMessage = {
-      id: `m-cust-${Date.now()}`,
-      sender: 'customer',
+
+    // The 'websocket' channel is the demo/testing widget with no real external customer,
+    // so typing here simulates an incoming customer message. Every other channel (Facebook,
+    // Instagram, WhatsApp) already has a real customer on the other end — typing here is the
+    // merchant's own reply, sent back to that real customer instead of impersonating them.
+    const isSimulatedCustomerChannel = activeChat.platform === 'websocket';
+
+    const optimisticMsg: ChatMessage = {
+      id: `m-local-${Date.now()}`,
+      sender: isSimulatedCustomerChannel ? 'customer' : 'merchant',
       text: textToSend,
       time: timestamp
     };
 
-    const updatedHistory = [...activeChat.messages, customerMsg];
-    
-    pushTelemetryLog(`[WEBHOOK] Incoming webhook event from ${activeChat.platform.toUpperCase()}`);
-    pushTelemetryLog(`[ADAPTER] Normalized payload: "${textToSend.substring(0, 30)}..."`);
+    if (isSimulatedCustomerChannel) {
+      pushTelemetryLog(`[WEBHOOK] Incoming webhook event from ${activeChat.platform.toUpperCase()}`);
+      pushTelemetryLog(`[ADAPTER] Normalized payload: "${textToSend.substring(0, 30)}..."`);
+    } else {
+      pushTelemetryLog(`[MERCHANT] Sending reply via ${activeChat.platform.toUpperCase()}`);
+    }
 
     onUpdateConversation(activeChat.id, {
-      messages: updatedHistory,
+      messages: [...activeChat.messages, optimisticMsg],
       lastMessage: textToSend,
       time: 'Just Now'
     });
     setInputText('');
 
-    if (activeChat.status !== 'AI Managed') {
+    if (isSimulatedCustomerChannel && activeChat.status === 'AI Managed') {
+      setIsTyping(true);
+      pushTelemetryLog(`[AI_GATEWAY] Dispatching payload to LLM...`);
+    } else if (isSimulatedCustomerChannel) {
       pushTelemetryLog(`[ROUTER] Manual override active. AI agent paused.`);
-      return;
     }
 
-    setIsTyping(true);
-    pushTelemetryLog(`[AI_GATEWAY] Dispatching payload to LLM...`);
-
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: textToSend,
-          history: updatedHistory.map(m => ({ sender: m.sender, text: m.text })),
-          persona,
-          catalog: products
-        })
-      });
+      // The backend persists the message and, for a simulated customer message on an
+      // AI-managed conversation, generates and persists the reply too — either way it
+      // returns the authoritative conversation state.
+      const updated = await sendConversationMessage(activeChat.id, textToSend, isSimulatedCustomerChannel ? 'customer' : 'merchant');
+      onUpdateConversation(activeChat.id, updated);
 
-      if (!response.ok) throw new Error('API failed');
-
-      const data = await response.json();
-      const replyText = data.replyText || 'Understood, let me review that.';
-      
-      const aiMsg: ChatMessage = {
-        id: `m-ai-${Date.now()}`,
-        sender: 'ai',
-        text: replyText,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      onUpdateConversation(activeChat.id, {
-        messages: [...updatedHistory, aiMsg],
-        lastMessage: replyText,
-        time: 'Just Now'
-      });
-
-      pushTelemetryLog(`[LLM_OUT] Response drafted successfully.`);
+      if (isSimulatedCustomerChannel && activeChat.status === 'AI Managed') {
+        pushTelemetryLog(`[LLM_OUT] Response drafted successfully.`);
+      } else if (!isSimulatedCustomerChannel) {
+        pushTelemetryLog(`[MERCHANT] Reply delivered.`);
+      }
     } catch (err) {
       console.error(err);
-      pushTelemetryLog(`[ERROR] LLM failed. Using localized catalog failover response.`);
-      
-      const fallbackMsg: ChatMessage = {
-        id: `m-ai-err-${Date.now()}`,
-        sender: 'ai',
-        text: `Got your request! Our SM-99 Professional Series Carbon L is currently in stock ($1,299.00). Would you like me to reserve units or set up a checkout link?`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      onUpdateConversation(activeChat.id, {
-        messages: [...updatedHistory, fallbackMsg],
-        lastMessage: fallbackMsg.text,
-        time: 'Just Now'
-      });
+      pushTelemetryLog(`[ERROR] Failed to deliver message to the backend.`);
     } finally {
       setIsTyping(false);
     }

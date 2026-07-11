@@ -103,3 +103,35 @@ export function getPersona() {
 export function updatePersona(input: { tone: string; style: string; customInstructions: string }) {
   return request<ApiPersona>('/api/persona', { method: 'PUT', body: JSON.stringify(input) });
 }
+
+export interface ApiChatMessage {
+  id: string;
+  sender: 'customer' | 'ai' | 'merchant';
+  text: string;
+  time: string;
+}
+
+export interface ApiConversation {
+  id: string;
+  customerName: string;
+  platform: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
+  lastMessage: string;
+  time: string;
+  unread: boolean;
+  status: 'Active' | 'AI Managed' | 'Closed';
+  messages: ApiChatMessage[];
+  isComplaint?: boolean;
+  cart?: { sku: string; quantity: number }[];
+}
+
+export function listConversations() {
+  return request<ApiConversation[]>('/api/conversations');
+}
+
+export function updateConversationStatus(id: string, status: 'Active' | 'AI Managed' | 'Closed') {
+  return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+}
+
+export function sendConversationMessage(id: string, text: string, sender: 'customer' | 'merchant' = 'customer') {
+  return request<ApiConversation>(`/api/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ text, sender }) });
+}

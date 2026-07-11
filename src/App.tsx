@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Tab, Product, Integration, AIPersona, Conversation, ChatMessage } from './types';
 import {
-  INITIAL_PRODUCTS,
   INITIAL_INTEGRATIONS,
   DEFAULT_AI_PERSONA,
   INITIAL_CONVERSATIONS
@@ -13,6 +12,11 @@ import {
   clearToken,
   fetchMe,
   updateProfile,
+  listProducts,
+  createProduct,
+  deleteProduct,
+  getPersona,
+  updatePersona,
   AuthResponse,
   PublicMerchant,
   PublicStore,
@@ -109,10 +113,19 @@ export default function App() {
   };
 
   // Application Data States
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [persona, setPersona] = useState<AIPersona>(DEFAULT_AI_PERSONA);
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+
+  // Load real catalog + persona from the backend once we know who's logged in
+  useEffect(() => {
+    if (!merchant) return;
+    listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
+    getPersona()
+      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions }))
+      .catch((err) => console.error('Failed to load persona:', err));
+  }, [merchant]);
 
   // Navigation controller
   const handleNavigate = (tab: Tab) => {
@@ -129,15 +142,13 @@ export default function App() {
   };
 
   // Product mutations
-  const handleAddProduct = (newProduct: Omit<Product, 'id'>) => {
-    const productWithId: Product = {
-      ...newProduct,
-      id: `p-${Date.now()}`
-    };
-    setProducts((prev) => [productWithId, ...prev]);
+  const handleAddProduct = async (newProduct: Omit<Product, 'id'>) => {
+    const created = await createProduct(newProduct);
+    setProducts((prev) => [created, ...prev]);
   };
 
-  const handleDeleteProduct = (id: string) => {
+  const handleDeleteProduct = async (id: string) => {
+    await deleteProduct(id);
     setProducts((prev) => prev.filter(p => p.id !== id));
   };
 
@@ -170,8 +181,9 @@ export default function App() {
   };
 
   // Persona save
-  const handleSavePersona = (newPersona: AIPersona) => {
-    setPersona(newPersona);
+  const handleSavePersona = async (newPersona: AIPersona) => {
+    const saved = await updatePersona(newPersona);
+    setPersona({ tone: saved.tone, style: saved.style as AIPersona['style'], customInstructions: saved.customInstructions });
   };
 
   // Conversations updating

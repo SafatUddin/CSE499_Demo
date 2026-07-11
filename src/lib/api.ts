@@ -68,3 +68,38 @@ export function updateProfile(input: {
 }) {
   return request<{ merchant: PublicMerchant }>('/api/me', { method: 'PATCH', body: JSON.stringify(input) });
 }
+
+export interface ApiProduct {
+  id: string;
+  name: string;
+  sku: string;
+  price: number;
+  inventory: number;
+  status: 'Trained' | 'Pending';
+}
+
+export function listProducts() {
+  return request<ApiProduct[]>('/api/products');
+}
+
+export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending' }) {
+  return request<ApiProduct>('/api/products', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function deleteProduct(id: string) {
+  return request<void>(`/api/products/${id}`, { method: 'DELETE' });
+}
+
+export interface ApiPersona {
+  tone: string;
+  style: string;
+  customInstructions: string;
+}
+
+export function getPersona() {
+  return request<ApiPersona>('/api/persona');
+}
+
+export function updatePersona(input: { tone: string; style: string; customInstructions: string }) {
+  return request<ApiPersona>('/api/persona', { method: 'PUT', body: JSON.stringify(input) });
+}

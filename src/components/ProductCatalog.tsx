@@ -19,9 +19,9 @@ import DashboardHeader from './DashboardHeader';
 interface ProductCatalogProps {
   products: Product[];
   persona: AIPersona;
-  onAddProduct: (product: Omit<Product, 'id'>) => void;
-  onDeleteProduct: (id: string) => void;
-  onSavePersona: (newPersona: AIPersona) => void;
+  onAddProduct: (product: Omit<Product, 'id'>) => Promise<void>;
+  onDeleteProduct: (id: string) => Promise<void>;
+  onSavePersona: (newPersona: AIPersona) => Promise<void>;
 }
 
 export default function ProductCatalog({ 
@@ -47,49 +47,72 @@ export default function ProductCatalog({
   
   const [isSavingPersona, setIsSavingPersona] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [addProductError, setAddProductError] = useState('');
+  const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [personaError, setPersonaError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   // Filter products based on search term
-  const filteredProducts = products.filter(p => 
+  const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleAddProductSubmit = (e: React.FormEvent) => {
+  const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProductName || !newProductSku || !newProductPrice) return;
 
-    onAddProduct({
-      name: newProductName,
-      sku: newProductSku,
-      price: parseFloat(newProductPrice) || 0.0,
-      inventory: parseInt(newProductInventory) || 0,
-      status: 'Trained'
-    });
+    setAddProductError('');
+    setIsAddingProduct(true);
+    try {
+      await onAddProduct({
+        name: newProductName,
+        sku: newProductSku,
+        price: parseFloat(newProductPrice) || 0.0,
+        inventory: parseInt(newProductInventory) || 0,
+        status: 'Trained'
+      });
 
-    // Reset Form
-    setNewProductName('');
-    setNewProductSku('');
-    setNewProductPrice('');
-    setNewProductInventory('');
-    setShowAddForm(false);
+      // Reset Form
+      setNewProductName('');
+      setNewProductSku('');
+      setNewProductPrice('');
+      setNewProductInventory('');
+      setShowAddForm(false);
+    } catch (err: any) {
+      setAddProductError(err.message || 'Failed to add product.');
+    } finally {
+      setIsAddingProduct(false);
+    }
   };
 
-  const handleSavePersonaClick = () => {
+  const handleDeleteClick = async (id: string) => {
+    setDeleteError('');
+    try {
+      await onDeleteProduct(id);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete product.');
+    }
+  };
+
+  const handleSavePersonaClick = async () => {
+    setPersonaError('');
     setIsSavingPersona(true);
-    
-    setTimeout(() => {
-      onSavePersona({
+    try {
+      await onSavePersona({
         tone: personaTone,
         style: personaStyle,
         customInstructions: personaInstructions
       });
-      setIsSavingPersona(false);
       setShowSaveSuccess(true);
-      
       setTimeout(() => {
         setShowSaveSuccess(false);
       }, 3000);
-    }, 1200);
+    } catch (err: any) {
+      setPersonaError(err.message || 'Failed to save persona.');
+    } finally {
+      setIsSavingPersona(false);
+    }
   };
 
   return (
@@ -140,6 +163,13 @@ export default function ProductCatalog({
                 <h4 className="font-sans font-bold text-xs text-white uppercase tracking-wider flex items-center gap-1.5">
                   <Package className="h-3.5 w-3.5" /> Register New Product SKU
                 </h4>
+
+                {addProductError && (
+                  <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[11px] p-2.5 rounded text-center font-sans">
+                    {addProductError}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1">
                     <label className="text-[9px] text-white/40 uppercase tracking-widest block font-bold">Product Name</label>
@@ -192,13 +222,20 @@ export default function ProductCatalog({
 
                 <button
                   type="submit"
-                  className="w-full bg-white hover:bg-white/90 text-black font-sans font-bold py-2.5 rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer"
+                  disabled={isAddingProduct}
+                  className="w-full bg-white hover:bg-white/90 text-black font-sans font-bold py-2.5 rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
                 >
-                  Confirm & Index SKU
+                  {isAddingProduct ? 'Indexing...' : 'Confirm & Index SKU'}
                 </button>
               </motion.form>
             )}
           </AnimatePresence>
+
+          {deleteError && (
+            <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[11px] p-2.5 rounded text-center font-sans">
+              {deleteError}
+            </div>
+          )}
 
           {/* Product Table Wrapper to retain rounded borders with scrolling inside */}
           <div className="border border-white/[0.06] rounded-xl overflow-hidden bg-[#0c0c0e]/30 w-full">
@@ -241,7 +278,7 @@ export default function ProductCatalog({
                       </td>
                       <td className="p-4 text-right">
                         <button
-                          onClick={() => onDeleteProduct(p.id)}
+                          onClick={() => handleDeleteClick(p.id)}
                           className="text-white/20 hover:text-red-400 p-1 rounded transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -339,6 +376,20 @@ export default function ProductCatalog({
               <Save className="h-3.5 w-3.5" />
               {isSavingPersona ? 'REDEPLOYING MODEL...' : 'REDEPLOY PERSONA MODEL'}
             </button>
+
+            {/* Model redeployment error notification */}
+            <AnimatePresence>
+              {personaError && (
+                <motion.div
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 5 }}
+                  className="bg-red-500/5 border border-red-500/10 p-2.5 rounded-lg text-center text-red-400 font-sans text-[9px] tracking-wider uppercase flex items-center justify-center gap-1.5"
+                >
+                  <AlertCircle className="h-3.5 w-3.5" /> {personaError}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Model redeployment success status notifications */}
             <AnimatePresence>

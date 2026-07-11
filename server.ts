@@ -165,6 +165,108 @@ async function startServer() {
     }
   });
 
+  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string }) => ({
+    id: p.id,
+    name: p.name,
+    sku: p.sku,
+    price: Number(p.price),
+    inventory: p.inventory,
+    status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+  });
+
+  // List this merchant's products
+  app.get('/api/products', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const products = await prisma.product.findMany({
+        where: { storeId: req.auth!.storeId },
+        orderBy: { createdAt: 'desc' },
+      });
+      res.json(products.map(toPublicProduct));
+    } catch (err: any) {
+      console.error('List products error:', err);
+      res.status(500).json({ error: 'Failed to load products' });
+    }
+  });
+
+  // Add a product to this merchant's catalog
+  app.post('/api/products', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { name, sku, price, inventory, status } = req.body;
+      if (!name || !sku || price === undefined || price === null) {
+        return res.status(400).json({ error: 'Name, SKU, and price are required' });
+      }
+
+      const existing = await prisma.product.findUnique({
+        where: { storeId_sku: { storeId: req.auth!.storeId, sku } },
+      });
+      if (existing) {
+        return res.status(409).json({ error: 'A product with this SKU already exists' });
+      }
+
+      const product = await prisma.product.create({
+        data: {
+          storeId: req.auth!.storeId,
+          name,
+          sku,
+          price,
+          inventory: inventory ?? 0,
+          status: status === 'Pending' ? 'PENDING' : 'TRAINED',
+        },
+      });
+      res.status(201).json(toPublicProduct(product));
+    } catch (err: any) {
+      console.error('Create product error:', err);
+      res.status(500).json({ error: 'Failed to create product' });
+    }
+  });
+
+  // Remove a product from this merchant's catalog
+  app.delete('/api/products/:id', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+      if (!product || product.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+      await prisma.product.delete({ where: { id: product.id } });
+      res.status(204).end();
+    } catch (err: any) {
+      console.error('Delete product error:', err);
+      res.status(500).json({ error: 'Failed to delete product' });
+    }
+  });
+
+  // Get this store's AI persona
+  app.get('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const store = await prisma.store.findUnique({ where: { id: req.auth!.storeId } });
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+      res.json({ tone: store.tone, style: store.style, customInstructions: store.customInstructions });
+    } catch (err: any) {
+      console.error('Fetch persona error:', err);
+      res.status(500).json({ error: 'Failed to load persona' });
+    }
+  });
+
+  // Update this store's AI persona
+  app.put('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { tone, style, customInstructions } = req.body;
+      if (!tone || !style) {
+        return res.status(400).json({ error: 'Tone and style are required' });
+      }
+      const store = await prisma.store.update({
+        where: { id: req.auth!.storeId },
+        data: { tone, style, customInstructions: customInstructions ?? '' },
+      });
+      res.json({ tone: store.tone, style: store.style, customInstructions: store.customInstructions });
+    } catch (err: any) {
+      console.error('Update persona error:', err);
+      res.status(500).json({ error: 'Failed to update persona' });
+    }
+  });
+
   // API endpoint for AI responses
   app.post('/api/chat', async (req, res) => {
     try {

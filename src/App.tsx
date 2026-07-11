@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Tab, Product, Integration, AIPersona, Conversation, ChatMessage } from './types';
-import { 
-  INITIAL_PRODUCTS, 
-  INITIAL_INTEGRATIONS, 
-  DEFAULT_AI_PERSONA, 
-  INITIAL_CONVERSATIONS 
+import {
+  INITIAL_PRODUCTS,
+  INITIAL_INTEGRATIONS,
+  DEFAULT_AI_PERSONA,
+  INITIAL_CONVERSATIONS
 } from './data/mockData';
+import {
+  getToken,
+  setToken,
+  clearToken,
+  fetchMe,
+  updateProfile,
+  AuthResponse,
+  PublicMerchant,
+  PublicStore,
+} from './lib/api';
 
 // Component Imports
 import LandingPage from './components/LandingPage';
@@ -20,21 +30,45 @@ import IntegrationsHub from './components/IntegrationsHub';
 import SettingsPage from './components/SettingsPage';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('landing');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // User Profile State synchronized with localStorage
-  const [userProfile, setUserProfile] = useState(() => {
-    const saved = localStorage.getItem('shopmate_user_profile');
-    return saved ? JSON.parse(saved) : {
-      name: "Mara K.",
-      email: "merchant@shopmate.ai",
-      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80",
-      password: "password123"
+  // Real auth state — merchant is null when logged out
+  const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
+  const [store, setStore] = useState<PublicStore | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const isAuthenticated = !!merchant;
+
+  // DashboardHeader reads this shape straight out of localStorage; keep it in sync
+  // with whatever the backend says is the current merchant.
+  const syncProfileToLocalStorage = (m: PublicMerchant) => {
+    const profile = {
+      name: m.name,
+      email: m.email,
+      avatarUrl: m.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80',
     };
-  });
+    localStorage.setItem('shopmate_user_profile', JSON.stringify(profile));
+    window.dispatchEvent(new Event('shopmate_profile_updated'));
+  };
+
+  // On load, if a token exists, verify it against the backend instead of trusting it blindly
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      setIsCheckingAuth(false);
+      return;
+    }
+    fetchMe()
+      .then((res) => {
+        setMerchant(res.merchant);
+        setStore(res.store);
+        syncProfileToLocalStorage(res.merchant);
+        setActiveTab('inbox');
+      })
+      .catch(() => clearToken())
+      .finally(() => setIsCheckingAuth(false));
+  }, []);
 
   // Listen to custom header actions for seamless routing & logging out
   useEffect(() => {
@@ -59,12 +93,19 @@ export default function App() {
     };
   }, []);
 
-  const handleUpdateProfile = (updates: Partial<typeof userProfile>) => {
-    const updated = { ...userProfile, ...updates };
-    setUserProfile(updated);
-    localStorage.setItem('shopmate_user_profile', JSON.stringify(updated));
-    // Dispatch event so any other listening components (like header) are updated instantly
-    window.dispatchEvent(new Event('shopmate_profile_updated'));
+  const handleAuthSuccess = (auth: AuthResponse) => {
+    setToken(auth.token);
+    setMerchant(auth.merchant);
+    setStore(auth.store);
+    syncProfileToLocalStorage(auth.merchant);
+    setActiveTab('inbox');
+    setIsSidebarOpen(false);
+  };
+
+  const handleUpdateProfile = async (updates: Partial<PublicMerchant> & { currentPassword?: string; password?: string }) => {
+    const { merchant: updated } = await updateProfile(updates);
+    setMerchant(updated);
+    syncProfileToLocalStorage(updated);
   };
 
   // Application Data States
@@ -79,15 +120,10 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  // Auth simulators
-  const handleLoginSuccess = () => {
-    setIsAuthenticated(true);
-    setActiveTab('inbox');
-    setIsSidebarOpen(false);
-  };
-
   const handleLogout = () => {
-    setIsAuthenticated(false);
+    clearToken();
+    setMerchant(null);
+    setStore(null);
     setActiveTab('landing');
     setIsSidebarOpen(false);
   };
@@ -176,15 +212,13 @@ export default function App() {
           return <LandingPage onNavigate={handleNavigate} />;
         case 'login':
           return (
-            <LoginPage 
-              onNavigate={handleNavigate} 
-              onLoginSuccess={handleLoginSuccess} 
-              userProfile={userProfile}
-              onUpdateProfile={handleUpdateProfile}
+            <LoginPage
+              onNavigate={handleNavigate}
+              onLoginSuccess={handleAuthSuccess}
             />
           );
         case 'signup':
-          return <SignupPage onNavigate={handleNavigate} onSignupSuccess={handleLoginSuccess} />;
+          return <SignupPage onNavigate={handleNavigate} onSignupSuccess={handleAuthSuccess} />;
         default:
           return <LandingPage onNavigate={handleNavigate} />;
       }
@@ -224,8 +258,12 @@ export default function App() {
         );
       case 'settings':
         return (
-          <SettingsPage 
-            userProfile={userProfile}
+          <SettingsPage
+            userProfile={{
+              name: merchant?.name || '',
+              email: merchant?.email || '',
+              avatarUrl: merchant?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80',
+            }}
             onUpdateProfile={handleUpdateProfile}
           />
         );
@@ -241,6 +279,14 @@ export default function App() {
         );
     }
   };
+
+  if (isCheckingAuth) {
+    return (
+      <div className="bg-background min-h-screen w-full flex items-center justify-center">
+        <div className="w-6 h-6 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-background min-h-screen text-on-surface overflow-x-hidden w-full max-w-full">

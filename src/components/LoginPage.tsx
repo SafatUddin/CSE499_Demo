@@ -2,27 +2,22 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, ArrowRight, Facebook } from 'lucide-react';
 import { Tab } from '../types';
+import { login, AuthResponse } from '../lib/api';
 
 interface LoginPageProps {
   onNavigate: (tab: Tab) => void;
-  onLoginSuccess: () => void;
-  userProfile?: {
-    name: string;
-    email: string;
-    avatarUrl: string;
-    password?: string;
-  };
-  onUpdateProfile?: (updates: any) => void;
+  onLoginSuccess: (auth: AuthResponse) => void;
 }
 
-export default function LoginPage({ onNavigate, onLoginSuccess, userProfile, onUpdateProfile }: LoginPageProps) {
+export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps) {
   const [mode, setMode] = useState<'login' | 'reset_password'>('login');
-  
+
   // Login states
   const [email, setEmail] = useState('merchant@shopmate.ai');
-  const [password, setPassword] = useState('••••••••');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
 
   // Reset password states
   const [resetEmail, setResetEmail] = useState('merchant@shopmate.ai');
@@ -32,58 +27,27 @@ export default function LoginPage({ onNavigate, onLoginSuccess, userProfile, onU
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError('');
     setIsLoading(true);
-    
-    // Smooth login simulation
-    setTimeout(() => {
+
+    try {
+      const auth = await login({ email, password });
+      onLoginSuccess(auth);
+    } catch (err: any) {
+      setLoginError(err.message || 'Failed to sign in. Please try again.');
+    } finally {
       setIsLoading(false);
-      onLoginSuccess();
-    }, 1200);
+    }
   };
 
   const handleResetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setResetError('');
-
-    if (!resetEmail) {
-      setResetError('Email address is required.');
-      return;
-    }
-    if (newPassword.length < 4) {
-      setResetError('Password must be at least 4 characters long.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setResetError('Passwords do not match.');
-      return;
-    }
-
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      // Save credentials to local storage so user profile is updated
-      if (onUpdateProfile) {
-        onUpdateProfile({
-          email: resetEmail,
-          password: newPassword
-        });
-      } else {
-        const saved = localStorage.getItem('shopmate_user_profile');
-        const profile = saved ? JSON.parse(saved) : {};
-        localStorage.setItem('shopmate_user_profile', JSON.stringify({
-          ...profile,
-          email: resetEmail,
-          password: newPassword
-        }));
-        window.dispatchEvent(new Event('shopmate_profile_updated'));
-      }
-      
-      // Auto-login!
-      onLoginSuccess();
-    }, 1200);
+    // Real password reset requires email verification, which isn't built yet.
+    // Rather than let anyone change any account's password by typing an email,
+    // point users back to sign-in instead of taking a shortcut here.
+    setResetError('Password reset via email isn\'t available yet. Please contact support or sign in with your existing password.');
   };
 
   return (
@@ -135,6 +99,12 @@ export default function LoginPage({ onNavigate, onLoginSuccess, userProfile, onU
           {mode === 'login' ? (
             /* Login Form */
             <form onSubmit={handleSubmit} className="w-full flex flex-col gap-5">
+              {loginError && (
+                <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[11px] p-2.5 rounded text-center font-sans">
+                  {loginError}
+                </div>
+              )}
+
               {/* Email Field */}
               <div className="flex flex-col gap-1.5">
                 <label className="font-sans text-[9px] font-bold text-white/55 uppercase tracking-[0.15em]" htmlFor="email">

@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, ArrowRight, Check, CreditCard, Zap } from 'lucide-react';
 import { Tab } from '../types';
+import { signup, AuthResponse } from '../lib/api';
 
 interface SignupPageProps {
   onNavigate: (tab: Tab) => void;
-  onSignupSuccess: () => void;
+  onSignupSuccess: (auth: AuthResponse) => void;
 }
 
 export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPageProps) {
@@ -17,16 +18,22 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [signupError, setSignupError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agreeTerms) return;
 
+    setSignupError('');
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const auth = await signup({ fullName, businessName, email, password });
+      onSignupSuccess(auth);
+    } catch (err: any) {
+      setSignupError(err.message || 'Failed to create account. Please try again.');
+    } finally {
       setIsLoading(false);
-      onSignupSuccess();
-    }, 1500);
+    }
   };
 
   return (
@@ -120,6 +127,12 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
+            {signupError && (
+              <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[11px] p-2.5 rounded text-center font-sans">
+                {signupError}
+              </div>
+            )}
+
             {/* Row 1: Name Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">

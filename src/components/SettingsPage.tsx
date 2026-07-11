@@ -32,7 +32,7 @@ interface UserProfile {
 
 interface SettingsPageProps {
   userProfile: UserProfile;
-  onUpdateProfile: (profile: Partial<UserProfile> & { password?: string }) => void;
+  onUpdateProfile: (profile: Partial<UserProfile> & { currentPassword?: string; password?: string }) => Promise<void>;
 }
 
 export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsPageProps) {
@@ -107,7 +107,7 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -142,18 +142,16 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
 
     setIsSaving(true);
 
-    // Simulate saving process
-    setTimeout(() => {
-      onUpdateProfile({
+    try {
+      await onUpdateProfile({
         name,
         email,
         avatarUrl,
-        ...(passwordUpdate ? { password: passwordUpdate } : {})
+        ...(passwordUpdate ? { currentPassword, password: passwordUpdate } : {})
       });
-      
-      setIsSaving(false);
+
       setSuccessMessage('Profile settings updated successfully.');
-      
+
       // Clear password fields
       setCurrentPassword('');
       setNewPassword('');
@@ -162,7 +160,11 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
       setTimeout(() => {
         setSuccessMessage('');
       }, 4000);
-    }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to update profile.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

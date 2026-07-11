@@ -3,6 +3,9 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+import { prisma } from './server/db';
+import { signToken, requireAuth, AuthedRequest } from './server/auth';
 
 dotenv.config();
 
@@ -24,7 +27,143 @@ if (apiKey && apiKey !== 'MY_GEMINI_API_KEY') {
 async function startServer() {
   const app = express();
   app.use(express.json());
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  const toPublicMerchant = (merchant: { id: string; name: string; email: string; avatarUrl: string | null }) => ({
+    id: merchant.id,
+    name: merchant.name,
+    email: merchant.email,
+    avatarUrl: merchant.avatarUrl,
+  });
+
+  // Signup: creates a Merchant + their Store, returns a JWT
+  app.post('/api/auth/signup', async (req, res) => {
+    try {
+      const { fullName, businessName, email, password } = req.body;
+
+      if (!fullName || !businessName || !email || !password) {
+        return res.status(400).json({ error: 'All fields are required' });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+
+      const existing = await prisma.merchant.findUnique({ where: { email } });
+      if (existing) {
+        return res.status(409).json({ error: 'An account with this email already exists' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      const merchant = await prisma.merchant.create({
+        data: { email, passwordHash, name: fullName },
+      });
+      const store = await prisma.store.create({
+        data: { merchantId: merchant.id, name: businessName },
+      });
+
+      const token = signToken({ merchantId: merchant.id, storeId: store.id });
+      res.json({
+        token,
+        merchant: toPublicMerchant(merchant),
+        store: { id: store.id, name: store.name },
+      });
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      res.status(500).json({ error: 'Failed to create account' });
+    }
+  });
+
+  // Login: verifies credentials, returns a JWT
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
+      }
+
+      const merchant = await prisma.merchant.findUnique({ where: { email }, include: { store: true } });
+      if (!merchant || !merchant.store) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const valid = await bcrypt.compare(password, merchant.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
+      res.json({
+        token,
+        merchant: toPublicMerchant(merchant),
+        store: { id: merchant.store.id, name: merchant.store.name },
+      });
+    } catch (err: any) {
+      console.error('Login error:', err);
+      res.status(500).json({ error: 'Failed to log in' });
+    }
+  });
+
+  // Current merchant profile, scoped by the JWT
+  app.get('/api/me', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const merchant = await prisma.merchant.findUnique({
+        where: { id: req.auth!.merchantId },
+        include: { store: true },
+      });
+      if (!merchant || !merchant.store) {
+        return res.status(404).json({ error: 'Account not found' });
+      }
+      res.json({
+        merchant: toPublicMerchant(merchant),
+        store: { id: merchant.store.id, name: merchant.store.name },
+      });
+    } catch (err: any) {
+      console.error('Fetch profile error:', err);
+      res.status(500).json({ error: 'Failed to load profile' });
+    }
+  });
+
+  // Update profile: name, avatar, and/or password (requires current password to change it)
+  app.patch('/api/me', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { name, email, avatarUrl, currentPassword, password } = req.body;
+      const merchant = await prisma.merchant.findUnique({ where: { id: req.auth!.merchantId } });
+      if (!merchant) {
+        return res.status(404).json({ error: 'Account not found' });
+      }
+
+      const data: { name?: string; email?: string; avatarUrl?: string; passwordHash?: string } = {};
+      if (typeof name === 'string' && name.trim()) data.name = name;
+      if (typeof avatarUrl === 'string') data.avatarUrl = avatarUrl;
+      if (typeof email === 'string' && email.trim() && email !== merchant.email) {
+        const emailTaken = await prisma.merchant.findUnique({ where: { email } });
+        if (emailTaken) {
+          return res.status(409).json({ error: 'An account with this email already exists' });
+        }
+        data.email = email;
+      }
+
+      if (password) {
+        if (!currentPassword) {
+          return res.status(400).json({ error: 'Current password is required to set a new password' });
+        }
+        const valid = await bcrypt.compare(currentPassword, merchant.passwordHash);
+        if (!valid) {
+          return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+        if (password.length < 6) {
+          return res.status(400).json({ error: 'New password must be at least 6 characters' });
+        }
+        data.passwordHash = await bcrypt.hash(password, 12);
+      }
+
+      const updated = await prisma.merchant.update({ where: { id: merchant.id }, data });
+      res.json({ merchant: toPublicMerchant(updated) });
+    } catch (err: any) {
+      console.error('Update profile error:', err);
+      res.status(500).json({ error: 'Failed to update profile' });
+    }
+  });
 
   // API endpoint for AI responses
   app.post('/api/chat', async (req, res) => {

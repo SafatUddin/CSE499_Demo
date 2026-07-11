@@ -14,4 +14,4 @@ View the app demo in Google AI Studio: [App Demo Link](https://ai.studio/apps/ca
 
 ## Design Instruction
 
-The [Demo.md](DESIGN.md) file contains the instructions for UI theme
+The [Demo.md](DESIGN.md) file contains the instructions for UI theme & the UI Screenshots are given in the folder [UI_Screenshots](./UI_ScreenShots/)

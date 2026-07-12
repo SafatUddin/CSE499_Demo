@@ -25,6 +25,7 @@ export interface ChatMessage {
   time: string;
   isImage?: boolean;
   imageUrl?: string;
+  pending?: boolean;
 }
 
 export interface Conversation {

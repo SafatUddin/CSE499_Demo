@@ -290,6 +290,7 @@ async function startServer() {
       sender: SENDER_TO_FRONTEND[m.sender] || 'customer',
       text: m.text,
       time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      pending: !!m.pending,
     }));
     const last = messages[messages.length - 1];
     return {
@@ -304,6 +305,50 @@ async function startServer() {
       isComplaint: c.isComplaint,
       cart: c.cart || undefined,
     };
+  }
+
+  // Generates an AI reply for a conversation and either delivers it immediately (Copilot
+  // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
+  // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
+  async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
+    const [store, products, recentMessages] = await Promise.all([
+      prisma.store.findUnique({ where: { id: conversation.storeId } }),
+      prisma.product.findMany({ where: { storeId: conversation.storeId } }),
+      prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
+    ]);
+    if (!store) return;
+
+    const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
+    const catalog = products.map((p) => ({
+      name: p.name,
+      sku: p.sku,
+      price: Number(p.price),
+      inventory: p.inventory,
+      status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+    }));
+    const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+
+    const result = await generateAgentReply({ message: customerText, history, persona, catalog });
+    const isAutopilot = conversation.status === 'AI_MANAGED';
+
+    await prisma.message.create({
+      data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any, pending: !isAutopilot },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
+    });
+
+    if (isAutopilot && conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
+      const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+      if (pageAccessToken) {
+        try {
+          await sendMessengerMessage(pageAccessToken, conversation.externalUserId, result.replyText);
+        } catch (err) {
+          console.error('Failed to deliver AI reply to Messenger:', err);
+        }
+      }
+    }
   }
 
   // List this store's conversations across all channels
@@ -359,12 +404,18 @@ async function startServer() {
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
-      const { text, sender } = req.body;
+      const { text, sender, discardDraftId } = req.body;
       if (!text) {
         return res.status(400).json({ error: 'Message text is required' });
       }
 
       if (sender === 'merchant') {
+        if (discardDraftId) {
+          // Merchant edited an AI draft before sending — remove the superseded draft
+          // rather than leaving a stale unsent card sitting in the thread.
+          await prisma.message.deleteMany({ where: { id: discardDraftId, conversationId: conversation.id, pending: true } });
+        }
+
         await prisma.message.create({ data: { conversationId: conversation.id, sender: 'MERCHANT', text } });
         await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
@@ -388,36 +439,7 @@ async function startServer() {
 
       await prisma.message.create({ data: { conversationId: conversation.id, sender: 'CUSTOMER', text } });
       await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
-
-      if (conversation.status === 'AI_MANAGED') {
-        const [store, products, recentMessages] = await Promise.all([
-          prisma.store.findUnique({ where: { id: conversation.storeId } }),
-          prisma.product.findMany({ where: { storeId: conversation.storeId } }),
-          prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
-        ]);
-
-        if (store) {
-          const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
-          const catalog = products.map((p) => ({
-            name: p.name,
-            sku: p.sku,
-            price: Number(p.price),
-            inventory: p.inventory,
-            status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
-          }));
-          const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
-
-          const result = await generateAgentReply({ message: text, history, persona, catalog });
-
-          await prisma.message.create({
-            data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any },
-          });
-          await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
-          });
-        }
-      }
+      await generateAndStoreAgentReply(conversation, text);
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
@@ -427,6 +449,44 @@ async function startServer() {
     } catch (err: any) {
       console.error('Send message error:', err);
       res.status(500).json({ error: 'Failed to send message' });
+    }
+  });
+
+  // Approves a pending AI draft (Copilot-off mode): delivers it to the real customer
+  // (e.g. via Messenger) when applicable, and marks it as sent.
+  app.post('/api/conversations/:id/messages/:messageId/approve', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+      if (!conversation || conversation.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+      const message = await prisma.message.findUnique({ where: { id: req.params.messageId } });
+      if (!message || message.conversationId !== conversation.id || !message.pending) {
+        return res.status(404).json({ error: 'Pending draft not found' });
+      }
+
+      if (conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
+        const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+        if (pageAccessToken) {
+          try {
+            await sendMessengerMessage(pageAccessToken, conversation.externalUserId, message.text);
+          } catch (err) {
+            console.error('Failed to deliver approved draft to Messenger:', err);
+          }
+        }
+      }
+
+      await prisma.message.update({ where: { id: message.id }, data: { pending: false } });
+      await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+      const updated = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      res.json(toPublicConversation(updated));
+    } catch (err: any) {
+      console.error('Approve draft error:', err);
+      res.status(500).json({ error: 'Failed to approve draft' });
     }
   });
 
@@ -460,10 +520,12 @@ async function startServer() {
     }
   });
 
-  async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string) {
-    const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
-    if (!pageAccessToken) {
-      console.error('META_PAGE_ACCESS_TOKEN not set; cannot reply to Messenger');
+  async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
+    // Meta's webhook delivery is "at-least-once" — it may redeliver the same event.
+    // Bail out immediately if we've already recorded this exact message.
+    const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
+    if (alreadyProcessed) {
+      console.log('Duplicate Messenger webhook event, skipping:', externalMessageId);
       return;
     }
 
@@ -497,48 +559,20 @@ async function startServer() {
       });
     }
 
-    await prisma.message.create({
-      data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText },
-    });
-
-    if (conversation.status !== 'AI_MANAGED') {
-      // Merchant has taken over this conversation manually; don't auto-reply.
-      return;
-    }
-
-    const [store, products, recentMessages] = await Promise.all([
-      prisma.store.findUnique({ where: { id: storeId } }),
-      prisma.product.findMany({ where: { storeId } }),
-      prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' }, take: 20 }),
-    ]);
-    if (!store) return;
-
-    const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
-    const catalog = products.map((p) => ({
-      name: p.name,
-      sku: p.sku,
-      price: Number(p.price),
-      inventory: p.inventory,
-      status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
-    }));
-    // Drop the last entry — it's the customer message we just inserted, sent separately below.
-    const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
-
-    const result = await generateAgentReply({ message: messageText, history, persona, catalog });
-
-    await prisma.message.create({
-      data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any },
-    });
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
-    });
-
     try {
-      await sendMessengerMessage(pageAccessToken, senderPsid, result.replyText);
-    } catch (err) {
-      console.error('Failed to send Messenger reply:', err);
+      await prisma.message.create({
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        // Lost a race with a concurrent redelivery of the same event — the other one wins.
+        console.log('Duplicate Messenger webhook event (race), skipping:', externalMessageId);
+        return;
+      }
+      throw err;
     }
+
+    await generateAndStoreAgentReply(conversation, messageText);
   }
 
   // Meta webhook receiver — signature-verified before any payload is trusted
@@ -562,9 +596,10 @@ async function startServer() {
         for (const event of entry.messaging || []) {
           const senderPsid = event.sender?.id;
           const messageText = event.message?.text;
-          if (!senderPsid || !messageText || event.message?.is_echo) continue;
+          const messageId = event.message?.mid;
+          if (!senderPsid || !messageText || !messageId || event.message?.is_echo) continue;
 
-          await handleIncomingMessengerMessage(pageId, senderPsid, messageText);
+          await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
         }
       }
     } catch (err) {

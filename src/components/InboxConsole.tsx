@@ -24,7 +24,7 @@ import {
   Info
 } from 'lucide-react';
 import { Conversation, ChatMessage } from '../types';
-import { sendConversationMessage } from '../lib/api';
+import { sendConversationMessage, approveDraftMessage } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
@@ -44,6 +44,8 @@ export default function InboxConsole({
   const [isTyping, setIsTyping] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL CONVERSATIONS');
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'info'>('list');
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const getChatDisplayName = (chat: Conversation) => {
     if (!chat) return '';
@@ -125,6 +127,9 @@ export default function InboxConsole({
       pushTelemetryLog(`[MERCHANT] Sending reply via ${activeChat.platform.toUpperCase()}`);
     }
 
+    const discardDraftId = editingDraftId;
+    setEditingDraftId(null);
+
     onUpdateConversation(activeChat.id, {
       messages: [...activeChat.messages, optimisticMsg],
       lastMessage: textToSend,
@@ -132,23 +137,27 @@ export default function InboxConsole({
     });
     setInputText('');
 
-    if (isSimulatedCustomerChannel && activeChat.status === 'AI Managed') {
+    if (isSimulatedCustomerChannel) {
       setIsTyping(true);
       pushTelemetryLog(`[AI_GATEWAY] Dispatching payload to LLM...`);
-    } else if (isSimulatedCustomerChannel) {
-      pushTelemetryLog(`[ROUTER] Manual override active. AI agent paused.`);
     }
 
     try {
-      // The backend persists the message and, for a simulated customer message on an
-      // AI-managed conversation, generates and persists the reply too — either way it
-      // returns the authoritative conversation state.
-      const updated = await sendConversationMessage(activeChat.id, textToSend, isSimulatedCustomerChannel ? 'customer' : 'merchant');
+      // The backend persists the message and, for a simulated customer message, generates
+      // a reply too — either auto-sent (Copilot on) or held as a pending draft (Copilot
+      // off) — either way it returns the authoritative conversation state.
+      const updated = await sendConversationMessage(
+        activeChat.id,
+        textToSend,
+        isSimulatedCustomerChannel ? 'customer' : 'merchant',
+        discardDraftId || undefined
+      );
       onUpdateConversation(activeChat.id, updated);
 
-      if (isSimulatedCustomerChannel && activeChat.status === 'AI Managed') {
-        pushTelemetryLog(`[LLM_OUT] Response drafted successfully.`);
-      } else if (!isSimulatedCustomerChannel) {
+      if (isSimulatedCustomerChannel) {
+        const last = updated.messages[updated.messages.length - 1];
+        pushTelemetryLog(last?.pending ? `[LLM_OUT] Draft ready for approval.` : `[LLM_OUT] Response drafted and sent.`);
+      } else {
         pushTelemetryLog(`[MERCHANT] Reply delivered.`);
       }
     } catch (err) {
@@ -156,6 +165,22 @@ export default function InboxConsole({
       pushTelemetryLog(`[ERROR] Failed to deliver message to the backend.`);
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  const handleApproveDraft = async (messageId: string) => {
+    if (!activeChat) return;
+    setApprovingId(messageId);
+    pushTelemetryLog(`[AGENT] Approving drafted response for delivery.`);
+    try {
+      const updated = await approveDraftMessage(activeChat.id, messageId);
+      onUpdateConversation(activeChat.id, updated);
+      pushTelemetryLog(`[AGENT] Draft delivered to customer.`);
+    } catch (err) {
+      console.error(err);
+      pushTelemetryLog(`[ERROR] Failed to approve draft.`);
+    } finally {
+      setApprovingId(null);
     }
   };
 
@@ -377,36 +402,33 @@ export default function InboxConsole({
 
             {activeChat?.messages.map((m) => {
               const isCustomer = m.sender === 'customer';
-              const isAI = m.sender === 'ai';
+              const isPendingDraft = m.sender === 'ai' && m.pending;
               return (
                 <div key={m.id} className={`flex w-full ${isCustomer ? 'justify-start' : 'justify-end'}`}>
-                  {isAI ? (
-                    /* AI DRAFT MESSAGE TYPE (matching screenshot) */
+                  {isPendingDraft ? (
+                    /* AI DRAFT MESSAGE TYPE — awaiting merchant approval, not yet delivered */
                     <div className="bg-white/[0.03] border border-white/[0.08] p-4 rounded-xl max-w-[85%] text-left space-y-3 shadow-lg">
                       <div className="flex items-center justify-between">
                         <span className="font-sans text-[9px] font-bold text-white/60 uppercase tracking-widest flex items-center gap-1">
-                          ✨ AI-GENERATED REPLY
+                          ✨ AI-GENERATED REPLY (DRAFT)
                         </span>
                         <span className="font-sans text-[8px] text-white/30">{m.time}</span>
                       </div>
                       <p className="text-xs text-white leading-relaxed">{m.text}</p>
-                      
+
                       {/* Action trigger buttons */}
                       <div className="flex items-center gap-2 pt-1 border-t border-white/[0.04]">
-                        <button 
-                          onClick={() => {
-                            pushTelemetryLog(`[AGENT] Manually authorized drafted response.`);
-                            onUpdateConversation(activeChat.id, {
-                              messages: activeChat.messages.map(msg => msg.id === m.id ? { ...msg, sender: 'merchant' } : msg)
-                            });
-                          }}
-                          className="bg-white hover:bg-white/90 text-black font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer"
+                        <button
+                          onClick={() => handleApproveDraft(m.id)}
+                          disabled={approvingId === m.id}
+                          className="bg-white hover:bg-white/90 text-black font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer disabled:opacity-50"
                         >
-                          Send Now
+                          {approvingId === m.id ? 'Sending...' : 'Send Now'}
                         </button>
-                        <button 
+                        <button
                           onClick={() => {
                             setInputText(m.text);
+                            setEditingDraftId(m.id);
                             pushTelemetryLog(`[WORKSPACE] Copy to input for edit.`);
                           }}
                           className="bg-transparent hover:bg-white/5 text-white/80 border border-white/15 font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer"
@@ -416,12 +438,17 @@ export default function InboxConsole({
                       </div>
                     </div>
                   ) : (
-                    /* NORMAL MESSAGE TYPE */
+                    /* NORMAL MESSAGE TYPE — customer message, or already-delivered AI/merchant reply */
                     <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 border text-left ${
-                      isCustomer 
-                        ? 'bg-[#121215] border-white/[0.04] text-white font-sans text-xs' 
+                      isCustomer
+                        ? 'bg-[#121215] border-white/[0.04] text-white font-sans text-xs'
                         : 'bg-white/[0.04] border-white/[0.06] text-white/95 font-sans text-xs'
                     }`}>
+                      {m.sender === 'ai' && (
+                        <span className="font-sans text-[8px] font-bold text-white/40 uppercase tracking-widest block mb-1">
+                          ✨ AI
+                        </span>
+                      )}
                       <p className="leading-relaxed leading-normal">{m.text}</p>
                       <div className="text-right text-[8px] text-white/30 mt-1 font-sans">
                         {m.time}

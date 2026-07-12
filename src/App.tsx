@@ -39,6 +39,27 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Pushes a browser history entry per tab change so the back button undoes the last
+  // in-app navigation instead of leaving the whole app.
+  const navigateTo = (tab: Tab, replace = false) => {
+    setActiveTab(tab);
+    if (replace) {
+      window.history.replaceState({ tab }, '', `#${tab}`);
+    } else {
+      window.history.pushState({ tab }, '', `#${tab}`);
+    }
+  };
+
+  useEffect(() => {
+    window.history.replaceState({ tab: activeTab }, '', `#${activeTab}`);
+    const handlePopState = (e: PopStateEvent) => {
+      const tab = (e.state?.tab as Tab) || 'landing';
+      setActiveTab(tab);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   // Real auth state — merchant is null when logged out
   const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
   const [store, setStore] = useState<PublicStore | null>(null);
@@ -69,7 +90,7 @@ export default function App() {
         setMerchant(res.merchant);
         setStore(res.store);
         syncProfileToLocalStorage(res.merchant);
-        setActiveTab('inbox');
+        navigateTo('inbox', true);
       })
       .catch(() => clearToken())
       .finally(() => setIsCheckingAuth(false));
@@ -79,7 +100,7 @@ export default function App() {
   useEffect(() => {
     const handleNavigateEvent = (e: Event) => {
       const tab = (e as CustomEvent).detail as Tab;
-      setActiveTab(tab);
+      navigateTo(tab);
       setIsSidebarOpen(false);
     };
     const handleLogoutEvent = () => {
@@ -103,7 +124,7 @@ export default function App() {
     setMerchant(auth.merchant);
     setStore(auth.store);
     syncProfileToLocalStorage(auth.merchant);
-    setActiveTab('inbox');
+    navigateTo('inbox');
     setIsSidebarOpen(false);
   };
 
@@ -129,9 +150,19 @@ export default function App() {
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
   }, [merchant]);
 
+  // Poll for new conversations/messages (e.g. real incoming Facebook messages) so the
+  // Inbox reflects them without requiring a manual page refresh.
+  useEffect(() => {
+    if (!merchant) return;
+    const interval = setInterval(() => {
+      listConversations().then(setConversations).catch((err) => console.error('Failed to refresh conversations:', err));
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [merchant]);
+
   // Navigation controller
   const handleNavigate = (tab: Tab) => {
-    setActiveTab(tab);
+    navigateTo(tab);
     setIsSidebarOpen(false);
   };
 
@@ -139,7 +170,7 @@ export default function App() {
     clearToken();
     setMerchant(null);
     setStore(null);
-    setActiveTab('landing');
+    navigateTo('landing');
     setIsSidebarOpen(false);
   };
 

@@ -109,6 +109,7 @@ export interface ApiChatMessage {
   sender: 'customer' | 'ai' | 'merchant';
   text: string;
   time: string;
+  pending?: boolean;
 }
 
 export interface ApiConversation {
@@ -132,6 +133,20 @@ export function updateConversationStatus(id: string, status: 'Active' | 'AI Mana
   return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
 }
 
-export function sendConversationMessage(id: string, text: string, sender: 'customer' | 'merchant' = 'customer') {
-  return request<ApiConversation>(`/api/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ text, sender }) });
+export function sendConversationMessage(
+  id: string,
+  text: string,
+  sender: 'customer' | 'merchant' = 'customer',
+  discardDraftId?: string
+) {
+  return request<ApiConversation>(`/api/conversations/${id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ text, sender, discardDraftId }),
+  });
+}
+
+export function approveDraftMessage(conversationId: string, messageId: string) {
+  return request<ApiConversation>(`/api/conversations/${conversationId}/messages/${messageId}/approve`, {
+    method: 'POST',
+  });
 }

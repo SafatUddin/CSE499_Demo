@@ -113,6 +113,12 @@ model Message {
   conversationId String
   sender         Sender
   text           String
+  // True for an AI-drafted reply awaiting merchant approval (Copilot off / manual mode) —
+  // not yet delivered to the real customer. False for anything already sent/delivered.
+  pending        Boolean      @default(false)
+  // Meta's message id, when this row originated from a webhook event. Used to make webhook
+  // processing idempotent, since Meta's delivery is "at-least-once" and may redeliver.
+  externalId     String?      @unique
   meta           Json?
   createdAt      DateTime     @default(now())
 }

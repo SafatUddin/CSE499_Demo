@@ -7,7 +7,7 @@ import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest } from './server/auth';
 import { ai } from './server/gemini';
 import { generateAgentReply } from './server/agent';
-import { verifyMetaSignature, sendMessengerMessage } from './server/meta';
+import { verifyMetaSignature, sendMessengerMessage, fetchMessengerProfileName } from './server/meta';
 
 dotenv.config();
 
@@ -557,6 +557,16 @@ async function startServer() {
       conversation = await prisma.conversation.create({
         data: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid, lastMessageAt: new Date() },
       });
+    }
+
+    // Backfill the customer's real name if we don't have one yet — covers both brand-new
+    // conversations and older ones created before this profile lookup existed.
+    if (!conversation.customerName) {
+      const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+      const customerName = pageAccessToken ? await fetchMessengerProfileName(pageAccessToken, senderPsid) : null;
+      if (customerName) {
+        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { customerName } });
+      }
     }
 
     try {

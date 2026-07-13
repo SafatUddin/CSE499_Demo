@@ -26,3 +26,18 @@ export async function sendMessengerMessage(pageAccessToken: string, recipientPsi
     throw new Error(`Messenger send failed: ${res.status} ${body}`);
   }
 }
+
+export async function fetchMessengerProfileName(pageAccessToken: string, psid: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${psid}?fields=first_name,last_name&access_token=${encodeURIComponent(pageAccessToken)}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const name = [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
+    return name || null;
+  } catch (err) {
+    console.error('Failed to fetch Messenger profile name:', err);
+    return null;
+  }
+}

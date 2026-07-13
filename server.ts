@@ -351,6 +351,62 @@ async function startServer() {
     }
   }
 
+  // Derived, real-time notifications: unread/complaint conversations + low-stock products.
+  // Computed on the fly rather than stored, since these all resolve naturally elsewhere
+  // (opening a conversation marks it read; restocking a product clears its low-stock alert).
+  app.get('/api/notifications', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const storeId = req.auth!.storeId;
+      const [conversations, lowStockProducts] = await Promise.all([
+        prisma.conversation.findMany({
+          where: { storeId },
+          include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 20,
+        }),
+        prisma.product.findMany({ where: { storeId, inventory: { lt: 10 } }, orderBy: { inventory: 'asc' } }),
+      ]);
+
+      const notifications: any[] = [];
+
+      for (const c of conversations) {
+        const last = c.messages[0];
+        if (last && last.sender === 'CUSTOMER') {
+          notifications.push({
+            id: `msg-${c.id}`,
+            type: 'message',
+            title: c.isComplaint ? 'Complaint Needs Attention' : 'New Message',
+            body: `${c.customerName || 'A customer'}: "${last.text.slice(0, 60)}"`,
+            time: last.createdAt,
+            platform: CHANNEL_TO_PLATFORM[c.channelType] || 'websocket',
+          });
+        }
+      }
+
+      for (const p of lowStockProducts) {
+        notifications.push({
+          id: `stock-${p.id}`,
+          type: 'inventory',
+          title: 'Inventory Alert',
+          body: `${p.name} is running low (${p.inventory} unit${p.inventory === 1 ? '' : 's'} left)`,
+          time: null,
+          platform: 'system',
+        });
+      }
+
+      notifications.sort((a, b) => {
+        if (!a.time) return 1;
+        if (!b.time) return -1;
+        return new Date(b.time).getTime() - new Date(a.time).getTime();
+      });
+
+      res.json(notifications.slice(0, 15));
+    } catch (err: any) {
+      console.error('Fetch notifications error:', err);
+      res.status(500).json({ error: 'Failed to load notifications' });
+    }
+  });
+
   // List this store's conversations across all channels
   app.get('/api/conversations', requireAuth, async (req: AuthedRequest, res) => {
     try {

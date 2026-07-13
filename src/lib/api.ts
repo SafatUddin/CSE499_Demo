@@ -150,3 +150,16 @@ export function approveDraftMessage(conversationId: string, messageId: string) {
     method: 'POST',
   });
 }
+
+export interface ApiNotification {
+  id: string;
+  type: 'message' | 'inventory';
+  title: string;
+  body: string;
+  time: string | null;
+  platform: 'facebook' | 'instagram' | 'whatsapp' | 'websocket' | 'system';
+}
+
+export function listNotifications() {
+  return request<ApiNotification[]>('/api/notifications');
+}

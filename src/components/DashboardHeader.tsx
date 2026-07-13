@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Settings, LogOut, ChevronDown, MessageSquare, AlertCircle, CheckCircle, X, Menu } from 'lucide-react';
+import { Bell, Search, Settings, LogOut, ChevronDown, MessageSquare, AlertCircle, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { listNotifications, ApiNotification } from '../lib/api';
 
 interface DashboardHeaderProps {
   title: string;
@@ -9,11 +10,23 @@ interface DashboardHeaderProps {
   onSearchChange?: (val: string) => void;
 }
 
-export default function DashboardHeader({ 
-  title, 
-  searchPlaceholder, 
-  searchValue = '', 
-  onSearchChange 
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+export default function DashboardHeader({
+  title,
+  searchPlaceholder,
+  searchValue = '',
+  onSearchChange
 }: DashboardHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -21,50 +34,29 @@ export default function DashboardHeader({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      title: "New FB Message",
-      body: "Joya Khan: 'Is the ocean blue dress in stock?'",
-      time: "2 mins ago",
-      read: false,
-      platform: "facebook"
-    },
-    {
-      id: 2,
-      title: "Automated Sale",
-      body: "Summer Breeze Maxi ($45) sold to JD via WhatsApp",
-      time: "15 mins ago",
-      read: false,
-      platform: "whatsapp"
-    },
-    {
-      id: 3,
-      title: "Inventory Alert",
-      body: "Red Velvet Lipstick inventory level is below 5 units",
-      time: "1 hour ago",
-      read: true,
-      platform: "system"
-    },
-    {
-      id: 4,
-      title: "Sync Successful",
-      body: "Instagram chat connections updated successfully",
-      time: "4 hours ago",
-      read: true,
-      platform: "system"
-    }
-  ]);
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const load = () => {
+      listNotifications().then(setNotifications).catch((err) => console.error('Failed to load notifications:', err));
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const visibleNotifications = notifications.filter((n) => !dismissedIds.has(n.id));
 
   const handleMarkAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setDismissedIds(new Set(notifications.map((n) => n.id)));
   };
 
-  const handleMarkAsRead = (id: number) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  const handleMarkAsRead = (id: string) => {
+    setDismissedIds((prev) => new Set(prev).add(id));
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = visibleNotifications.length;
 
   // Profile State synchronized with localStorage
   const [profile, setProfile] = useState(() => {
@@ -182,43 +174,39 @@ export default function DashboardHeader({
 
                   {/* List Container */}
                   <div className="max-h-72 overflow-y-auto divide-y divide-white/[0.03] no-scrollbar">
-                    {notifications.length === 0 ? (
+                    {visibleNotifications.length === 0 ? (
                       <div className="p-8 text-center text-white/30 text-xs font-sans">
                         No notifications found.
                       </div>
                     ) : (
-                      notifications.map((n) => (
-                        <div 
+                      visibleNotifications.map((n) => (
+                        <div
                           key={n.id}
                           onClick={() => handleMarkAsRead(n.id)}
-                          className={`p-3 text-left transition-colors cursor-pointer flex gap-2.5 items-start ${
-                            n.read ? 'bg-transparent hover:bg-white/[0.02]' : 'bg-white/[0.02] hover:bg-white/[0.03]'
-                          }`}
+                          className="p-3 text-left transition-colors cursor-pointer flex gap-2.5 items-start bg-white/[0.02] hover:bg-white/[0.03]"
                         >
                           <div className={`p-1.5 rounded-md mt-0.5 shrink-0 ${
                             n.platform === 'facebook' ? 'bg-[#1877F2]/10 text-[#1877F2]' :
                             n.platform === 'whatsapp' ? 'bg-[#25D366]/10 text-[#25D366]' : 'bg-white/10 text-white/70'
                           }`}>
-                            {n.platform === 'facebook' || n.platform === 'whatsapp' ? (
+                            {n.type === 'message' ? (
                               <MessageSquare className="h-3 w-3" />
-                            ) : n.title.includes('Alert') ? (
-                              <AlertCircle className="h-3 w-3" />
                             ) : (
-                              <CheckCircle className="h-3 w-3" />
+                              <AlertCircle className="h-3 w-3" />
                             )}
                           </div>
 
                           <div className="flex-grow min-w-0 space-y-0.5">
                             <div className="flex justify-between items-center">
-                              <span className={`font-sans text-[11px] truncate ${n.read ? 'text-white/60 font-medium' : 'text-white font-bold'}`}>
+                              <span className="font-sans text-[11px] truncate text-white font-bold">
                                 {n.title}
                               </span>
-                              {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />}
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
                             </div>
                             <p className="font-sans text-[10px] text-white/40 leading-normal line-clamp-2">
                               {n.body}
                             </p>
-                            <p className="text-[8px] text-white/20 font-sans">{n.time}</p>
+                            <p className="text-[8px] text-white/20 font-sans">{formatRelativeTime(n.time)}</p>
                           </div>
                         </div>
                       ))

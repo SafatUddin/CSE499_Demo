@@ -17,8 +17,6 @@ import {
   Coins,
   Check,
   FileText,
-  PhoneCall,
-  MoreHorizontal,
   Zap,
   ChevronLeft,
   Info
@@ -371,19 +369,13 @@ export default function InboxConsole({
             {/* Utility icons */}
             <div className="flex items-center gap-1.5">
               {/* Mobile Info toggle */}
-              <button 
+              <button
                 type="button"
                 onClick={() => setMobileView('info')}
                 className="lg:hidden p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
                 title="View Strategy & Logs"
               >
                 <Info className="h-4 w-4" />
-              </button>
-              <button className="p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer">
-                <PhoneCall className="h-3.5 w-3.5" />
-              </button>
-              <button className="p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer">
-                <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
             </div>
           </header>

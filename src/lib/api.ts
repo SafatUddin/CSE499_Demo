@@ -163,3 +163,40 @@ export interface ApiNotification {
 export function listNotifications() {
   return request<ApiNotification[]>('/api/notifications');
 }
+
+export interface ApiChannel {
+  type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
+  connected: boolean;
+}
+
+export function listChannels() {
+  return request<ApiChannel[]>('/api/channels');
+}
+
+export function disconnectChannel(type: string) {
+  return request<{ success: boolean }>(`/api/channels/${type}`, { method: 'DELETE' });
+}
+
+// Full-page redirect (not a fetch) since it hands off to Facebook's OAuth dialog.
+// The token travels as a query param because a browser navigation can't carry an
+// Authorization header.
+export function getFacebookConnectUrl(): string {
+  const token = getToken() || '';
+  return `/api/channels/facebook/connect?token=${encodeURIComponent(token)}`;
+}
+
+export interface FacebookPendingPage {
+  id: string;
+  name: string;
+}
+
+export function getFacebookPendingPages(pendingToken: string) {
+  return request<{ pages: FacebookPendingPage[] }>(`/api/channels/facebook/pending?token=${encodeURIComponent(pendingToken)}`);
+}
+
+export function selectFacebookPage(pendingToken: string, pageId: string) {
+  return request<{ success: boolean }>('/api/channels/facebook/select', {
+    method: 'POST',
+    body: JSON.stringify({ pendingToken, pageId }),
+  });
+}

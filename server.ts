@@ -4,10 +4,20 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
-import { signToken, requireAuth, AuthedRequest } from './server/auth';
+import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
 import { ai } from './server/gemini';
 import { generateAgentReply } from './server/agent';
-import { verifyMetaSignature, sendMessengerMessage, fetchMessengerProfileName } from './server/meta';
+import {
+  verifyMetaSignature,
+  sendMessengerMessage,
+  fetchMessengerProfileName,
+  getFacebookOAuthUrl,
+  exchangeCodeForUserToken,
+  listManagedPages,
+  subscribePageWebhook,
+  ManagedPage,
+} from './server/meta';
+import { encryptSecret, decryptSecret } from './server/crypto';
 
 dotenv.config();
 
@@ -160,6 +170,146 @@ async function startServer() {
     }
   });
 
+  const CHANNEL_TYPE_TO_FRONTEND: Record<string, string> = {
+    FACEBOOK: 'facebook',
+    INSTAGRAM: 'instagram',
+    WHATSAPP: 'whatsapp',
+    WIDGET: 'websocket',
+  };
+
+  function getFacebookRedirectUri(): string {
+    return `${process.env.APP_URL}/api/channels/facebook/callback`;
+  }
+
+  async function finalizeFacebookConnection(storeId: string, page: ManagedPage) {
+    await prisma.channel.upsert({
+      where: { storeId_type: { storeId, type: 'FACEBOOK' } },
+      update: { connected: true, externalId: page.id, credentials: { token: encryptSecret(page.access_token) } },
+      create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials: { token: encryptSecret(page.access_token) } },
+    });
+    try {
+      await subscribePageWebhook(page.id, page.access_token);
+    } catch (err) {
+      console.error('Failed to auto-subscribe Facebook Page webhook:', err);
+    }
+  }
+
+  // List this store's real channel connections (currently just Facebook; other
+  // platforms in the UI are still mock toggles, see CLAUDE.md)
+  app.get('/api/channels', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const channels = await prisma.channel.findMany({ where: { storeId: req.auth!.storeId } });
+      res.json(channels.map((c) => ({
+        type: CHANNEL_TYPE_TO_FRONTEND[c.type] || c.type.toLowerCase(),
+        connected: c.connected,
+      })));
+    } catch (err: any) {
+      console.error('List channels error:', err);
+      res.status(500).json({ error: 'Failed to load channels' });
+    }
+  });
+
+  // Disconnect a channel
+  app.delete('/api/channels/:type', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const type = req.params.type.toUpperCase();
+      await prisma.channel.updateMany({
+        where: { storeId: req.auth!.storeId, type: type as any },
+        data: { connected: false, credentials: null, externalId: null },
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Disconnect channel error:', err);
+      res.status(500).json({ error: 'Failed to disconnect channel' });
+    }
+  });
+
+  // Start the Facebook OAuth flow. Browser navigation can't carry an Authorization
+  // header, so the JWT is passed as a query param and verified inline here instead
+  // of via the requireAuth middleware.
+  app.get('/api/channels/facebook/connect', (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.status(401).send('Missing token');
+      const auth = verifyState<{ merchantId: string; storeId: string }>(token);
+
+      const state = signState({ storeId: auth.storeId }, '10m');
+      const url = getFacebookOAuthUrl(getFacebookRedirectUri(), state);
+      res.redirect(url);
+    } catch (err) {
+      console.error('Facebook connect error:', err);
+      res.status(401).send('Invalid or expired session. Please log in again and retry.');
+    }
+  });
+
+  // Facebook redirects here after the merchant approves (or denies) access.
+  app.get('/api/channels/facebook/callback', async (req, res) => {
+    const frontendBase = process.env.APP_URL || '';
+    try {
+      const { code, state, error: oauthError } = req.query as { code?: string; state?: string; error?: string };
+      if (oauthError || !code || !state) {
+        return res.redirect(`${frontendBase}/#integrations?fbError=denied`);
+      }
+
+      const { storeId } = verifyState<{ storeId: string }>(state);
+      const redirectUri = getFacebookRedirectUri();
+      const userAccessToken = await exchangeCodeForUserToken(code, redirectUri);
+      const pages = await listManagedPages(userAccessToken);
+
+      if (pages.length === 0) {
+        return res.redirect(`${frontendBase}/#integrations?fbError=no_pages`);
+      }
+
+      if (pages.length === 1) {
+        await finalizeFacebookConnection(storeId, pages[0]);
+        return res.redirect(`${frontendBase}/#integrations?fbConnected=1`);
+      }
+
+      // Multiple Pages — let the merchant choose. Their tokens travel only inside this
+      // short-lived signed token, never exposed to the frontend directly.
+      const pendingToken = signState({ storeId, pages }, '10m');
+      res.redirect(`${frontendBase}/#integrations?fbPending=${encodeURIComponent(pendingToken)}`);
+    } catch (err) {
+      console.error('Facebook OAuth callback error:', err);
+      res.redirect(`${frontendBase}/#integrations?fbError=server_error`);
+    }
+  });
+
+  // Returns the candidate Pages for a pending multi-page selection (names only — the
+  // access tokens stay server-side inside the signed pendingToken).
+  app.get('/api/channels/facebook/pending', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const pendingToken = req.query.token as string;
+      const decoded = verifyState<{ storeId: string; pages: ManagedPage[] }>(pendingToken);
+      if (decoded.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Token does not match your account' });
+      }
+      res.json({ pages: decoded.pages.map((p) => ({ id: p.id, name: p.name })) });
+    } catch (err) {
+      res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
+    }
+  });
+
+  // Finalizes the connection once the merchant picks a Page from the multi-page list.
+  app.post('/api/channels/facebook/select', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { pendingToken, pageId } = req.body;
+      const decoded = verifyState<{ storeId: string; pages: ManagedPage[] }>(pendingToken);
+      if (decoded.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Token does not match your account' });
+      }
+      const page = decoded.pages.find((p) => p.id === pageId);
+      if (!page) {
+        return res.status(404).json({ error: 'Page not found in this selection' });
+      }
+      await finalizeFacebookConnection(decoded.storeId, page);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Facebook page selection error:', err);
+      res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
+    }
+  });
+
   const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string }) => ({
     id: p.id,
     name: p.name,
@@ -307,6 +457,21 @@ async function startServer() {
     };
   }
 
+  // Prefers the per-store token from a real self-serve OAuth connection; falls back to
+  // the single global env-var token used by the manual-token connection path.
+  async function getPageAccessTokenForStore(storeId: string): Promise<string | null> {
+    const channel = await prisma.channel.findUnique({ where: { storeId_type: { storeId, type: 'FACEBOOK' } } });
+    if (channel?.connected && channel.credentials) {
+      try {
+        const { token } = channel.credentials as { token: string };
+        return decryptSecret(token);
+      } catch (err) {
+        console.error('Failed to decrypt stored Facebook token:', err);
+      }
+    }
+    return process.env.META_PAGE_ACCESS_TOKEN || null;
+  }
+
   // Generates an AI reply for a conversation and either delivers it immediately (Copilot
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
@@ -340,7 +505,7 @@ async function startServer() {
     });
 
     if (isAutopilot && conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
-      const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+      const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
       if (pageAccessToken) {
         try {
           await sendMessengerMessage(pageAccessToken, conversation.externalUserId, result.replyText);
@@ -476,7 +641,7 @@ async function startServer() {
         await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
         if (conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
-          const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+          const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
           if (pageAccessToken) {
             try {
               await sendMessengerMessage(pageAccessToken, conversation.externalUserId, text);
@@ -522,7 +687,7 @@ async function startServer() {
       }
 
       if (conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
-        const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+        const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
         if (pageAccessToken) {
           try {
             await sendMessengerMessage(pageAccessToken, conversation.externalUserId, message.text);
@@ -585,9 +750,10 @@ async function startServer() {
       return;
     }
 
-    // This manual-token test phase has no self-serve "Connect with Facebook" flow yet
-    // (that's Option B in the roadmap), so there's no Channel row created via OAuth.
-    // Attach this Page to whichever store doesn't already have a Facebook channel.
+    // A real self-serve OAuth connection always has a Channel row keyed by this exact
+    // Page ID already (see finalizeFacebookConnection), so this lookup routes the event
+    // to the right store automatically. The fallback below only fires for a Page that's
+    // never been connected through either flow — e.g. the older manual-token setup.
     let channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', externalId: pageId } });
     let storeId: string;
     if (channel) {
@@ -618,7 +784,7 @@ async function startServer() {
     // Backfill the customer's real name if we don't have one yet — covers both brand-new
     // conversations and older ones created before this profile lookup existed.
     if (!conversation.customerName) {
-      const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+      const pageAccessToken = await getPageAccessTokenForStore(storeId);
       const customerName = pageAccessToken ? await fetchMessengerProfileName(pageAccessToken, senderPsid) : null;
       if (customerName) {
         conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { customerName } });

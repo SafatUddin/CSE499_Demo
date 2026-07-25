@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Facebook, 
-  Instagram, 
-  MessageSquare, 
-  ShoppingBag, 
-  RefreshCw, 
-  CheckCircle2, 
-  AlertTriangle, 
+import {
+  Facebook,
+  Instagram,
+  MessageSquare,
+  ShoppingBag,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
   Database,
   ShieldCheck,
   Smartphone,
@@ -19,6 +19,14 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { Integration } from '../types';
+import {
+  listChannels,
+  disconnectChannel,
+  getFacebookConnectUrl,
+  getFacebookPendingPages,
+  selectFacebookPage,
+  FacebookPendingPage,
+} from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface IntegrationsHubProps {
@@ -31,11 +39,86 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [searchTerm, setSearchTerm] = useState('');
   const [reconnectingId, setReconnectingId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // Setup Wizard states
   const [activeWizardId, setActiveWizardId] = useState<string | null>(null);
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [isSimulatingSync, setIsSimulatingSync] = useState(false);
+
+  // Real Facebook connection state (self-serve OAuth flow)
+  const [fbConnected, setFbConnected] = useState(false);
+  const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
+  const [fbPendingPages, setFbPendingPages] = useState<FacebookPendingPage[]>([]);
+  const [fbError, setFbError] = useState('');
+  const [isSelectingPage, setIsSelectingPage] = useState(false);
+
+  const refreshFacebookStatus = () => {
+    listChannels()
+      .then((channels) => setFbConnected(!!channels.find((c) => c.type === 'facebook')?.connected))
+      .catch((err) => console.error('Failed to load channel status:', err));
+  };
+
+  useEffect(() => {
+    refreshFacebookStatus();
+
+    // The OAuth callback redirects back here as #integrations?fbConnected=1 / fbPending=... / fbError=...
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex === -1) return;
+    const params = new URLSearchParams(hash.slice(queryIndex + 1));
+
+    if (params.get('fbConnected')) {
+      refreshFacebookStatus();
+    } else if (params.get('fbPending')) {
+      const token = params.get('fbPending')!;
+      setFbPendingToken(token);
+      getFacebookPendingPages(token)
+        .then((res) => setFbPendingPages(res.pages))
+        .catch(() => setFbError('That connection attempt expired. Please try connecting again.'));
+    } else if (params.get('fbError')) {
+      const code = params.get('fbError');
+      setFbError(
+        code === 'no_pages'
+          ? "We didn't find any Facebook Pages you manage. Connect a Page to your Facebook account and try again."
+          : code === 'denied'
+            ? 'Facebook connection was cancelled.'
+            : 'Something went wrong connecting to Facebook. Please try again.'
+      );
+    }
+
+    // Clean the URL so a refresh doesn't re-process the same callback params
+    window.history.replaceState(null, '', '#integrations');
+  }, []);
+
+  const handleFacebookCardClick = async () => {
+    if (fbConnected) {
+      if (!window.confirm('Disconnect Facebook? Incoming messages will stop being delivered to this store.')) return;
+      try {
+        await disconnectChannel('facebook');
+        setFbConnected(false);
+      } catch (err) {
+        console.error('Failed to disconnect Facebook:', err);
+      }
+      return;
+    }
+    window.location.href = getFacebookConnectUrl();
+  };
+
+  const handleSelectFacebookPage = async (pageId: string) => {
+    if (!fbPendingToken) return;
+    setIsSelectingPage(true);
+    try {
+      await selectFacebookPage(fbPendingToken, pageId);
+      setFbPendingToken(null);
+      setFbPendingPages([]);
+      refreshFacebookStatus();
+    } catch (err) {
+      console.error('Failed to select Facebook Page:', err);
+      setFbError('Failed to connect that Page. Please try again.');
+    } finally {
+      setIsSelectingPage(false);
+    }
+  };
 
   // Form states for Wizards
   const [shopifyDomain, setShopifyDomain] = useState('');
@@ -89,8 +172,19 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  // Overlay the real Facebook connection state onto the otherwise-mock integration list
+  const displayIntegrations = integrations.map((item) =>
+    item.id === 'int-fb'
+      ? {
+          ...item,
+          connected: fbConnected,
+          statusText: fbConnected ? 'Active Sync' : 'Not Connected',
+        }
+      : item
+  );
+
   // Filter based on search term
-  const filteredIntegrations = integrations.filter(item => 
+  const filteredIntegrations = displayIntegrations.filter(item =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -107,6 +201,15 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
       />
 
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
+        {fbError && (
+          <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[11px] p-3 rounded-lg flex items-center justify-between font-sans">
+            <span>{fbError}</span>
+            <button onClick={() => setFbError('')} className="text-[#ea4335] hover:text-white cursor-pointer">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Connectivity Banner Content */}
       <div className="space-y-4">
         {/* Global Connectivity Pill */}
@@ -194,14 +297,14 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                 </span>
 
                 <button
-                  onClick={() => handleConnectClick(item)}
+                  onClick={() => (item.id === 'int-fb' ? handleFacebookCardClick() : handleConnectClick(item))}
                   className={`font-sans text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide transition-all active:scale-[0.98] cursor-pointer ${
-                    isWhatsApp 
-                      ? 'bg-white hover:bg-white/90 text-black' 
+                    isWhatsApp
+                      ? 'bg-white hover:bg-white/90 text-black'
                       : 'bg-transparent hover:bg-white/5 border border-white/10 text-white'
                   }`}
                 >
-                  {isWhatsApp ? 'Connect' : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? 'Connect' : 'Manage'}
                 </button>
               </div>
 
@@ -313,8 +416,8 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
                     {/* WIZARD PATHS BASED ON CHOSEN PLUGIN TYPE */}
 
-                    {/* PATH A: FACEBOOK & INSTAGRAM CHANNELS */}
-                    {(activeWizardId === 'int-fb' || activeWizardId === 'int-ig') && (
+                    {/* PATH A: INSTAGRAM (Facebook now uses the real OAuth flow, not this wizard) */}
+                    {activeWizardId === 'int-ig' && (
                       <div className="space-y-4">
                         {wizardStep === 1 && (
                           <div className="space-y-4 text-center py-4">
@@ -626,6 +729,63 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                 )}
               </div>
 
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Facebook multi-Page picker — shown when the merchant manages more than one Page */}
+      <AnimatePresence>
+        {fbPendingToken && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+              className="bg-[#0d0d0d] border border-white/10 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl flex flex-col text-left"
+            >
+              <header className="p-5 border-b border-white/5 bg-[#111111] flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-[#070707] border border-white/10 rounded-lg">
+                    <Facebook className="h-5 w-5 text-[#1877F2]" />
+                  </div>
+                  <div>
+                    <h4 className="font-sans font-bold text-sm text-white">Select a Facebook Page</h4>
+                    <p className="font-mono text-[8px] text-white/40 uppercase tracking-widest mt-0.5">
+                      You manage more than one Page
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setFbPendingToken(null); setFbPendingPages([]); }}
+                  className="text-white/40 hover:text-white transition-colors cursor-pointer outline-none"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+
+              <div className="p-6 space-y-3">
+                <p className="text-xs text-white/50 leading-relaxed">
+                  Choose which Page ShopMate AI should connect to:
+                </p>
+                {fbPendingPages.map((page) => (
+                  <button
+                    key={page.id}
+                    onClick={() => handleSelectFacebookPage(page.id)}
+                    disabled={isSelectingPage}
+                    className="w-full p-3 text-left border rounded-lg flex justify-between items-center transition-all bg-[#060606] border-white/5 hover:border-white/20 cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="text-xs text-white font-sans font-medium">{page.name}</span>
+                    <ChevronRight className="h-4 w-4 text-white/40" />
+                  </button>
+                ))}
+              </div>
             </motion.div>
           </motion.div>
         )}

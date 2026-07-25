@@ -41,3 +41,61 @@ export async function fetchMessengerProfileName(pageAccessToken: string, psid: s
     return null;
   }
 }
+
+const FACEBOOK_OAUTH_SCOPES = ['pages_messaging', 'pages_show_list', 'pages_manage_metadata', 'pages_read_engagement'];
+
+export function getFacebookOAuthUrl(redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: process.env.FACEBOOK_APP_ID || '',
+    redirect_uri: redirectUri,
+    state,
+    scope: FACEBOOK_OAUTH_SCOPES.join(','),
+    response_type: 'code',
+  });
+  return `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+}
+
+export async function exchangeCodeForUserToken(code: string, redirectUri: string): Promise<string> {
+  const params = new URLSearchParams({
+    client_id: process.env.FACEBOOK_APP_ID || '',
+    client_secret: process.env.META_APP_SECRET || '',
+    redirect_uri: redirectUri,
+    code,
+  });
+  const res = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?${params.toString()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Facebook code exchange failed: ${res.status} ${body}`);
+  }
+  const data = await res.json();
+  return data.access_token;
+}
+
+export interface ManagedPage {
+  id: string;
+  name: string;
+  access_token: string;
+}
+
+export async function listManagedPages(userAccessToken: string): Promise<ManagedPage[]> {
+  const res = await fetch(
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(userAccessToken)}`
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to list managed Pages: ${res.status} ${body}`);
+  }
+  const data = await res.json();
+  return data.data || [];
+}
+
+export async function subscribePageWebhook(pageId: string, pageAccessToken: string): Promise<void> {
+  const res = await fetch(
+    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(pageAccessToken)}`,
+    { method: 'POST' }
+  );
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to subscribe Page webhook: ${res.status} ${body}`);
+  }
+}

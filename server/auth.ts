@@ -36,3 +36,13 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
+
+// Generic short-lived signed tokens for stateless server-side handoffs (OAuth `state`
+// params, pending-selection tokens) — distinct from the long-lived login session token.
+export function signState<T extends object>(payload: T, expiresIn: string): string {
+  return jwt.sign(payload as object, JWT_SECRET, { expiresIn } as jwt.SignOptions);
+}
+
+export function verifyState<T>(token: string): T {
+  return jwt.verify(token, JWT_SECRET) as T;
+}

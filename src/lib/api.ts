@@ -167,6 +167,7 @@ export function listNotifications() {
 export interface ApiChannel {
   type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
   connected: boolean;
+  name: string | null;
 }
 
 export function listChannels() {

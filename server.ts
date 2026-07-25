@@ -182,10 +182,11 @@ async function startServer() {
   }
 
   async function finalizeFacebookConnection(storeId: string, page: ManagedPage) {
+    const credentials = { token: encryptSecret(page.access_token), name: page.name };
     await prisma.channel.upsert({
       where: { storeId_type: { storeId, type: 'FACEBOOK' } },
-      update: { connected: true, externalId: page.id, credentials: { token: encryptSecret(page.access_token) } },
-      create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials: { token: encryptSecret(page.access_token) } },
+      update: { connected: true, externalId: page.id, credentials },
+      create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials },
     });
     try {
       await subscribePageWebhook(page.id, page.access_token);
@@ -202,6 +203,7 @@ async function startServer() {
       res.json(channels.map((c) => ({
         type: CHANNEL_TYPE_TO_FRONTEND[c.type] || c.type.toLowerCase(),
         connected: c.connected,
+        name: (c.credentials as any)?.name || null,
       })));
     } catch (err: any) {
       console.error('List channels error:', err);

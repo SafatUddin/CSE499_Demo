@@ -47,6 +47,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   // Real Facebook connection state (self-serve OAuth flow)
   const [fbConnected, setFbConnected] = useState(false);
+  const [fbPageName, setFbPageName] = useState<string | null>(null);
   const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
   const [fbPendingPages, setFbPendingPages] = useState<FacebookPendingPage[]>([]);
   const [fbError, setFbError] = useState('');
@@ -54,7 +55,11 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   const refreshFacebookStatus = () => {
     listChannels()
-      .then((channels) => setFbConnected(!!channels.find((c) => c.type === 'facebook')?.connected))
+      .then((channels) => {
+        const facebook = channels.find((c) => c.type === 'facebook');
+        setFbConnected(!!facebook?.connected);
+        setFbPageName(facebook?.name || null);
+      })
       .catch((err) => console.error('Failed to load channel status:', err));
   };
 
@@ -178,7 +183,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
       ? {
           ...item,
           connected: fbConnected,
-          statusText: fbConnected ? 'Active Sync' : 'Not Connected',
+          statusText: fbConnected ? (fbPageName ? `Connected: ${fbPageName}` : 'Active Sync') : 'Not Connected',
         }
       : item
   );

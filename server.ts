@@ -844,6 +844,51 @@ async function startServer() {
     res.json({ status: 'ok', geminiActive: !!ai });
   });
 
+  // Static privacy policy page (required by Meta's App Basic Settings to enable
+  // Facebook Login / App Domains). Plain HTML on purpose — it's a legal document,
+  // not part of the SPA's tab-based navigation.
+  app.get('/privacy', (req, res) => {
+    res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Privacy Policy — ShopMate AI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  body { background:#070708; color:#e2e2e2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; color: #fff; }
+  p, li { color: #b8b8bc; font-size: 0.95rem; }
+  a { color: #e2e2e2; }
+</style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p>ShopMate AI is a student capstone project (CSE499) that lets a merchant connect a Facebook Page so an AI assistant can help answer customer messages using the merchant's own product catalog.</p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li>Merchant account info: name, email, password (hashed, never stored in plain text).</li>
+    <li>Product catalog data the merchant enters (names, SKUs, prices, inventory).</li>
+    <li>Customer conversation content from connected channels (Facebook Messenger, or the website chat widget), so the AI can generate relevant replies and the merchant can review the conversation history.</li>
+    <li>The Facebook Page Access Token issued when a merchant connects their Page via Facebook Login, stored encrypted, used only to receive and send messages on that Page's behalf.</li>
+  </ul>
+
+  <h2>How it's used</h2>
+  <p>Conversation content is sent to Google's Gemini API to generate a suggested or automatic reply. It is not sold, shared with advertisers, or used for any purpose beyond powering this messaging assistant.</p>
+
+  <h2>Data retention</h2>
+  <p>Data is retained for as long as the merchant's account is active. As this is an educational project, data may be periodically reset during development and testing.</p>
+
+  <h2>Third parties</h2>
+  <p>We use Meta's Graph API (to send/receive Facebook Messenger messages) and Google's Gemini API (to generate AI replies). Each is governed by its own respective privacy policy.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy can be directed to the project maintainers via the contact email on file with this app's Meta Developer account.</p>
+</body>
+</html>`);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

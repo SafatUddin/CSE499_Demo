@@ -2,6 +2,15 @@
 
 Plain-language history of work on ShopMate AI, for humans (not git blame). See `CLAUDE.md` for current project state and `PLANNING.md` for the roadmap.
 
+## 2026-07-25/26 — Self-serve Facebook connect, real names, notifications, and orders
+
+- Built the real "Connect with Facebook" OAuth flow (Option B from the roadmap), replacing the manual "paste a token into `.env`" setup: OAuth popup → code exchange for a Page Access Token → a picker step if the merchant manages multiple Pages → auto-subscribe the webhook via the Graph API → the token stored encrypted (AES-256-GCM) in the database. The old manual-token connection still works as a fallback. Worked through several one-time Meta app configuration requirements along the way (App Domains, a real hosted Privacy Policy page, and the Facebook Login product's own "Valid OAuth Redirect URIs" setting, which is separate from the Messenger webhook's callback URL).
+- Facebook conversations now show the customer's real name (fetched via the Graph API) instead of a generic "New Customer" placeholder — this needed an additional Meta app permission ("Business Asset User Profile Access") that wasn't granted before.
+- Real notifications: the bell icon now reflects actual unread messages, flagged complaints, and low-stock products instead of a hardcoded fake list from the original demo.
+- Removed the phone/call icon and "..." menu from the conversation header — decorative leftovers from the demo with no real feature behind them (no telephony integration exists in this project).
+- Closed the sales loop: the AI's cart-detection was already part of its reply schema but was silently discarded — nothing ever built a real cart or created an order. Now the cart builds for real (validated against actual stock), the Inbox shows real cart contents/totals, and a working "Generate Order" button creates a real Order record once the merchant confirms a shipping address. Added an Orders screen to view and update them.
+- Wired the Integrations screen's Facebook card to real connection state (shows which Page is connected, real Connect/Disconnect actions) — other channel cards are still mock for now.
+
 ## 2026-07-12/13 — Facebook Messenger goes live, real Inbox, and correctness fixes
 
 - Connected a real Facebook Page to a Meta Developer app and built a signature-verified webhook (`GET/POST /webhooks/meta`) that receives real Messenger messages, runs them through the same AI pipeline as the demo widget, and sends real replies back via the Graph API Send API. Verified end-to-end with real messages from an actual Facebook account.

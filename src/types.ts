@@ -4,6 +4,7 @@ export type Tab =
   | 'signup'
   | 'inbox'
   | 'catalog'
+  | 'orders'
   | 'analytics'
   | 'integrations'
   | 'settings'

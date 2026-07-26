@@ -32,6 +32,7 @@ import InboxConsole from './components/InboxConsole';
 import ProductCatalog from './components/ProductCatalog';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IntegrationsHub from './components/IntegrationsHub';
+import OrdersPage from './components/OrdersPage';
 import SettingsPage from './components/SettingsPage';
 
 export default function App() {
@@ -268,13 +269,14 @@ export default function App() {
         return (
           <InboxConsole
             conversations={conversations}
+            products={products}
             onUpdateConversation={handleUpdateConversation}
             onUpdateConversationStatus={handleUpdateConversationStatus}
           />
         );
       case 'catalog':
         return (
-          <ProductCatalog 
+          <ProductCatalog
             products={products}
             persona={persona}
             onAddProduct={handleAddProduct}
@@ -282,6 +284,8 @@ export default function App() {
             onSavePersona={handleSavePersona}
           />
         );
+      case 'orders':
+        return <OrdersPage />;
       case 'analytics':
         return <AnalyticsDashboard />;
       case 'integrations':
@@ -307,6 +311,7 @@ export default function App() {
         return (
           <InboxConsole
             conversations={conversations}
+            products={products}
             onUpdateConversation={handleUpdateConversation}
             onUpdateConversationStatus={handleUpdateConversationStatus}
           />

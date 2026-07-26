@@ -1,14 +1,15 @@
 import React from 'react';
-import { 
-  MessageSquare, 
-  Package, 
-  BarChart3, 
-  Grid, 
+import {
+  MessageSquare,
+  Package,
+  BarChart3,
+  Grid,
   Settings,
   LogOut,
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ClipboardList
 } from 'lucide-react';
 import { Tab } from '../types';
 
@@ -34,6 +35,7 @@ export default function Sidebar({
   const menuItems = [
     { id: 'inbox', label: 'Unified Inbox', icon: MessageSquare },
     { id: 'catalog', label: 'Product Catalog', icon: Package },
+    { id: 'orders', label: 'Orders', icon: ClipboardList },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'integrations', label: 'Integrations', icon: Grid },
   ];

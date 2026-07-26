@@ -21,18 +21,20 @@ import {
   ChevronLeft,
   Info
 } from 'lucide-react';
-import { Conversation, ChatMessage } from '../types';
-import { sendConversationMessage, approveDraftMessage } from '../lib/api';
+import { Conversation, ChatMessage, Product } from '../types';
+import { sendConversationMessage, approveDraftMessage, createOrderFromConversation } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
   conversations: Conversation[];
+  products: Product[];
   onUpdateConversation: (chatId: string, updates: Partial<Conversation>) => void;
   onUpdateConversationStatus: (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => Promise<void>;
 }
 
 export default function InboxConsole({
   conversations,
+  products,
   onUpdateConversation,
   onUpdateConversationStatus
 }: InboxConsoleProps) {
@@ -41,6 +43,10 @@ export default function InboxConsole({
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL CONVERSATIONS');
+  const [orderAddress, setOrderAddress] = useState('');
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [orderError, setOrderError] = useState('');
+  const [orderSuccess, setOrderSuccess] = useState('');
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'info'>('list');
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
@@ -179,6 +185,28 @@ export default function InboxConsole({
       pushTelemetryLog(`[ERROR] Failed to approve draft.`);
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleGenerateOrder = async () => {
+    if (!activeChat) return;
+    if (!orderAddress.trim()) {
+      setOrderError('Enter a shipping address first.');
+      return;
+    }
+    setOrderError('');
+    setIsCreatingOrder(true);
+    try {
+      await createOrderFromConversation(activeChat.id, { address: orderAddress });
+      onUpdateConversation(activeChat.id, { cart: undefined });
+      setOrderAddress('');
+      setOrderSuccess('Order created successfully.');
+      pushTelemetryLog(`[ORDER] Order created for ${getChatDisplayName(activeChat)}.`);
+      setTimeout(() => setOrderSuccess(''), 3000);
+    } catch (err: any) {
+      setOrderError(err.message || 'Failed to create order.');
+    } finally {
+      setIsCreatingOrder(false);
     }
   };
 
@@ -600,55 +628,73 @@ export default function InboxConsole({
             <span className="font-sans text-xs font-bold text-white uppercase tracking-wider">Back to Chat</span>
           </div>
           
-          {/* Panel 1: Detected SKU */}
+          {/* Panel 1: Cart (built automatically by the AI, confirmed into a real order by the merchant) */}
           <section className="p-4 border-b border-white/[0.05] space-y-3.5 shrink-0">
             <div className="flex items-center justify-between">
               <h4 className="font-sans text-[9px] font-extrabold text-white/50 uppercase tracking-widest">
-                Detected SKU
+                Cart
               </h4>
-              <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[8px] font-sans font-bold px-1.5 py-0.5 rounded">
-                ACTIVE
-              </span>
+              {activeChat?.cart && activeChat.cart.length > 0 && (
+                <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[8px] font-sans font-bold px-1.5 py-0.5 rounded">
+                  ACTIVE
+                </span>
+              )}
             </div>
 
-            {/* SKU Card */}
-            <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg space-y-3 max-h-[195px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-              <div className="flex gap-3">
-                {/* Simulated product photo */}
-                <div className="w-12 h-12 rounded-md border border-white/10 overflow-hidden bg-[#18181b] shrink-0">
-                  <img 
-                    src="https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=100&q=80" 
-                    alt="SM-99 Pro Series" 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div>
-                  <h5 className="font-sans text-xs font-bold text-white leading-snug">SM-99 Pro Carbon L</h5>
-                  <span className="font-sans text-[8px] text-white/30 uppercase block mt-0.5">PROFESSIONAL SERIES</span>
-                </div>
+            {!activeChat?.cart || activeChat.cart.length === 0 ? (
+              <div className="bg-[#121215] border border-white/[0.06] p-4 rounded-lg text-center">
+                <p className="text-[10px] text-white/30 font-sans">No items in cart yet.</p>
               </div>
+            ) : (
+              <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg space-y-3 max-h-[260px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+                {activeChat.cart.map((item) => {
+                  const product = products.find((p) => p.sku === item.sku);
+                  return (
+                    <div key={item.sku} className="flex justify-between items-center text-[10px] font-sans border-b border-white/[0.04] pb-2 last:border-0 last:pb-0">
+                      <div>
+                        <span className="text-white font-bold block">{product?.name || item.sku}</span>
+                        <span className="text-white/30">{item.quantity} x ${(product?.price || 0).toFixed(2)}</span>
+                      </div>
+                      <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
+                    </div>
+                  );
+                })}
 
-              <div className="grid grid-cols-2 gap-2 border-t border-white/[0.04] pt-2.5 text-[10px] font-sans">
-                <div>
-                  <span className="text-white/30 block text-[9px]">Stock Level</span>
-                  <span className="text-white font-bold block mt-0.5">42 Units Available</span>
+                <div className="flex justify-between items-center pt-2 border-t border-white/[0.06] text-xs font-sans font-bold text-white">
+                  <span>Total</span>
+                  <span>
+                    ${activeChat.cart.reduce((sum, item) => sum + (products.find((p) => p.sku === item.sku)?.price || 0) * item.quantity, 0).toFixed(2)}
+                  </span>
                 </div>
-                <div>
-                  <span className="text-white/30 block text-[9px]">Unit Price</span>
-                  <span className="text-white font-bold block mt-0.5">$1,299.00</span>
-                </div>
+
+                {orderError && (
+                  <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[9px] p-2 rounded text-center font-sans">
+                    {orderError}
+                  </div>
+                )}
+                {orderSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] p-2 rounded text-center font-sans">
+                    {orderSuccess}
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={orderAddress}
+                  onChange={(e) => setOrderAddress(e.target.value)}
+                  placeholder="Shipping address..."
+                  className="w-full bg-[#0a0a0c] border border-white/[0.06] rounded-md px-2.5 py-2 font-sans text-[10px] text-white placeholder-white/20 outline-none focus:border-white/20 transition-all"
+                />
+
+                <button
+                  onClick={handleGenerateOrder}
+                  disabled={isCreatingOrder}
+                  className="w-full bg-[#e2e2e2] hover:bg-white text-black font-sans font-bold text-[9px] uppercase tracking-wider py-2 rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <FileText className="h-3 w-3" /> {isCreatingOrder ? 'Creating...' : 'Generate Order'}
+                </button>
               </div>
-
-              <button 
-                onClick={() => {
-                  pushTelemetryLog(`[CART] Generated bulk order invoice for 5 units.`);
-                  setInputText("Here is the purchase link for the 5 units of SM-99 Professional Series Carbon L: http://checkout.shopmate.ai/invoice/ORD-8402");
-                }}
-                className="w-full bg-[#e2e2e2] hover:bg-white text-black font-sans font-bold text-[9px] uppercase tracking-wider py-2 rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <FileText className="h-3 w-3" /> Generate Order
-              </button>
-            </div>
+            )}
           </section>
 
           {/* Panel 2: AI Strategy */}

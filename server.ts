@@ -382,6 +382,109 @@ async function startServer() {
     }
   });
 
+  const toPublicOrder = (o: { id: string; conversationId: string | null; items: any; customerName: string; address: string; status: string; total: any; createdAt: Date }) => ({
+    id: o.id,
+    conversationId: o.conversationId,
+    items: o.items,
+    customerName: o.customerName,
+    address: o.address,
+    status: o.status === 'FULFILLED' ? 'Fulfilled' : o.status === 'CANCELLED' ? 'Cancelled' : 'Pending',
+    total: Number(o.total),
+    createdAt: o.createdAt,
+  });
+
+  // List this store's orders
+  app.get('/api/orders', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const orders = await prisma.order.findMany({
+        where: { storeId: req.auth!.storeId },
+        orderBy: { createdAt: 'desc' },
+      });
+      res.json(orders.map(toPublicOrder));
+    } catch (err: any) {
+      console.error('List orders error:', err);
+      res.status(500).json({ error: 'Failed to load orders' });
+    }
+  });
+
+  // Update an order's fulfillment status
+  app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { status } = req.body;
+      const mapped = status === 'Fulfilled' ? 'FULFILLED' : status === 'Cancelled' ? 'CANCELLED' : status === 'Pending' ? 'PENDING' : null;
+      if (!mapped) return res.status(400).json({ error: 'Invalid status' });
+
+      const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+      if (!order || order.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+      const updated = await prisma.order.update({ where: { id: order.id }, data: { status: mapped as any } });
+      res.json(toPublicOrder(updated));
+    } catch (err: any) {
+      console.error('Update order error:', err);
+      res.status(500).json({ error: 'Failed to update order' });
+    }
+  });
+
+  // Creates a real Order from a conversation's current AI-built cart. A deliberate
+  // merchant action (not automatic) — the AI can build a cart, but committing it to a
+  // real order/financial record needs explicit confirmation, same reasoning as the
+  // AI-Copilot pending-draft approval flow.
+  app.post('/api/conversations/:id/orders', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+      if (!conversation || conversation.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      const cart: { sku: string; quantity: number }[] = (conversation.cart as any) || [];
+      if (cart.length === 0) {
+        return res.status(400).json({ error: 'This conversation has no items in its cart yet' });
+      }
+
+      const { address } = req.body;
+      if (!address || !address.trim()) {
+        return res.status(400).json({ error: 'A shipping address is required' });
+      }
+      const customerName = req.body.customerName || conversation.customerName || 'Customer';
+
+      const products = await prisma.product.findMany({
+        where: { storeId: conversation.storeId, sku: { in: cart.map((item) => item.sku) } },
+      });
+
+      const items = cart.map((cartItem) => {
+        const product = products.find((p) => p.sku === cartItem.sku);
+        return {
+          sku: cartItem.sku,
+          name: product?.name || cartItem.sku,
+          price: product ? Number(product.price) : 0,
+          quantity: cartItem.quantity,
+        };
+      });
+      const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+      const order = await prisma.order.create({
+        data: {
+          storeId: conversation.storeId,
+          conversationId: conversation.id,
+          items,
+          customerName,
+          address,
+          status: 'PENDING',
+          total,
+        },
+      });
+
+      // Checked out — clear the conversation's cart.
+      await prisma.conversation.update({ where: { id: conversation.id }, data: { cart: null } });
+
+      res.status(201).json(toPublicOrder(order));
+    } catch (err: any) {
+      console.error('Create order error:', err);
+      res.status(500).json({ error: 'Failed to create order' });
+    }
+  });
+
   // Get this store's AI persona
   app.get('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
     try {
@@ -501,9 +604,27 @@ async function startServer() {
     await prisma.message.create({
       data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any, pending: !isAutopilot },
     });
+
+    // Build the cart from the AI's detected intent — only ever adds a real, in-stock
+    // catalog item, never invents one. This is separate from actually placing an order,
+    // which the merchant confirms explicitly (see POST /api/conversations/:id/orders).
+    const conversationData: any = { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint };
+    if (result.cartAction?.action === 'add' && result.cartAction.sku) {
+      const product = products.find((p) => p.sku === result.cartAction.sku);
+      if (product && product.inventory > 0) {
+        const currentConversation = await prisma.conversation.findUnique({ where: { id: conversation.id } });
+        const existingCart: { sku: string; quantity: number }[] = (currentConversation?.cart as any) || [];
+        const existingItem = existingCart.find((item) => item.sku === product.sku);
+        const updatedCart = existingItem
+          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity: item.quantity + 1 } : item))
+          : [...existingCart, { sku: product.sku, quantity: 1 }];
+        conversationData.cart = updatedCart;
+      }
+    }
+
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint },
+      data: conversationData,
     });
 
     if (isAutopilot && conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {

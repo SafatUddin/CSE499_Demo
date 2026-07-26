@@ -201,3 +201,36 @@ export function selectFacebookPage(pendingToken: string, pageId: string) {
     body: JSON.stringify({ pendingToken, pageId }),
   });
 }
+
+export interface ApiOrderItem {
+  sku: string;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+export interface ApiOrder {
+  id: string;
+  conversationId: string | null;
+  items: ApiOrderItem[];
+  customerName: string;
+  address: string;
+  status: 'Pending' | 'Fulfilled' | 'Cancelled';
+  total: number;
+  createdAt: string;
+}
+
+export function listOrders() {
+  return request<ApiOrder[]>('/api/orders');
+}
+
+export function updateOrderStatus(id: string, status: 'Pending' | 'Fulfilled' | 'Cancelled') {
+  return request<ApiOrder>(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+}
+
+export function createOrderFromConversation(conversationId: string, input: { customerName?: string; address: string }) {
+  return request<ApiOrder>(`/api/conversations/${conversationId}/orders`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}

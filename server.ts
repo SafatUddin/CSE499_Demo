@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
-import { ai } from './server/gemini';
+import { ollamaEnabled, warmUpOllama } from './server/ollama';
 import { generateAgentReply } from './server/agent';
 import {
   verifyMetaSignature,
@@ -559,6 +559,7 @@ async function startServer() {
       messages,
       isComplaint: c.isComplaint,
       cart: c.cart || undefined,
+      detectedAddress: c.detectedAddress || undefined,
     };
   }
 
@@ -596,7 +597,9 @@ async function startServer() {
       inventory: p.inventory,
       status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
     }));
-    const history = recentMessages.slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+    // Cap history sent to the model — an unbounded prompt grows with every message in a
+    // long-running conversation, which slows down local LLM inference noticeably.
+    const history = recentMessages.slice(0, -1).slice(-10).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
 
     const result = await generateAgentReply({ message: customerText, history, persona, catalog });
     const isAutopilot = conversation.status === 'AI_MANAGED';
@@ -620,6 +623,10 @@ async function startServer() {
           : [...existingCart, { sku: product.sku, quantity: 1 }];
         conversationData.cart = updatedCart;
       }
+    }
+
+    if (result.extractedAddress && result.extractedAddress.trim()) {
+      conversationData.detectedAddress = result.extractedAddress.trim();
     }
 
     await prisma.conversation.update({
@@ -964,7 +971,7 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', geminiActive: !!ai });
+    res.json({ status: 'ok', ollamaEnabled });
   });
 
   // Static privacy policy page (required by Meta's App Basic Settings to enable
@@ -1029,6 +1036,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    warmUpOllama();
   });
 }
 

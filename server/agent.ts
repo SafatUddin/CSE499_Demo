@@ -1,5 +1,4 @@
-import { Type } from '@google/genai';
-import { ai } from './gemini';
+import { ollamaChatJSON, ollamaEnabled } from './ollama';
 
 export interface AgentPersona {
   tone?: string;
@@ -25,6 +24,7 @@ export interface AgentReply {
   isComplaint: boolean;
   cartAction: { action: string; sku: string };
   suggestedProductsSKUs: string[];
+  extractedAddress: string;
 }
 
 export async function generateAgentReply({
@@ -61,11 +61,12 @@ You must respond with a JSON object containing the exact properties specified in
 2. isComplaint: Set to true if the customer is expressing dissatisfaction, complaining, reporting issues, or requesting refunds/exchanges.
 3. cartAction: An object with 'action' ('add' or 'none') and 'sku' (string). Set action to 'add' if the customer expresses explicit intent to buy, purchase, or add an item to their cart, and specify the product SKU.
 4. suggestedProductsSKUs: An array of strings representing product SKUs to cross-sell or recommend as alternatives based on their interest.
+5. extractedAddress: If the customer has stated a shipping/delivery address anywhere in the conversation (street, city, or similarly specific delivery details), return it here as a single string. Otherwise return an empty string. Never invent or guess an address.
 
 Core Directives:
 1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
 2. Keep your answers concise, engaging, and professional.
-3. Under no circumstances mention that you are a language model or AI assistant from Google. You are ShopMate AI, built natively for this merchant.
+3. Under no circumstances mention that you are a language model or AI assistant, or name any underlying model/vendor. You are ShopMate AI, built natively for this merchant.
 4. If a product is out of stock (inventory is 0), do not add it to the cart; instead, politely inform the customer and suggest an alternative product that is in stock.
 5. Support multilingual queries naturally (Bangla, English, and "Banglish" - romanized/code-mixed Bangla). Respond in the same language register the customer used.
 
@@ -81,75 +82,63 @@ ${customInst}
 Available Product Catalog:
 ${catalogText || 'No products registered in catalog.'}`;
 
-  // Assemble chat format for Gemini API
-  const contentsPayload: any[] = [];
+  // Assemble chat message history for Ollama's /api/chat
+  const chatMessages = [
+    { role: 'system' as const, content: systemInstruction },
+    ...history.map((h) => ({
+      role: (h.sender === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: h.text,
+    })),
+    { role: 'user' as const, content: message },
+  ];
 
-  // Map history to part structure
-  history.forEach((h) => {
-    contentsPayload.push({
-      role: h.sender === 'customer' ? 'user' : 'model',
-      parts: [{ text: h.text }],
-    });
-  });
-
-  // Push latest user message
-  contentsPayload.push({
-    role: 'user',
-    parts: [{ text: message }],
-  });
-
-  // If AI client is configured, run the live model
-  if (ai) {
+  // If the local Ollama model is reachable, run it
+  if (ollamaEnabled) {
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: contentsPayload,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
+      const content = await ollamaChatJSON(chatMessages, {
+        type: 'object',
+        properties: {
+          replyText: {
+            type: 'string',
+            description: 'The conversational response to the customer.'
+          },
+          isComplaint: {
+            type: 'boolean',
+            description: 'Whether the user is complaining or dissatisfied.'
+          },
+          cartAction: {
+            type: 'object',
+            description: 'Action to build customer cart.',
             properties: {
-              replyText: {
-                type: Type.STRING,
-                description: 'The conversational response to the customer. Under no circumstances mention you are an AI from Google.'
+              action: {
+                type: 'string',
+                description: "Can be 'add' or 'none'. Set to 'add' if customer wants to purchase or checkout."
               },
-              isComplaint: {
-                type: Type.BOOLEAN,
-                description: 'Whether the user is complaining or dissatisfied.'
-              },
-              cartAction: {
-                type: Type.OBJECT,
-                description: 'Action to build customer cart.',
-                properties: {
-                  action: {
-                    type: Type.STRING,
-                    description: "Can be 'add' or 'none'. Set to 'add' if customer wants to purchase or checkout."
-                  },
-                  sku: {
-                    type: Type.STRING,
-                    description: 'The exact SKU of the product to add to cart, e.g., NX-402-B.'
-                  }
-                },
-                required: ['action', 'sku']
-              },
-              suggestedProductsSKUs: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: 'SKUs of relevant products to suggest for cross-sell.'
+              sku: {
+                type: 'string',
+                description: 'The exact SKU of the product to add to cart, e.g., NX-402-B.'
               }
             },
-            required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs']
+            required: ['action', 'sku']
+          },
+          suggestedProductsSKUs: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'SKUs of relevant products to suggest for cross-sell.'
+          },
+          extractedAddress: {
+            type: 'string',
+            description: 'A shipping/delivery address the customer has stated in the conversation, verbatim. Empty string if none was given.'
           }
         },
+        required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs', 'extractedAddress']
       });
 
-      if (response.text) {
-        return JSON.parse(response.text.trim()) as AgentReply;
+      if (content) {
+        return JSON.parse(content.trim()) as AgentReply;
       }
-    } catch (geminiError: any) {
-      console.error('Gemini call failed, falling back to simulated logic:', geminiError.message);
+    } catch (ollamaError: any) {
+      console.error('Ollama call failed, falling back to simulated logic:', ollamaError.message);
       // Fall through to fallback simulator
     }
   }
@@ -250,5 +239,6 @@ Would you like me to add this to your active shopping cart?`;
     isComplaint,
     cartAction,
     suggestedProductsSKUs,
+    extractedAddress: '',
   };
 }

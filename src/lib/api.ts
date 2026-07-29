@@ -123,6 +123,7 @@ export interface ApiConversation {
   messages: ApiChatMessage[];
   isComplaint?: boolean;
   cart?: { sku: string; quantity: number }[];
+  detectedAddress?: string;
 }
 
 export function listConversations() {

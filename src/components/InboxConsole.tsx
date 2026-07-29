@@ -106,6 +106,14 @@ export default function InboxConsole({
     scrollToBottom();
   }, [activeChat?.messages, isTyping]);
 
+  // Pre-fill (never overwrite) the order address from what the AI detected in the
+  // conversation — the merchant can still edit it before confirming the order.
+  useEffect(() => {
+    if (activeChat?.detectedAddress && !orderAddress.trim()) {
+      setOrderAddress(activeChat.detectedAddress);
+    }
+  }, [activeChat?.id, activeChat?.detectedAddress]);
+
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || !activeChat) return;
 

@@ -102,6 +102,9 @@ model Conversation {
   status         ConversationStatus @default(AI_MANAGED)
   isComplaint    Boolean            @default(false)
   cart           Json?
+  // Shipping address the AI has extracted from the conversation, if the customer
+  // mentioned one — pre-fills (but doesn't auto-submit) the Generate Order form.
+  detectedAddress String?
   messages       Message[]
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())

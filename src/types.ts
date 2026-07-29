@@ -41,6 +41,7 @@ export interface Conversation {
   lastProductViewed?: string;
   isComplaint?: boolean;
   cart?: { sku: string; quantity: number }[];
+  detectedAddress?: string;
   suggestedProducts?: string[];
 }
 

@@ -2,6 +2,14 @@
 
 Plain-language history of work on ShopMate AI, for humans (not git blame). See `CLAUDE.md` for current project state and `PLANNING.md` for the roadmap.
 
+## 2026-07-29 — Shipping address auto-detection, and swapping Gemini for a self-hosted local model
+
+- The AI now extracts a shipping address from the conversation (extending the same structured-output pattern already used for cart detection) and pre-fills it into the "Generate Order" address field — still editable/confirmable by the merchant, never auto-submitted.
+- Replaced Google Gemini with a self-hosted Ollama model (`qwen2.5:3b`, chosen for decent Bangla/Banglish support) to remove any dependency on a paid third-party API. `server/gemini.ts` is gone; `server/ollama.ts` calls Ollama's `/api/chat` with a JSON schema `format` for the same structured replies Gemini used to produce.
+- For production, the Node app on Railway (CPU-only, no GPU) reaches Ollama running on a local GPU machine over a Tailscale Funnel tunnel (a public HTTPS URL that proxies to `localhost:11434`) rather than running inference on Railway itself, since CPU inference was going to be far slower. This makes production AI replies dependent on that machine staying on and connected — a deliberate tradeoff to keep AI inference cost at $0 and fast, accepted for the capstone's beta-testing phase.
+- Fixed two latency issues found while wiring this up: Ollama was unloading the model from VRAM after 5 minutes idle (a ~90s reload tax on the next message) — fixed with `keep_alive: -1` plus a warm-up call on server boot; and the conversation history sent to the model was unbounded and slowing down long conversations — capped to the last 10 messages.
+- Also hit and fixed an Ollama-specific gotcha: it silently 403s any request whose `Host` header isn't `localhost`/`127.0.0.1` (anti-DNS-rebinding protection), which broke every request through the Funnel tunnel. Fixed by binding Ollama to `0.0.0.0` (`OLLAMA_HOST`) instead of trying to allow-list origins (`OLLAMA_ORIGINS` doesn't affect this check at all — a red herring in some online guides).
+
 ## 2026-07-25/26 — Self-serve Facebook connect, real names, notifications, and orders
 
 - Built the real "Connect with Facebook" OAuth flow (Option B from the roadmap), replacing the manual "paste a token into `.env`" setup: OAuth popup → code exchange for a Page Access Token → a picker step if the merchant manages multiple Pages → auto-subscribe the webhook via the Graph API → the token stored encrypted (AES-256-GCM) in the database. The old manual-token connection still works as a fallback. Worked through several one-time Meta app configuration requirements along the way (App Domains, a real hosted Privacy Policy page, and the Facebook Login product's own "Valid OAuth Redirect URIs" setting, which is separate from the Messenger webhook's callback URL).

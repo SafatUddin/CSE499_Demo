@@ -18,6 +18,7 @@ import {
   updatePersona,
   listConversations,
   updateConversationStatus,
+  listChannels,
   AuthResponse,
   PublicMerchant,
   PublicStore,
@@ -140,6 +141,17 @@ export default function App() {
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [persona, setPersona] = useState<AIPersona>(DEFAULT_AI_PERSONA);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // Which channel types actually have a connected Channel row right now — the Inbox
+  // only shows chat for channels a merchant has genuinely connected, not just any
+  // conversation that happens to exist in the DB (e.g. a channel disconnected after
+  // real messages already came in).
+  const [connectedPlatforms, setConnectedPlatforms] = useState<Set<string>>(new Set());
+
+  const refreshChannels = () => {
+    listChannels()
+      .then((channels) => setConnectedPlatforms(new Set(channels.filter((c) => c.connected).map((c) => c.type))))
+      .catch((err) => console.error('Failed to load channels:', err));
+  };
 
   // Load real catalog + persona + conversations from the backend once we know who's logged in
   useEffect(() => {
@@ -149,17 +161,24 @@ export default function App() {
       .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions }))
       .catch((err) => console.error('Failed to load persona:', err));
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
+    refreshChannels();
   }, [merchant]);
 
-  // Poll for new conversations/messages (e.g. real incoming Facebook messages) so the
-  // Inbox reflects them without requiring a manual page refresh.
+  // Poll for new conversations/messages (e.g. real incoming Facebook messages) and channel
+  // connection state so the Inbox reflects them without requiring a manual page refresh.
   useEffect(() => {
     if (!merchant) return;
     const interval = setInterval(() => {
       listConversations().then(setConversations).catch((err) => console.error('Failed to refresh conversations:', err));
+      refreshChannels();
     }, 5000);
     return () => clearInterval(interval);
   }, [merchant]);
+
+  // Conversations belonging to a channel that isn't currently connected shouldn't appear
+  // in the Inbox — connection state (Integrations Hub) is the source of truth for whether
+  // a channel's chat interface should be visible at all.
+  const visibleConversations = conversations.filter((c) => connectedPlatforms.has(c.platform));
 
   // Navigation controller
   const handleNavigate = (tab: Tab) => {
@@ -243,6 +262,34 @@ export default function App() {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...updated } : chat)));
   };
 
+  // Shared by the 'inbox' tab and the authenticated default fallback below.
+  const renderInbox = () => {
+    if (connectedPlatforms.size === 0) {
+      return (
+        <div className="w-full flex-grow flex flex-col items-center justify-center text-center px-6 h-full">
+          <h3 className="font-sans font-bold text-sm text-white uppercase tracking-wider">No Channels Connected</h3>
+          <p className="font-sans text-xs text-white/40 max-w-xs mt-2 leading-relaxed">
+            Connect a channel like Facebook Messenger to start receiving and replying to real customer conversations here.
+          </p>
+          <button
+            onClick={() => handleNavigate('integrations')}
+            className="mt-5 bg-white hover:bg-white/90 text-black font-sans font-extrabold text-[10px] uppercase tracking-wider px-4 py-2 rounded transition-all cursor-pointer"
+          >
+            Go to Integrations
+          </button>
+        </div>
+      );
+    }
+    return (
+      <InboxConsole
+        conversations={visibleConversations}
+        products={products}
+        onUpdateConversation={handleUpdateConversation}
+        onUpdateConversationStatus={handleUpdateConversationStatus}
+      />
+    );
+  };
+
   // Main page rendering logic based on active tab and authentication
   const renderPageContent = () => {
     if (!isAuthenticated) {
@@ -266,14 +313,7 @@ export default function App() {
     // Authenticated views
     switch (activeTab) {
       case 'inbox':
-        return (
-          <InboxConsole
-            conversations={conversations}
-            products={products}
-            onUpdateConversation={handleUpdateConversation}
-            onUpdateConversationStatus={handleUpdateConversationStatus}
-          />
-        );
+        return renderInbox();
       case 'catalog':
         return (
           <ProductCatalog
@@ -308,14 +348,7 @@ export default function App() {
           />
         );
       default:
-        return (
-          <InboxConsole
-            conversations={conversations}
-            products={products}
-            onUpdateConversation={handleUpdateConversation}
-            onUpdateConversationStatus={handleUpdateConversationStatus}
-          />
-        );
+        return renderInbox();
     }
   };
 

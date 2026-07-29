@@ -562,8 +562,9 @@ async function startServer() {
     };
   }
 
-  // Prefers the per-store token from a real self-serve OAuth connection; falls back to
-  // the single global env-var token used by the manual-token connection path.
+  // Only the real self-serve OAuth connection's per-store token is used — there is no
+  // manual/env-var fallback, so a store with no completed Facebook connection simply
+  // can't send or fetch anything via Messenger.
   async function getPageAccessTokenForStore(storeId: string): Promise<string | null> {
     const channel = await prisma.channel.findUnique({ where: { storeId_type: { storeId, type: 'FACEBOOK' } } });
     if (channel?.connected && channel.credentials) {
@@ -574,7 +575,7 @@ async function startServer() {
         console.error('Failed to decrypt stored Facebook token:', err);
       }
     }
-    return process.env.META_PAGE_ACCESS_TOKEN || null;
+    return null;
   }
 
   // Generates an AI reply for a conversation and either delivers it immediately (Copilot
@@ -874,26 +875,15 @@ async function startServer() {
     }
 
     // A real self-serve OAuth connection always has a Channel row keyed by this exact
-    // Page ID already (see finalizeFacebookConnection), so this lookup routes the event
-    // to the right store automatically. The fallback below only fires for a Page that's
-    // never been connected through either flow — e.g. the older manual-token setup.
-    let channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', externalId: pageId } });
-    let storeId: string;
-    if (channel) {
-      storeId = channel.storeId;
-    } else {
-      const store = await prisma.store.findFirst({ orderBy: { createdAt: 'asc' } });
-      if (!store) {
-        console.error('No store found to attach the Facebook channel to');
-        return;
-      }
-      storeId = store.id;
-      await prisma.channel.upsert({
-        where: { storeId_type: { storeId, type: 'FACEBOOK' } },
-        update: { connected: true, externalId: pageId },
-        create: { storeId, type: 'FACEBOOK', connected: true, externalId: pageId },
-      });
+    // Page ID (see finalizeFacebookConnection). There is no fallback: a Page that hasn't
+    // been connected through that flow has no known store to attach the message to, so
+    // it's dropped rather than guessed at.
+    const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
+    if (!channel) {
+      console.error('Ignoring Messenger event for unconnected Page:', pageId);
+      return;
     }
+    const storeId = channel.storeId;
 
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid },

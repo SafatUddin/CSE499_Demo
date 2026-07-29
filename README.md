@@ -1,6 +1,12 @@
+## Live Site
+
+The deployed app is live on Railway: [shopmateai-production.up.railway.app](https://shopmateai-production.up.railway.app)
+
+Demo login: `merchant@shopmate.ai` / `password123`
+
 ## App Demo
 
-View the app demo in Google AI Studio: [App Demo Link](https://ai.studio/apps/ca45ede0-e90d-492b-b5d5-453d8582c725)
+View the original AI-Studio-generated frontend demo: [App Demo Link](https://ai.studio/apps/ca45ede0-e90d-492b-b5d5-453d8582c725)
 
 ## Run Locally
 

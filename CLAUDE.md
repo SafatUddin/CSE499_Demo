@@ -12,7 +12,7 @@ A CSE499 capstone: an AI sales agent merchants connect to Messenger/Instagram/Wh
 - **Only commit when explicitly asked in that turn.** Don't infer commit consent from an ambiguous "yes" to a broader question (e.g. "yes" to "push and redeploy?" is not "yes, commit this").
 - Don't invent new UI styling — reuse existing patterns already in the component/file (error banners, loading-button states, etc. all follow patterns already established in `LoginPage.tsx`/`SignupPage.tsx`/the persona-save button). Anything genuinely new should follow `DESIGN.md`.
 - This repo has a collaborator (not just the primary user) — treat force-pushing/rewriting shared history as needing explicit confirmation each time, and warn that the collaborator will need to `git fetch && git reset --hard origin/main` to resync afterward.
-- **A second machine (`d:\CSE499_Demo`) also works against this same repo and the same shared Supabase DB.** All commits so far, from both machines, use the identical git email (`safwanismaunamin@gmail.com`) with different `user.name` (`safwan` here, `aspiroo` there) — unclear whether that's the same person on two machines or a teammate sharing git config; unresolved as of this writing. That machine has applied migrations directly to the shared DB without pushing the corresponding schema/code (see `Conversation.orderConfirmationRequested`/`orderConfirmed`/`orderSummaryShown`/`awaitingQuantityFor` below) — always `git fetch` and check for DB schema drift (`npx prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`) before assuming this machine's `schema.prisma` is authoritative.
+- **A second machine (`d:\CSE499_Demo`) also works against this same repo and the same shared Supabase DB.** All commits so far, from both machines, use the identical git email (`safwanismaunamin@gmail.com`) with different `user.name` (`safwan` here, `aspiroo` there). It previously applied migrations directly to the shared DB (adding `Conversation.orderConfirmationRequested`/`orderConfirmed`/`orderSummaryShown`/`awaitingQuantityFor`) without pushing the corresponding code — that's since been reconciled (as of 2026-07-31, that machine isn't actively building anything and both machines' commits are pushed/synced on `origin/main`) but the pattern can recur. Always `git fetch` and check for DB schema drift (`npx prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`) before assuming this machine's `schema.prisma` is authoritative.
 
 ## Infrastructure (as of this writing)
 
@@ -42,6 +42,14 @@ A CSE499 capstone: an AI sales agent merchants connect to Messenger/Instagram/Wh
 - ❌ "Forgot password" intentionally disabled (shows a "not available yet" message) rather than wired to the DB — the old demo behavior let anyone reset any account's password just by typing an email, which would be a real account-takeover hole on the public Railway URL. Needs real email verification before it's built for real.
 - ❌ Instagram/WhatsApp/Shopify/WooCommerce are still mock toggles — only Facebook has a real connection (both manual-token and self-serve OAuth). Instagram messaging is technically reachable through the same Facebook Login token (`instagram_basic`/`instagram_manage_messages` scopes) but isn't wired up yet.
 - ❌ Archive/Spam filter tabs in the Inbox are still non-functional (would need an `isArchived`/`isSpam` schema addition plus real UI actions to set them).
+
+## Next objectives (as of 2026-07-31)
+
+Beta testing is imminent — a handful of testers, days-scale timeline. In priority order:
+
+1. **Make the Ollama/Tailscale pipeline survive reboots and closed terminals.** Right now, after a reboot, Ollama auto-starts via its own Startup-folder shortcut and should pick up the persisted `OLLAMA_HOST=0.0.0.0:11434` user env var automatically — untested end-to-end with an actual reboot. The Tailscale Funnel tunnel (`tailscale funnel --bg 11434`) needs to be *registered* as a background funnel so it doesn't depend on a terminal window staying open; last confirmed state had it running in the foreground in a manually-opened PowerShell window, which will drop the moment that window closes. Verify both survive a real reboot before beta starts.
+2. **Prevent this PC from sleeping** during any window beta testers might be active — sleep silently kills the whole AI pipeline (falls back to the rule-based simulator, not a crash, but a noticeably dumber bot with no warning).
+3. Model accuracy (occasional wrong answers, occasional confirmation-detection misses in the new order-confirmation flow) — intentionally deferred, not a beta blocker.
 
 ## Known environment quirks
 

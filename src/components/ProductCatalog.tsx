@@ -44,7 +44,8 @@ export default function ProductCatalog({
   const [personaTone, setPersonaTone] = useState(persona.tone);
   const [personaStyle, setPersonaStyle] = useState<'bullets' | 'narrative'>(persona.style);
   const [personaInstructions, setPersonaInstructions] = useState(persona.customInstructions);
-  
+  const [autoFinalizeOrdersAlways, setAutoFinalizeOrdersAlways] = useState(!!persona.autoFinalizeOrdersAlways);
+
   const [isSavingPersona, setIsSavingPersona] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [addProductError, setAddProductError] = useState('');
@@ -102,7 +103,8 @@ export default function ProductCatalog({
       await onSavePersona({
         tone: personaTone,
         style: personaStyle,
-        customInstructions: personaInstructions
+        customInstructions: personaInstructions,
+        autoFinalizeOrdersAlways
       });
       setShowSaveSuccess(true);
       setTimeout(() => {
@@ -364,6 +366,45 @@ export default function ProductCatalog({
               className="w-full bg-[#121215] border border-white/[0.06] rounded-lg p-3 font-sans text-xs text-white placeholder-white/20 outline-none focus:border-white/20 transition-all resize-none"
               placeholder="e.g. Free shipping on orders over $150. Suggest adding Void Audio One."
             />
+          </div>
+
+          {/* Order auto-finalization scope */}
+          <div className="space-y-1.5 text-left">
+            <label className="text-[9px] text-white/40 uppercase tracking-widest block font-bold">
+              Order Auto-Finalization
+            </label>
+            <p className="text-[10px] text-white/35 leading-relaxed">
+              When a customer explicitly confirms their order, should the AI place it for real automatically?
+            </p>
+            <div className="grid grid-cols-2 bg-[#121215] border border-white/[0.06] p-0.5 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setAutoFinalizeOrdersAlways(false)}
+                className={`py-1.5 rounded-md font-sans text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                  !autoFinalizeOrdersAlways
+                    ? 'bg-white/[0.08] text-white'
+                    : 'text-white/45 hover:text-white'
+                }`}
+              >
+                AI Managed Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutoFinalizeOrdersAlways(true)}
+                className={`py-1.5 rounded-md font-sans text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                  autoFinalizeOrdersAlways
+                    ? 'bg-white/[0.08] text-white'
+                    : 'text-white/45 hover:text-white'
+                }`}
+              >
+                Always
+              </button>
+            </div>
+            <p className="text-[9px] text-white/25 leading-relaxed">
+              {autoFinalizeOrdersAlways
+                ? 'The AI can finalize a confirmed order even when a conversation\'s Copilot is set to Active (manual review).'
+                : 'The AI only auto-finalizes when a conversation\'s Copilot is set to AI Managed (autopilot). In Active mode, the merchant still confirms via Generate Order.'}
+            </p>
           </div>
 
           {/* Model redeployment trigger */}

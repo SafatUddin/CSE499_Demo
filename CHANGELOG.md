@@ -2,6 +2,14 @@
 
 Plain-language history of work on ShopMate AI, for humans (not git blame). See `CLAUDE.md` for current project state and `PLANNING.md` for the roadmap.
 
+## 2026-07-30/31 — Customer-driven order confirmation (admin-independent)
+
+- The AI can now finalize a real order entirely from the conversation, with no merchant click required: once a customer's cart and shipping address are both known, the AI presents a summary and asks them to confirm; an explicit "yes" auto-creates a real `Order` and clears the cart.
+- Added a new AI Persona setting, "Order Auto-Finalization" (`Store.autoFinalizeOrdersAlways`): default "AI Managed Only" mirrors the existing Copilot autopilot/manual split (auto-finalize only fires in AI Managed conversations); switching it to "Always" lets the AI finalize confirmed orders even in Active/manually-reviewed conversations.
+- Guardrails: a customer's "yes" only counts if the AI genuinely asked for confirmation first (tracked via `Conversation.orderConfirmationRequested`), and the backend independently re-checks that a cart and address actually exist before creating anything — never trusts the model's claim alone.
+- Fixed a real bug hit while building this: the model was re-emitting a cart "add" for the same item on every subsequent turn (e.g. while giving the address, while confirming), silently inflating the order quantity. Fixed by explicitly telling the model what's already in the cart each turn, instead of leaving it to infer that from conversation history alone.
+- Note: `Conversation.orderConfirmationRequested` / `orderConfirmed` / `orderSummaryShown` / `awaitingQuantityFor` were originally added directly against the shared DB from another machine (`d:\CSE499_Demo`), which is independently building overlapping order-confirmation logic there. This implementation uses those same DB fields but is a separate, not-yet-reconciled implementation — expect to need to merge the two once the other machine's code is pushed.
+
 ## 2026-07-29 — Shipping address auto-detection, and swapping Gemini for a self-hosted local model
 
 - The AI now extracts a shipping address from the conversation (extending the same structured-output pattern already used for cart detection) and pre-fills it into the "Generate Order" address field — still editable/confirmable by the merchant, never auto-submitted.

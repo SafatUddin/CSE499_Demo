@@ -94,13 +94,14 @@ export interface ApiPersona {
   tone: string;
   style: string;
   customInstructions: string;
+  autoFinalizeOrdersAlways: boolean;
 }
 
 export function getPersona() {
   return request<ApiPersona>('/api/persona');
 }
 
-export function updatePersona(input: { tone: string; style: string; customInstructions: string }) {
+export function updatePersona(input: { tone: string; style: string; customInstructions: string; autoFinalizeOrdersAlways?: boolean }) {
   return request<ApiPersona>('/api/persona', { method: 'PUT', body: JSON.stringify(input) });
 }
 
@@ -124,6 +125,8 @@ export interface ApiConversation {
   isComplaint?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
+  orderConfirmed?: boolean;
+  orderConfirmationRequested?: boolean;
 }
 
 export function listConversations() {

@@ -158,7 +158,7 @@ export default function App() {
     if (!merchant) return;
     listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
     getPersona()
-      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions }))
+      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways }))
       .catch((err) => console.error('Failed to load persona:', err));
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
     refreshChannels();
@@ -236,7 +236,7 @@ export default function App() {
   // Persona save
   const handleSavePersona = async (newPersona: AIPersona) => {
     const saved = await updatePersona(newPersona);
-    setPersona({ tone: saved.tone, style: saved.style as AIPersona['style'], customInstructions: saved.customInstructions });
+    setPersona({ tone: saved.tone, style: saved.style as AIPersona['style'], customInstructions: saved.customInstructions, autoFinalizeOrdersAlways: saved.autoFinalizeOrdersAlways });
   };
 
   // Conversations updating

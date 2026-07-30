@@ -430,6 +430,58 @@ async function startServer() {
   // merchant action (not automatic) — the AI can build a cart, but committing it to a
   // real order/financial record needs explicit confirmation, same reasoning as the
   // AI-Copilot pending-draft approval flow.
+  // Shared by the manual "Generate Order" endpoint and the AI's auto-finalize path
+  // (see generateAndStoreAgentReply) — builds line items from the current catalog,
+  // creates the Order row, and clears the conversation's cart.
+  async function createOrderForConversation(
+    conversation: { id: string; storeId: string; customerName: string | null },
+    cart: { sku: string; quantity: number }[],
+    address: string,
+    customerNameOverride?: string
+  ) {
+    const products = await prisma.product.findMany({
+      where: { storeId: conversation.storeId, sku: { in: cart.map((item) => item.sku) } },
+    });
+
+    const items = cart.map((cartItem) => {
+      const product = products.find((p) => p.sku === cartItem.sku);
+      return {
+        sku: cartItem.sku,
+        name: product?.name || cartItem.sku,
+        price: product ? Number(product.price) : 0,
+        quantity: cartItem.quantity,
+      };
+    });
+    const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    const order = await prisma.order.create({
+      data: {
+        storeId: conversation.storeId,
+        conversationId: conversation.id,
+        items,
+        customerName: customerNameOverride || conversation.customerName || 'Customer',
+        address,
+        status: 'PENDING',
+        total,
+      },
+    });
+
+    // Checked out — clear the conversation's cart and reset order-flow state so a
+    // later purchase in the same conversation starts a fresh confirmation cycle.
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        cart: null,
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderSummaryShown: false,
+        awaitingQuantityFor: null,
+      },
+    });
+
+    return order;
+  }
+
   app.post('/api/conversations/:id/orders', requireAuth, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
@@ -446,38 +498,8 @@ async function startServer() {
       if (!address || !address.trim()) {
         return res.status(400).json({ error: 'A shipping address is required' });
       }
-      const customerName = req.body.customerName || conversation.customerName || 'Customer';
 
-      const products = await prisma.product.findMany({
-        where: { storeId: conversation.storeId, sku: { in: cart.map((item) => item.sku) } },
-      });
-
-      const items = cart.map((cartItem) => {
-        const product = products.find((p) => p.sku === cartItem.sku);
-        return {
-          sku: cartItem.sku,
-          name: product?.name || cartItem.sku,
-          price: product ? Number(product.price) : 0,
-          quantity: cartItem.quantity,
-        };
-      });
-      const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
-      const order = await prisma.order.create({
-        data: {
-          storeId: conversation.storeId,
-          conversationId: conversation.id,
-          items,
-          customerName,
-          address,
-          status: 'PENDING',
-          total,
-        },
-      });
-
-      // Checked out — clear the conversation's cart.
-      await prisma.conversation.update({ where: { id: conversation.id }, data: { cart: null } });
-
+      const order = await createOrderForConversation(conversation, cart, address, req.body.customerName);
       res.status(201).json(toPublicOrder(order));
     } catch (err: any) {
       console.error('Create order error:', err);
@@ -492,7 +514,12 @@ async function startServer() {
       if (!store) {
         return res.status(404).json({ error: 'Store not found' });
       }
-      res.json({ tone: store.tone, style: store.style, customInstructions: store.customInstructions });
+      res.json({
+        tone: store.tone,
+        style: store.style,
+        customInstructions: store.customInstructions,
+        autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
+      });
     } catch (err: any) {
       console.error('Fetch persona error:', err);
       res.status(500).json({ error: 'Failed to load persona' });
@@ -502,15 +529,25 @@ async function startServer() {
   // Update this store's AI persona
   app.put('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { tone, style, customInstructions } = req.body;
+      const { tone, style, customInstructions, autoFinalizeOrdersAlways } = req.body;
       if (!tone || !style) {
         return res.status(400).json({ error: 'Tone and style are required' });
       }
       const store = await prisma.store.update({
         where: { id: req.auth!.storeId },
-        data: { tone, style, customInstructions: customInstructions ?? '' },
+        data: {
+          tone,
+          style,
+          customInstructions: customInstructions ?? '',
+          autoFinalizeOrdersAlways: !!autoFinalizeOrdersAlways,
+        },
       });
-      res.json({ tone: store.tone, style: store.style, customInstructions: store.customInstructions });
+      res.json({
+        tone: store.tone,
+        style: store.style,
+        customInstructions: store.customInstructions,
+        autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
+      });
     } catch (err: any) {
       console.error('Update persona error:', err);
       res.status(500).json({ error: 'Failed to update persona' });
@@ -560,6 +597,8 @@ async function startServer() {
       isComplaint: c.isComplaint,
       cart: c.cart || undefined,
       detectedAddress: c.detectedAddress || undefined,
+      orderConfirmed: !!c.orderConfirmed,
+      orderConfirmationRequested: !!c.orderConfirmationRequested,
     };
   }
 
@@ -583,12 +622,13 @@ async function startServer() {
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
   async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
-    const [store, products, recentMessages] = await Promise.all([
+    const [store, products, recentMessages, currentConversation] = await Promise.all([
       prisma.store.findUnique({ where: { id: conversation.storeId } }),
       prisma.product.findMany({ where: { storeId: conversation.storeId } }),
       prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
+      prisma.conversation.findUnique({ where: { id: conversation.id } }),
     ]);
-    if (!store) return;
+    if (!store || !currentConversation) return;
 
     const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
     const catalog = products.map((p) => ({
@@ -602,7 +642,20 @@ async function startServer() {
     // long-running conversation, which slows down local LLM inference noticeably.
     const history = recentMessages.slice(0, -1).slice(-10).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
 
-    const result = await generateAgentReply({ message: customerText, history, persona, catalog });
+    const existingCart: { sku: string; quantity: number }[] = (currentConversation.cart as any) || [];
+    const orderState = {
+      awaitingQuantityFor: currentConversation.awaitingQuantityFor,
+      orderConfirmationRequested: currentConversation.orderConfirmationRequested,
+      hasCartItems: existingCart.length > 0,
+      hasAddress: !!currentConversation.detectedAddress,
+      cartItems: existingCart.map((item) => ({
+        sku: item.sku,
+        name: products.find((p) => p.sku === item.sku)?.name || item.sku,
+        quantity: item.quantity,
+      })),
+    };
+
+    const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
     const isAutopilot = conversation.status === 'AI_MANAGED';
 
     await prisma.message.create({
@@ -611,29 +664,68 @@ async function startServer() {
 
     // Build the cart from the AI's detected intent — only ever adds a real, in-stock
     // catalog item, never invents one. This is separate from actually placing an order,
-    // which the merchant confirms explicitly (see POST /api/conversations/:id/orders).
+    // which either the merchant confirms explicitly (Generate Order) or the AI
+    // auto-finalizes once the customer confirms, if the store allows it (see below).
     const conversationData: any = { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint };
+    let updatedCart = existingCart;
     if (result.cartAction?.action === 'add' && result.cartAction.sku) {
       const product = products.find((p) => p.sku === result.cartAction.sku);
       if (product && product.inventory > 0) {
-        const currentConversation = await prisma.conversation.findUnique({ where: { id: conversation.id } });
-        const existingCart: { sku: string; quantity: number }[] = (currentConversation?.cart as any) || [];
+        const quantity = result.cartAction.quantity && result.cartAction.quantity > 0 ? Math.floor(result.cartAction.quantity) : 1;
         const existingItem = existingCart.find((item) => item.sku === product.sku);
-        const updatedCart = existingItem
-          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity: item.quantity + 1 } : item))
-          : [...existingCart, { sku: product.sku, quantity: 1 }];
+        updatedCart = existingItem
+          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity: item.quantity + quantity } : item))
+          : [...existingCart, { sku: product.sku, quantity }];
         conversationData.cart = updatedCart;
+        conversationData.awaitingQuantityFor = null;
       }
     }
+    if (result.askQuantityForSku) {
+      conversationData.awaitingQuantityFor = result.askQuantityForSku;
+    }
 
+    let updatedAddress = currentConversation.detectedAddress;
     if (result.extractedAddress && result.extractedAddress.trim()) {
-      conversationData.detectedAddress = result.extractedAddress.trim();
+      updatedAddress = result.extractedAddress.trim();
+      conversationData.detectedAddress = updatedAddress;
+    }
+
+    if (result.orderConfirmationRequested) {
+      conversationData.orderConfirmationRequested = true;
+      conversationData.orderSummaryShown = true;
+    }
+
+    // Only trust a customer's "yes" as a real confirmation if the AI actually asked for
+    // one in a previous turn — otherwise a stray "yes" to an unrelated question could
+    // trigger a real order.
+    const customerConfirmedForReal = result.orderConfirmed && currentConversation.orderConfirmationRequested;
+    if (customerConfirmedForReal) {
+      conversationData.orderConfirmed = true;
     }
 
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: conversationData,
     });
+
+    // Auto-finalize: only when the customer's confirmation is genuine, there's actually
+    // something to order, and the store has opted into AI-driven finalization for this
+    // conversation's Copilot mode (autopilot always qualifies; manual mode only if the
+    // merchant has separately turned on "always auto-finalize" for the store).
+    if (customerConfirmedForReal && updatedCart.length > 0 && updatedAddress) {
+      const eligible = isAutopilot || store.autoFinalizeOrdersAlways;
+      if (eligible) {
+        try {
+          await createOrderForConversation(
+            { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
+            updatedCart,
+            updatedAddress
+          );
+        } catch (err) {
+          console.error('Auto-finalize order failed:', err);
+        }
+      }
+    }
 
     if (isAutopilot && conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
       const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);

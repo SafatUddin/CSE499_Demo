@@ -42,6 +42,8 @@ export interface Conversation {
   isComplaint?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
+  orderConfirmed?: boolean;
+  orderConfirmationRequested?: boolean;
   suggestedProducts?: string[];
 }
 
@@ -60,6 +62,7 @@ export interface AIPersona {
   tone: string;
   style: 'bullets' | 'narrative';
   customInstructions: string;
+  autoFinalizeOrdersAlways?: boolean;
 }
 
 export interface DailyMetric {

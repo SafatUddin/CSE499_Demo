@@ -667,19 +667,64 @@ async function startServer() {
     // which either the merchant confirms explicitly (Generate Order) or the AI
     // auto-finalizes once the customer confirms, if the store allows it (see below).
     const conversationData: any = { lastMessageAt: new Date(), isComplaint: result.isComplaint || conversation.isComplaint };
+
+    // Detect "start fresh" / "clear cart" / "remove everything" intent — reset cart and all order state.
+    const lowerCustomerText = customerText.toLowerCase();
+    const isStartFresh =
+      lowerCustomerText.includes('start fresh') ||
+      lowerCustomerText.includes('start over') ||
+      lowerCustomerText.includes('clear cart') ||
+      lowerCustomerText.includes('empty my cart') ||
+      lowerCustomerText.includes('empty the cart') ||
+      lowerCustomerText.includes('reset cart') ||
+      lowerCustomerText.includes('shuru theke') ||
+      lowerCustomerText.includes('cancel everything') ||
+      lowerCustomerText.includes('remove everything') ||
+      lowerCustomerText.includes('remove all') ||
+      lowerCustomerText.includes('delete everything') ||
+      lowerCustomerText.includes('shob delete') ||
+      lowerCustomerText.includes('shob remove') ||
+      lowerCustomerText.includes('naya shuru') ||
+      lowerCustomerText.includes('notun kore');
+    if (isStartFresh) {
+      conversationData.cart = [];
+      conversationData.awaitingQuantityFor = null;
+      conversationData.detectedAddress = null;
+      conversationData.orderConfirmationRequested = false;
+      conversationData.orderConfirmed = false;
+      conversationData.orderSummaryShown = false;
+      // Still save the AI's reply (which will say "Done! I've cleared your cart...")
+      await prisma.message.create({
+        data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any, pending: !isAutopilot },
+      });
+      await prisma.conversation.update({ where: { id: conversation.id }, data: conversationData });
+      return;
+    }
+
     let updatedCart = existingCart;
-    if (result.cartAction?.action === 'add' && result.cartAction.sku) {
+
+    // SERVER-SIDE CART GUARD: Only allow a cart write when the AI was explicitly waiting
+    // for a quantity answer for that exact SKU. This prevents the Ollama model from
+    // autonomously adding items on price-inquiry turns, confirmation turns, or any other
+    // turn where the customer didn't actually state a quantity.
+    const cartAddAllowed =
+      result.cartAction?.action === 'add' &&
+      result.cartAction.sku &&
+      currentConversation.awaitingQuantityFor === result.cartAction.sku;
+
+    if (cartAddAllowed) {
       const product = products.find((p) => p.sku === result.cartAction.sku);
       if (product && product.inventory > 0) {
         const quantity = result.cartAction.quantity && result.cartAction.quantity > 0 ? Math.floor(result.cartAction.quantity) : 1;
         const existingItem = existingCart.find((item) => item.sku === product.sku);
         updatedCart = existingItem
-          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity: item.quantity + quantity } : item))
+          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity } : item))
           : [...existingCart, { sku: product.sku, quantity }];
         conversationData.cart = updatedCart;
         conversationData.awaitingQuantityFor = null;
       }
     }
+
     if (result.askQuantityForSku) {
       conversationData.awaitingQuantityFor = result.askQuantityForSku;
     }
@@ -810,7 +855,7 @@ async function startServer() {
     }
   });
 
-  // Update a conversation's status (AI Managed / Active / Closed)
+  // Update a conversation's status (AI Managed / Active / Closed) or cart
   app.patch('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
@@ -818,15 +863,24 @@ async function startServer() {
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
-      const { status } = req.body;
-      const mappedStatus = FRONTEND_TO_STATUS[status];
-      if (!mappedStatus) {
-        return res.status(400).json({ error: 'Invalid status' });
+      const { status, cart } = req.body;
+      const dataToUpdate: any = {};
+
+      if (status) {
+        const mappedStatus = FRONTEND_TO_STATUS[status];
+        if (!mappedStatus) {
+          return res.status(400).json({ error: 'Invalid status' });
+        }
+        dataToUpdate.status = mappedStatus;
+      }
+
+      if (cart !== undefined) {
+        dataToUpdate.cart = cart;
       }
 
       const updated = await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { status: mappedStatus as any },
+        data: dataToUpdate,
         include: { messages: { orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));

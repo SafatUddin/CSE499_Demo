@@ -137,6 +137,10 @@ export function updateConversationStatus(id: string, status: 'Active' | 'AI Mana
   return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
 }
 
+export function updateConversationCart(id: string, cart: { sku: string; quantity: number }[]) {
+  return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ cart }) });
+}
+
 export function sendConversationMessage(
   id: string,
   text: string,

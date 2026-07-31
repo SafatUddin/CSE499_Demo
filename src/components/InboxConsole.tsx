@@ -12,17 +12,17 @@ import {
   ToggleLeft, 
   ToggleRight,
   ShieldAlert,
-  Terminal,
   Plus,
   Coins,
   Check,
   FileText,
   Zap,
   ChevronLeft,
-  Info
+  Info,
+  Trash2
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
-import { sendConversationMessage, approveDraftMessage, createOrderFromConversation } from '../lib/api';
+import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
@@ -81,22 +81,9 @@ export default function InboxConsole({
     return `Unknown#${num}`;
   };
 
-  // Live adapter webhook telemetry logs
-  const [telemetryLogs, setTelemetryLogs] = useState<string[]>([
-    '[SYSTEM] LazyChat Unified Channel Adapter initialized.',
-    '[SYSTEM] Routing active on webhook endpoint: /api/webhooks/v1/...',
-    '[ADAPTER] Active listeners connected to Meta Cloud API (Messenger, IG, WhatsApp).'
-  ]);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const telemetryEndRef = useRef<HTMLDivElement>(null);
   
   const activeChat = conversations.find(c => c.id === selectedChatId) || conversations[0];
-
-  const pushTelemetryLog = (text: string) => {
-    const timestamp = new Date().toLocaleTimeString([], { hour12: false });
-    setTelemetryLogs(prev => [...prev.slice(-15), `[${timestamp}] ${text}`]);
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -132,13 +119,6 @@ export default function InboxConsole({
       time: timestamp
     };
 
-    if (isSimulatedCustomerChannel) {
-      pushTelemetryLog(`[WEBHOOK] Incoming webhook event from ${activeChat.platform.toUpperCase()}`);
-      pushTelemetryLog(`[ADAPTER] Normalized payload: "${textToSend.substring(0, 30)}..."`);
-    } else {
-      pushTelemetryLog(`[MERCHANT] Sending reply via ${activeChat.platform.toUpperCase()}`);
-    }
-
     const discardDraftId = editingDraftId;
     setEditingDraftId(null);
 
@@ -151,7 +131,6 @@ export default function InboxConsole({
 
     if (isSimulatedCustomerChannel) {
       setIsTyping(true);
-      pushTelemetryLog(`[AI_GATEWAY] Dispatching payload to LLM...`);
     }
 
     try {
@@ -165,16 +144,8 @@ export default function InboxConsole({
         discardDraftId || undefined
       );
       onUpdateConversation(activeChat.id, updated);
-
-      if (isSimulatedCustomerChannel) {
-        const last = updated.messages[updated.messages.length - 1];
-        pushTelemetryLog(last?.pending ? `[LLM_OUT] Draft ready for approval.` : `[LLM_OUT] Response drafted and sent.`);
-      } else {
-        pushTelemetryLog(`[MERCHANT] Reply delivered.`);
-      }
     } catch (err) {
       console.error(err);
-      pushTelemetryLog(`[ERROR] Failed to deliver message to the backend.`);
     } finally {
       setIsTyping(false);
     }
@@ -183,16 +154,25 @@ export default function InboxConsole({
   const handleApproveDraft = async (messageId: string) => {
     if (!activeChat) return;
     setApprovingId(messageId);
-    pushTelemetryLog(`[AGENT] Approving drafted response for delivery.`);
     try {
       const updated = await approveDraftMessage(activeChat.id, messageId);
       onUpdateConversation(activeChat.id, updated);
-      pushTelemetryLog(`[AGENT] Draft delivered to customer.`);
     } catch (err) {
       console.error(err);
-      pushTelemetryLog(`[ERROR] Failed to approve draft.`);
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleRemoveCartItem = async (skuToRemove: string) => {
+    if (!activeChat || !activeChat.cart) return;
+    const updatedCart = activeChat.cart.filter((item) => item.sku !== skuToRemove);
+    onUpdateConversation(activeChat.id, { cart: updatedCart });
+    try {
+      const updated = await updateConversationCart(activeChat.id, updatedCart);
+      onUpdateConversation(activeChat.id, updated);
+    } catch (err) {
+      console.error('Failed to update cart on server:', err);
     }
   };
 
@@ -209,7 +189,6 @@ export default function InboxConsole({
       onUpdateConversation(activeChat.id, { cart: undefined });
       setOrderAddress('');
       setOrderSuccess('Order created successfully.');
-      pushTelemetryLog(`[ORDER] Order created for ${getChatDisplayName(activeChat)}.`);
       setTimeout(() => setOrderSuccess(''), 3000);
     } catch (err: any) {
       setOrderError(err.message || 'Failed to create order.');
@@ -222,7 +201,6 @@ export default function InboxConsole({
     if (!activeChat) return;
     const newStatus = activeChat.status === 'AI Managed' ? 'Active' : 'AI Managed';
     onUpdateConversationStatus(activeChat.id, newStatus);
-    pushTelemetryLog(`[SYSTEM] Automation state updated to ${newStatus}`);
   };
 
   // Filter list of chats
@@ -404,14 +382,14 @@ export default function InboxConsole({
 
             {/* Utility icons */}
             <div className="flex items-center gap-1.5">
-              {/* Mobile Info toggle */}
+              {/* Mobile Cart toggle */}
               <button
                 type="button"
                 onClick={() => setMobileView('info')}
                 className="lg:hidden p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
-                title="View Strategy & Logs"
+                title="View Cart"
               >
-                <Info className="h-4 w-4" />
+                <ShoppingBag className="h-4 w-4" />
               </button>
             </div>
           </header>
@@ -457,7 +435,6 @@ export default function InboxConsole({
                           onClick={() => {
                             setInputText(m.text);
                             setEditingDraftId(m.id);
-                            pushTelemetryLog(`[WORKSPACE] Copy to input for edit.`);
                           }}
                           className="bg-transparent hover:bg-white/5 text-white/80 border border-white/15 font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer"
                         >
@@ -579,7 +556,6 @@ export default function InboxConsole({
                         lastMessage: aiMsg.text,
                         time: 'Just Now'
                       });
-                      pushTelemetryLog(`[WS_AGENT] Prompted client for delivery info.`);
                     } else {
                       const custMsg = {
                         id: `m-cust-ws-${Date.now()}`,
@@ -592,7 +568,6 @@ export default function InboxConsole({
                         lastMessage: custMsg.text,
                         time: 'Just Now'
                       });
-                      pushTelemetryLog(`[WS_CLIENT] Received delivery info. Socket client renamed.`);
                     }
                   }}
                   className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 text-cyan-400 hover:text-white rounded px-2.5 py-1 text-left font-sans text-[8px] font-bold uppercase tracking-wider transition-all cursor-pointer animate-pulse"
@@ -636,8 +611,8 @@ export default function InboxConsole({
             <span className="font-sans text-xs font-bold text-white uppercase tracking-wider">Back to Chat</span>
           </div>
           
-          {/* Panel 1: Cart (built automatically by the AI, confirmed into a real order by the merchant) */}
-          <section className="p-4 border-b border-white/[0.05] space-y-3.5 shrink-0">
+          {/* Panel: Cart */}
+          <section className="p-4 space-y-3.5 shrink-0">
             <div className="flex items-center justify-between">
               <h4 className="font-sans text-[9px] font-extrabold text-white/50 uppercase tracking-widest">
                 Cart
@@ -654,16 +629,26 @@ export default function InboxConsole({
                 <p className="text-[10px] text-white/30 font-sans">No items in cart yet.</p>
               </div>
             ) : (
-              <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg space-y-3 max-h-[260px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+              <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg space-y-3 max-h-[450px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
                 {activeChat.cart.map((item) => {
                   const product = products.find((p) => p.sku === item.sku);
                   return (
                     <div key={item.sku} className="flex justify-between items-center text-[10px] font-sans border-b border-white/[0.04] pb-2 last:border-0 last:pb-0">
-                      <div>
-                        <span className="text-white font-bold block">{product?.name || item.sku}</span>
+                      <div className="flex-grow min-w-0 pr-2">
+                        <span className="text-white font-bold block truncate">{product?.name || item.sku}</span>
                         <span className="text-white/30">{item.quantity} x ${(product?.price || 0).toFixed(2)}</span>
                       </div>
-                      <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCartItem(item.sku)}
+                          className="text-white/30 hover:text-red-400 p-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
+                          title="Remove item from cart"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -703,40 +688,6 @@ export default function InboxConsole({
                 </button>
               </div>
             )}
-          </section>
-
-          {/* Panel 2: AI Strategy */}
-          <section className="p-4 border-b border-white/[0.05] space-y-3 shrink-0">
-            <h4 className="font-sans text-[9px] font-extrabold text-white/50 uppercase tracking-widest flex items-center gap-1">
-              ✨ AI Strategy
-            </h4>
-            <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg font-sans text-[11px] text-white/70 leading-relaxed space-y-2">
-              <p>Customer is inquiring about a bulk purchase of 5 units.</p>
-              <p className="text-[#a1a1aa] font-medium">Conversion probability: <span className="text-emerald-400 font-bold">92%</span>.</p>
-              <div className="bg-white/[0.02] border-l-2 border-white/20 p-2 text-white/55 text-[10px] rounded-r">
-                Recommendation: Offer a 5% bundle discount to close the sales cycle today.
-              </div>
-            </div>
-          </section>
-
-          {/* Webhook logs */}
-          <section className="p-4 space-y-3 shrink-0 pb-6">
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <Terminal className="h-3.5 w-3.5 text-white/40" />
-              <h4 className="font-sans text-[9px] font-extrabold text-white/50 uppercase tracking-widest">
-                Channel Webhook Telemetry
-              </h4>
-            </div>
-
-            <div className="bg-[#121215] border border-white/[0.06] rounded p-2.5 font-mono text-[8px] text-[#8e9192] overflow-y-auto space-y-1 h-[110px] scrollbar-thin scrollbar-thumb-white/5">
-              {telemetryLogs.map((log, i) => (
-                <div key={i} className="leading-snug">
-                  <span className="text-white/20 select-none mr-1">&gt;</span>
-                  {log}
-                </div>
-              ))}
-              <div ref={telemetryEndRef} />
-            </div>
           </section>
 
         </aside>

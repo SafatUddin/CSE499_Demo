@@ -10,10 +10,12 @@ import { generateAgentReply } from './server/agent';
 import {
   verifyMetaSignature,
   sendMessengerMessage,
+  sendWhatsAppMessage,
   fetchMessengerProfileName,
   getFacebookOAuthUrl,
   exchangeCodeForUserToken,
   listManagedPages,
+  listWhatsAppPhoneNumbers,
   subscribePageWebhook,
   ManagedPage,
 } from './server/meta';
@@ -195,15 +197,27 @@ async function startServer() {
     }
   }
 
-  // List this store's real channel connections (currently just Facebook; other
-  // platforms in the UI are still mock toggles, see CLAUDE.md)
+  async function finalizeWhatsAppConnection(storeId: string, numberObj: { id: string; display_phone_number: string; token: string }) {
+    const credentials = {
+      token: encryptSecret(numberObj.token),
+      phoneNumberId: numberObj.id,
+      phoneNumber: numberObj.display_phone_number,
+    };
+    await prisma.channel.upsert({
+      where: { storeId_type: { storeId, type: 'WHATSAPP' } },
+      update: { connected: true, externalId: numberObj.id, credentials },
+      create: { storeId, type: 'WHATSAPP', connected: true, externalId: numberObj.id, credentials },
+    });
+  }
+
+  // List this store's real channel connections (Facebook & WhatsApp)
   app.get('/api/channels', requireAuth, async (req: AuthedRequest, res) => {
     try {
       const channels = await prisma.channel.findMany({ where: { storeId: req.auth!.storeId } });
       res.json(channels.map((c) => ({
         type: CHANNEL_TYPE_TO_FRONTEND[c.type] || c.type.toLowerCase(),
         connected: c.connected,
-        name: (c.credentials as any)?.name || null,
+        name: (c.credentials as any)?.name || (c.credentials as any)?.phoneNumber || (c.credentials as any)?.phoneNumberId || null,
       })));
     } catch (err: any) {
       console.error('List channels error:', err);
@@ -226,6 +240,33 @@ async function startServer() {
     }
   });
 
+  // Connect WhatsApp Business Cloud API with Phone Number ID and Access Token
+  app.post('/api/channels/whatsapp/connect', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { phoneNumberId, accessToken, phoneNumber } = req.body;
+      if (!phoneNumberId || !accessToken) {
+        return res.status(400).json({ error: 'Phone Number ID and Access Token are required' });
+      }
+
+      const credentials = {
+        token: encryptSecret(accessToken),
+        phoneNumberId,
+        phoneNumber: phoneNumber || null,
+      };
+
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'WHATSAPP' } },
+        update: { connected: true, externalId: phoneNumberId, credentials },
+        create: { storeId: req.auth!.storeId, type: 'WHATSAPP', connected: true, externalId: phoneNumberId, credentials },
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Connect WhatsApp channel error:', err);
+      res.status(500).json({ error: 'Failed to connect WhatsApp channel' });
+    }
+  });
+
   // Start the Facebook OAuth flow. Browser navigation can't carry an Authorization
   // header, so the JWT is passed as a query param and verified inline here instead
   // of via the requireAuth middleware.
@@ -244,7 +285,7 @@ async function startServer() {
     }
   });
 
-  // Facebook redirects here after the merchant approves (or denies) access.
+  // Meta redirects here after the merchant approves (or denies) access.
   app.get('/api/channels/facebook/callback', async (req, res) => {
     const frontendBase = process.env.APP_URL || '';
     try {
@@ -256,24 +297,82 @@ async function startServer() {
       const { storeId } = verifyState<{ storeId: string }>(state);
       const redirectUri = getFacebookRedirectUri();
       const userAccessToken = await exchangeCodeForUserToken(code, redirectUri);
-      const pages = await listManagedPages(userAccessToken);
 
-      if (pages.length === 0) {
-        return res.redirect(`${frontendBase}/#integrations?fbError=no_pages`);
+      const pages = await listManagedPages(userAccessToken);
+      const waAccounts = await listWhatsAppPhoneNumbers(userAccessToken);
+
+      const allWaNumbers: { id: string; display_phone_number: string; name?: string; token: string }[] = [];
+      for (const acc of waAccounts) {
+        for (const num of acc.phoneNumbers) {
+          allWaNumbers.push({
+            id: num.id,
+            display_phone_number: num.display_phone_number || num.verified_name || num.id,
+            name: acc.wabaName,
+            token: userAccessToken,
+          });
+        }
       }
 
       if (pages.length === 1) {
         await finalizeFacebookConnection(storeId, pages[0]);
-        return res.redirect(`${frontendBase}/#integrations?fbConnected=1`);
       }
 
-      // Multiple Pages — let the merchant choose. Their tokens travel only inside this
-      // short-lived signed token, never exposed to the frontend directly.
-      const pendingToken = signState({ storeId, pages }, '10m');
-      res.redirect(`${frontendBase}/#integrations?fbPending=${encodeURIComponent(pendingToken)}`);
+      if (allWaNumbers.length === 1) {
+        await finalizeWhatsAppConnection(storeId, allWaNumbers[0]);
+      }
+
+      if (pages.length > 1) {
+        const pendingToken = signState({ storeId, pages }, '10m');
+        return res.redirect(`${frontendBase}/#integrations?fbPending=${encodeURIComponent(pendingToken)}`);
+      }
+
+      if (allWaNumbers.length > 1) {
+        const waPendingToken = signState({ storeId, numbers: allWaNumbers }, '10m');
+        return res.redirect(`${frontendBase}/#integrations?waPending=${encodeURIComponent(waPendingToken)}`);
+      }
+
+      if (pages.length === 0 && allWaNumbers.length === 0) {
+        return res.redirect(`${frontendBase}/#integrations?fbError=no_pages`);
+      }
+
+      return res.redirect(`${frontendBase}/#integrations?fbConnected=1&waConnected=1`);
     } catch (err) {
-      console.error('Facebook OAuth callback error:', err);
+      console.error('Meta OAuth callback error:', err);
       res.redirect(`${frontendBase}/#integrations?fbError=server_error`);
+    }
+  });
+
+  // Returns candidate WhatsApp phone numbers for multi-number selection
+  app.get('/api/channels/whatsapp/pending', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const pendingToken = req.query.token as string;
+      const decoded = verifyState<{ storeId: string; numbers: any[] }>(pendingToken);
+      if (decoded.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Token does not match your account' });
+      }
+      res.json({ numbers: decoded.numbers.map((n) => ({ id: n.id, display_phone_number: n.display_phone_number, name: n.name })) });
+    } catch (err) {
+      res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
+    }
+  });
+
+  // Finalizes WhatsApp connection after merchant picks a number
+  app.post('/api/channels/whatsapp/select', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { pendingToken, phoneNumberId } = req.body;
+      const decoded = verifyState<{ storeId: string; numbers: any[] }>(pendingToken);
+      if (decoded.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Token does not match your account' });
+      }
+      const num = decoded.numbers.find((n) => n.id === phoneNumberId);
+      if (!num) {
+        return res.status(404).json({ error: 'Phone number not found in this selection' });
+      }
+      await finalizeWhatsAppConnection(decoded.storeId, num);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('WhatsApp number selection error:', err);
+      res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
   });
 
@@ -618,6 +717,19 @@ async function startServer() {
     return null;
   }
 
+  async function getWhatsAppCredentialsForStore(storeId: string): Promise<{ phoneNumberId: string; accessToken: string } | null> {
+    const channel = await prisma.channel.findUnique({ where: { storeId_type: { storeId, type: 'WHATSAPP' } } });
+    if (channel?.connected && channel.credentials) {
+      try {
+        const { token, phoneNumberId } = channel.credentials as { token: string; phoneNumberId: string };
+        return { phoneNumberId, accessToken: decryptSecret(token) };
+      } catch (err) {
+        console.error('Failed to decrypt stored WhatsApp credentials:', err);
+      }
+    }
+    return null;
+  }
+
   // Generates an AI reply for a conversation and either delivers it immediately (Copilot
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
@@ -782,6 +894,17 @@ async function startServer() {
         }
       }
     }
+
+    if (isAutopilot && conversation.channelType === 'WHATSAPP' && conversation.externalUserId) {
+      const waCreds = await getWhatsAppCredentialsForStore(conversation.storeId);
+      if (waCreds) {
+        try {
+          await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, result.replyText);
+        } catch (err) {
+          console.error('Failed to deliver AI reply to WhatsApp:', err);
+        }
+      }
+    }
   }
 
   // Derived, real-time notifications: unread/complaint conversations + low-stock products.
@@ -928,6 +1051,17 @@ async function startServer() {
           }
         }
 
+        if (conversation.channelType === 'WHATSAPP' && conversation.externalUserId) {
+          const waCreds = await getWhatsAppCredentialsForStore(conversation.storeId);
+          if (waCreds) {
+            try {
+              await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, text);
+            } catch (err) {
+              console.error('Failed to deliver merchant reply to WhatsApp:', err);
+            }
+          }
+        }
+
         const updated = await prisma.conversation.findUnique({
           where: { id: conversation.id },
           include: { messages: { orderBy: { createdAt: 'asc' } } },
@@ -951,7 +1085,7 @@ async function startServer() {
   });
 
   // Approves a pending AI draft (Copilot-off mode): delivers it to the real customer
-  // (e.g. via Messenger) when applicable, and marks it as sent.
+  // (e.g. via Messenger/WhatsApp) when applicable, and marks it as sent.
   app.post('/api/conversations/:id/messages/:messageId/approve', requireAuth, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
@@ -970,6 +1104,17 @@ async function startServer() {
             await sendMessengerMessage(pageAccessToken, conversation.externalUserId, message.text);
           } catch (err) {
             console.error('Failed to deliver approved draft to Messenger:', err);
+          }
+        }
+      }
+
+      if (conversation.channelType === 'WHATSAPP' && conversation.externalUserId) {
+        const waCreds = await getWhatsAppCredentialsForStore(conversation.storeId);
+        if (waCreds) {
+          try {
+            await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, message.text);
+          } catch (err) {
+            console.error('Failed to deliver approved draft to WhatsApp:', err);
           }
         }
       }
@@ -1073,6 +1218,55 @@ async function startServer() {
     await generateAndStoreAgentReply(conversation, messageText);
   }
 
+  async function handleIncomingWhatsAppMessage(phoneNumberId: string, senderWaId: string, messageText: string, externalMessageId: string, customerName?: string) {
+    const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
+    if (alreadyProcessed) {
+      console.log('Duplicate WhatsApp webhook event, skipping:', externalMessageId);
+      return;
+    }
+
+    const channel = await prisma.channel.findFirst({ where: { type: 'WHATSAPP', connected: true, externalId: phoneNumberId } });
+    if (!channel) {
+      console.error('Ignoring WhatsApp event for unconnected Phone Number ID:', phoneNumberId);
+      return;
+    }
+    const storeId = channel.storeId;
+
+    let conversation = await prisma.conversation.findFirst({
+      where: { storeId, channelType: 'WHATSAPP', externalUserId: senderWaId },
+    });
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          storeId,
+          channelType: 'WHATSAPP',
+          externalUserId: senderWaId,
+          customerName: customerName || `WhatsApp User (+${senderWaId})`,
+          lastMessageAt: new Date(),
+        },
+      });
+    } else if (customerName && conversation.customerName !== customerName) {
+      conversation = await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { customerName },
+      });
+    }
+
+    try {
+      await prisma.message.create({
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        console.log('Duplicate WhatsApp webhook event (race), skipping:', externalMessageId);
+        return;
+      }
+      throw err;
+    }
+
+    await generateAndStoreAgentReply(conversation, messageText);
+  }
+
   // Meta webhook receiver — signature-verified before any payload is trusted
   app.post('/webhooks/meta', async (req: RequestWithRawBody, res) => {
     const signature = req.headers['x-hub-signature-256'] as string | undefined;
@@ -1087,17 +1281,41 @@ async function startServer() {
 
     try {
       const body = req.body;
-      if (body.object !== 'page') return;
 
-      for (const entry of body.entry || []) {
-        const pageId = entry.id;
-        for (const event of entry.messaging || []) {
-          const senderPsid = event.sender?.id;
-          const messageText = event.message?.text;
-          const messageId = event.message?.mid;
-          if (!senderPsid || !messageText || !messageId || event.message?.is_echo) continue;
+      if (body.object === 'page') {
+        for (const entry of body.entry || []) {
+          const pageId = entry.id;
+          for (const event of entry.messaging || []) {
+            const senderPsid = event.sender?.id;
+            const messageText = event.message?.text;
+            const messageId = event.message?.mid;
+            if (!senderPsid || !messageText || !messageId || event.message?.is_echo) continue;
 
-          await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
+            await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
+          }
+        }
+      } else if (body.object === 'whatsapp_business_account') {
+        for (const entry of body.entry || []) {
+          for (const change of entry.changes || []) {
+            if (change.field !== 'messages') continue;
+            const value = change.value;
+            const phoneNumberId = value?.metadata?.phone_number_id;
+            const contacts = value?.contacts || [];
+            const messages = value?.messages || [];
+
+            for (const msg of messages) {
+              if (msg.type !== 'text' || !msg.text?.body) continue;
+              const senderWaId = msg.from;
+              const messageText = msg.text.body;
+              const externalMessageId = msg.id;
+              const contact = contacts.find((c: any) => c.wa_id === senderWaId);
+              const customerName = contact?.profile?.name;
+
+              if (phoneNumberId && senderWaId && messageText && externalMessageId) {
+                await handleIncomingWhatsAppMessage(phoneNumberId, senderWaId, messageText, externalMessageId, customerName);
+              }
+            }
+          }
         }
       }
     } catch (err) {

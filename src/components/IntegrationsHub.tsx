@@ -26,6 +26,10 @@ import {
   getFacebookPendingPages,
   selectFacebookPage,
   FacebookPendingPage,
+  getWhatsAppPendingNumbers,
+  selectWhatsAppNumber,
+  WhatsAppPendingNumber,
+  connectWhatsAppChannel,
 } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
@@ -45,7 +49,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [isSimulatingSync, setIsSimulatingSync] = useState(false);
 
-  // Real Facebook connection state (self-serve OAuth flow)
+  // Real Facebook & WhatsApp connection state
   const [fbConnected, setFbConnected] = useState(false);
   const [fbPageName, setFbPageName] = useState<string | null>(null);
   const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
@@ -53,54 +57,76 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [fbError, setFbError] = useState('');
   const [isSelectingPage, setIsSelectingPage] = useState(false);
 
-  const refreshFacebookStatus = () => {
+  const [waConnected, setWaConnected] = useState(false);
+  const [waPhoneName, setWaPhoneName] = useState<string | null>(null);
+  const [waPhoneNumberId, setWaPhoneNumberId] = useState('');
+  const [waAccessToken, setWaAccessToken] = useState('');
+  const [waError, setWaError] = useState('');
+  const [isConnectingWa, setIsConnectingWa] = useState(false);
+  const [waPendingToken, setWaPendingToken] = useState<string | null>(null);
+  const [waPendingNumbers, setWaPendingNumbers] = useState<WhatsAppPendingNumber[]>([]);
+  const [isSelectingWa, setIsSelectingWa] = useState(false);
+
+  const refreshChannelsStatus = () => {
     listChannels()
       .then((channels) => {
         const facebook = channels.find((c) => c.type === 'facebook');
         setFbConnected(!!facebook?.connected);
         setFbPageName(facebook?.name || null);
+
+        const whatsapp = channels.find((c) => c.type === 'whatsapp');
+        setWaConnected(!!whatsapp?.connected);
+        setWaPhoneName(whatsapp?.name || null);
       })
       .catch((err) => console.error('Failed to load channel status:', err));
   };
 
   useEffect(() => {
-    refreshFacebookStatus();
+    refreshChannelsStatus();
 
-    // The OAuth callback redirects back here as #integrations?fbConnected=1 / fbPending=... / fbError=...
+    // The OAuth callback redirects back here with query params in the hash
     const hash = window.location.hash;
     const queryIndex = hash.indexOf('?');
     if (queryIndex === -1) return;
     const params = new URLSearchParams(hash.slice(queryIndex + 1));
 
-    if (params.get('fbConnected')) {
-      refreshFacebookStatus();
+    if (params.get('waConnected') || params.get('fbConnected')) {
+      refreshChannelsStatus();
+      window.history.replaceState(null, '', '#integrations');
+    } else if (params.get('waPending')) {
+      const token = params.get('waPending')!;
+      setWaPendingToken(token);
+      getWhatsAppPendingNumbers(token)
+        .then((res) => setWaPendingNumbers(res.numbers))
+        .catch(() => setWaError('That connection attempt expired. Please try connecting again.'));
+      window.history.replaceState(null, '', '#integrations');
     } else if (params.get('fbPending')) {
       const token = params.get('fbPending')!;
       setFbPendingToken(token);
       getFacebookPendingPages(token)
         .then((res) => setFbPendingPages(res.pages))
         .catch(() => setFbError('That connection attempt expired. Please try connecting again.'));
+      window.history.replaceState(null, '', '#integrations');
     } else if (params.get('fbError')) {
       const code = params.get('fbError');
       setFbError(
         code === 'no_pages'
-          ? "We didn't find any Facebook Pages you manage. Connect a Page to your Facebook account and try again."
+          ? "We didn't find any Facebook Pages or WhatsApp Business accounts. Make sure your business is verified and try again."
           : code === 'denied'
-            ? 'Facebook connection was cancelled.'
-            : 'Something went wrong connecting to Facebook. Please try again.'
+            ? 'Permissions were not granted. Please try again.'
+            : 'Failed to connect. Please try again.'
       );
+      window.history.replaceState(null, '', '#integrations');
     }
-
-    // Clean the URL so a refresh doesn't re-process the same callback params
-    window.history.replaceState(null, '', '#integrations');
   }, []);
 
   const handleFacebookCardClick = async () => {
     if (fbConnected) {
-      if (!window.confirm('Disconnect Facebook? Incoming messages will stop being delivered to this store.')) return;
       try {
         await disconnectChannel('facebook');
         setFbConnected(false);
+        setFbPageName(null);
+        refreshChannelsStatus();
       } catch (err) {
         console.error('Failed to disconnect Facebook:', err);
       }
@@ -115,21 +141,67 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     try {
       await selectFacebookPage(fbPendingToken, pageId);
       setFbPendingToken(null);
-      setFbPendingPages([]);
-      refreshFacebookStatus();
+      refreshChannelsStatus();
     } catch (err) {
-      console.error('Failed to select Facebook Page:', err);
-      setFbError('Failed to connect that Page. Please try again.');
+      setFbError('Failed to select Facebook Page. Please try again.');
     } finally {
       setIsSelectingPage(false);
+    }
+  };
+
+  const handleWhatsAppDisconnect = async () => {
+    try {
+      await disconnectChannel('whatsapp');
+      setWaConnected(false);
+      setWaPhoneName(null);
+      refreshChannelsStatus();
+    } catch (err) {
+      console.error('Failed to disconnect WhatsApp:', err);
+    }
+  };
+
+  const handleSelectWhatsAppNumber = async (phoneNumberId: string) => {
+    if (!waPendingToken) return;
+    setIsSelectingWa(true);
+    try {
+      await selectWhatsAppNumber(waPendingToken, phoneNumberId);
+      setWaPendingToken(null);
+      setWaPendingNumbers([]);
+      refreshChannelsStatus();
+    } catch (err) {
+      setWaError('Failed to select WhatsApp number. Please try again.');
+    } finally {
+      setIsSelectingWa(false);
+    }
+  };
+
+  const handleSaveWhatsAppCredentials = async () => {
+    if (!waPhoneNumberId.trim() || !waAccessToken.trim()) {
+      setWaError('Phone Number ID and Access Token are required');
+      return;
+    }
+    setWaError('');
+    setIsConnectingWa(true);
+    try {
+      await connectWhatsAppChannel({
+        phoneNumberId: waPhoneNumberId.trim(),
+        accessToken: waAccessToken.trim(),
+        phoneNumber: whatsappNumber.trim() || undefined,
+      });
+      setIsConnectingWa(false);
+      setWaConnected(true);
+      setWaPhoneName(whatsappNumber.trim() || waPhoneNumberId.trim());
+      setWizardStep(2);
+      refreshChannelsStatus();
+    } catch (err: any) {
+      setIsConnectingWa(false);
+      setWaError(err.message || 'Failed to connect WhatsApp channel');
     }
   };
 
   // Form states for Wizards
   const [shopifyDomain, setShopifyDomain] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('+1 (555) 019-2834');
-  const [whatsappOtpInput, setWhatsappOtpInput] = useState('');
-  const [whatsappOtpError, setWhatsappOtpError] = useState(false);
   const [selectedFbPage, setSelectedFbPage] = useState('Aether Tech Labs');
   const [wooUrl, setWooUrl] = useState('https://mystore.wpcomstaging.com');
   const [wooConsumerKey, setWooConsumerKey] = useState('ck_91802b...');
@@ -146,8 +218,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     setActiveWizardId(item.id);
     setWizardStep(1);
     setIsSimulatingSync(false);
-    setWhatsappOtpError(false);
-    setWhatsappOtpInput('');
+    setWaError('');
   };
 
   const handleCompleteWizard = (id: string) => {
@@ -177,16 +248,24 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
-  // Overlay the real Facebook connection state onto the otherwise-mock integration list
-  const displayIntegrations = integrations.map((item) =>
-    item.id === 'int-fb'
-      ? {
-          ...item,
-          connected: fbConnected,
-          statusText: fbConnected ? (fbPageName ? `Connected: ${fbPageName}` : 'Active Sync') : 'Not Connected',
-        }
-      : item
-  );
+  // Overlay real Facebook & WhatsApp connection states onto the integration list
+  const displayIntegrations = integrations.map((item) => {
+    if (item.id === 'int-fb') {
+      return {
+        ...item,
+        connected: fbConnected,
+        statusText: fbConnected ? (fbPageName ? `Connected: ${fbPageName}` : 'Active Sync') : 'Not Connected',
+      };
+    }
+    if (item.id === 'int-wa') {
+      return {
+        ...item,
+        connected: waConnected,
+        statusText: waConnected ? (waPhoneName ? `Connected: ${waPhoneName}` : 'Active Sync') : 'Not Connected',
+      };
+    }
+    return item;
+  });
 
   // Filter based on search term
   const filteredIntegrations = displayIntegrations.filter(item =>
@@ -268,11 +347,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
                   {/* Status Badge Tag */}
                   <div>
-                    {isWhatsApp ? (
-                      <span className="inline-flex items-center text-[9px] font-sans font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
-                        Action Required
-                      </span>
-                    ) : item.connected ? (
+                    {item.connected ? (
                       <span className="inline-flex items-center text-[9px] font-sans font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
                         Connected
                       </span>
@@ -297,19 +372,31 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
               {/* Bottom footer & Action button */}
               <div className="border-t border-white/[0.04] pt-3.5 flex justify-between items-center">
-                <span className={`font-sans text-xs ${isWhatsApp ? 'text-red-400 font-semibold' : 'text-white/45'}`}>
+                <span className="font-sans text-xs text-white/45">
                   {item.statusText}
                 </span>
 
                 <button
-                  onClick={() => (item.id === 'int-fb' ? handleFacebookCardClick() : handleConnectClick(item))}
+                  onClick={() => {
+                    if (item.id === 'int-fb') {
+                      handleFacebookCardClick();
+                    } else if (item.id === 'int-wa') {
+                      if (waConnected) {
+                        handleWhatsAppDisconnect();
+                      } else {
+                        handleConnectClick(item);
+                      }
+                    } else {
+                      handleConnectClick(item);
+                    }
+                  }}
                   className={`font-sans text-xs font-bold px-3 py-1.5 rounded-lg tracking-wide transition-all active:scale-[0.98] cursor-pointer ${
-                    isWhatsApp
+                    isWhatsApp && !waConnected
                       ? 'bg-white hover:bg-white/90 text-black'
                       : 'bg-transparent hover:bg-white/5 border border-white/10 text-white'
                   }`}
                 >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? 'Connect' : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : 'Manage'}
                 </button>
               </div>
 
@@ -320,27 +407,23 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         {/* INTEGRATION INSIGHT Card - always present at the end of the grid layout */}
         <div className="bg-[#0e0e11] border border-white/[0.06] rounded-xl p-6 flex flex-col justify-between h-[250px] relative overflow-hidden group">
           
-          <div className="space-y-4">
-            {/* Top header with sparkles */}
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="h-4 w-4 text-white/70" />
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-white/70">
-                Integration Insight
-              </span>
-            </div>
-            
-            {/* Quote Body text */}
-            <p className="text-[13px] text-white/80 italic font-sans leading-relaxed tracking-tight">
-              "Connecting TikTok Shop could increase your multi-channel conversion rate by 14.2% based on current inventory trends."
-            </p>
+          {/* Subtle Background Pattern */}
+          <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] via-transparent to-white/[0.01] pointer-events-none" />
+
+          {/* Top Label */}
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[10px] font-sans font-bold text-white/40 uppercase tracking-widest">System Insight</span>
           </div>
 
-          {/* Large bottom View Projection button */}
-          <button className="w-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white/90 font-mono text-[10px] font-bold uppercase tracking-widest py-3 rounded-lg transition-all active:scale-[0.98] cursor-pointer">
-            View Projection
-          </button>
-          
+          {/* Bottom Action */}
+          <div className="border-t border-white/[0.04] pt-3">
+            <span className="text-[11px] font-sans text-white/40 hover:text-white/70 transition-colors cursor-pointer flex items-center gap-1.5">
+              Read architecture docs &rarr;
+            </span>
+          </div>
         </div>
+
       </div>
 
       {/* SETUP WIZARDS DIALOGS BACKDROP OVERLAY MODAL */}
@@ -493,96 +576,123 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                       </div>
                     )}
 
-                    {/* PATH B: WHATSAPP BUSINESS WEBHOOKS */}
+                    {/* PATH B: WHATSAPP BUSINESS — DUAL MODE */}
                     {activeWizardId === 'int-wa' && (
                       <div className="space-y-4">
                         {wizardStep === 1 && (
-                          <div className="space-y-4">
-                            <div className="text-center py-2 space-y-1">
-                              <Smartphone className="h-10 w-10 text-white mx-auto" />
-                              <h5 className="text-sm font-semibold text-white">Meta Cloud API Embedded Signup</h5>
+                          <div className="space-y-5">
+                            {/* ── Header ── */}
+                            <div className="text-center py-1 space-y-1.5">
+                              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto">
+                                <MessageSquare className="h-6 w-6 text-emerald-400" />
+                              </div>
+                              <h5 className="text-sm font-semibold text-white">Connect WhatsApp Business</h5>
                               <p className="text-xs text-white/50 leading-relaxed max-w-sm mx-auto">
-                                Provide your business telephone number linked to your Meta WhatsApp Business app account.
+                                Link your WhatsApp Business account so ShopMate AI can send and receive customer messages automatically.
                               </p>
                             </div>
-                            <div className="space-y-1.5">
-                              <label className="font-sans text-[10px] text-white/40 uppercase tracking-widest font-bold">Business Phone Number</label>
-                              <input
-                                type="text"
-                                value={whatsappNumber}
-                                onChange={(e) => setWhatsappNumber(e.target.value)}
-                                className="w-full bg-[#050505] border border-white/10 rounded-lg p-3 font-mono text-xs text-white focus:border-white/30 outline-none"
-                              />
+
+                            {waError && (
+                              <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-xs leading-relaxed">
+                                {waError}
+                              </div>
+                            )}
+
+                            {/* ── RECOMMENDED: Meta OAuth ── */}
+                            <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 space-y-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-sans font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded uppercase tracking-wider">
+                                  Recommended
+                                </span>
+                                <span className="text-[10px] text-white/40 font-sans">For all merchants</span>
+                              </div>
+
+                              <div>
+                                <h6 className="text-xs font-semibold text-white mb-1">Sign in with Meta</h6>
+                                <p className="text-[11px] text-white/50 leading-relaxed">
+                                  Click below — Meta's login will guide you through selecting your WhatsApp Business number. No tokens or IDs required.
+                                </p>
+                              </div>
+
+                              <button
+                                onClick={() => { window.location.href = getFacebookConnectUrl(); }}
+                                className="w-full flex items-center justify-center gap-2.5 bg-[#1877f2] hover:bg-[#1565d8] text-white font-sans text-xs font-bold py-3 rounded-lg cursor-pointer transition-colors"
+                              >
+                                <Facebook className="h-4 w-4" />
+                                Continue with Meta
+                              </button>
                             </div>
-                            <button 
-                              onClick={() => setWizardStep(2)}
-                              className="w-full bg-white hover:bg-white/95 text-black font-sans text-xs font-bold uppercase tracking-wider py-3 rounded-lg cursor-pointer"
-                            >
-                              Send Verification OTP SMS
-                            </button>
+
+                            {/* ── DIVIDER ── */}
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 h-px bg-white/[0.06]" />
+                              <span className="text-[10px] text-white/30 font-sans uppercase tracking-widest">or</span>
+                              <div className="flex-1 h-px bg-white/[0.06]" />
+                            </div>
+
+                            {/* ── DEVELOPER: Manual Credentials ── */}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Lock className="h-3.5 w-3.5 text-white/30" />
+                                <span className="text-[11px] text-white/40 font-sans font-semibold">Developer / Test Number Setup</span>
+                              </div>
+                              <p className="text-[10px] text-white/30 leading-relaxed mb-3">
+                                Use this only if you have a Meta Developer App with a test phone number.
+                              </p>
+
+                              <div className="space-y-2.5">
+                                <div className="space-y-1.5">
+                                  <label className="font-sans text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                                    Phone Number ID <span className="text-red-400">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="e.g. 10528492049102"
+                                    value={waPhoneNumberId}
+                                    onChange={(e) => setWaPhoneNumberId(e.target.value)}
+                                    className="w-full bg-[#050505] border border-white/10 rounded-lg p-2.5 font-mono text-xs text-white focus:border-white/30 outline-none"
+                                  />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="font-sans text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                                    Temporary Access Token <span className="text-red-400">*</span>
+                                  </label>
+                                  <textarea
+                                    placeholder="e.g. EAAG..."
+                                    rows={2}
+                                    value={waAccessToken}
+                                    onChange={(e) => setWaAccessToken(e.target.value)}
+                                    className="w-full bg-[#050505] border border-white/10 rounded-lg p-2.5 font-mono text-xs text-white focus:border-white/30 outline-none resize-none"
+                                  />
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={handleSaveWhatsAppCredentials}
+                                disabled={isConnectingWa || (!waPhoneNumberId.trim() || !waAccessToken.trim())}
+                                className="w-full mt-2 bg-white/[0.06] hover:bg-white/[0.10] disabled:opacity-40 border border-white/10 text-white font-sans text-xs font-bold uppercase tracking-wider py-2.5 rounded-lg cursor-pointer transition-colors flex items-center justify-center gap-2"
+                              >
+                                {isConnectingWa ? 'Connecting...' : 'Connect via API Keys'}
+                              </button>
+                            </div>
                           </div>
                         )}
 
                         {wizardStep === 2 && (
-                          <div className="space-y-4">
-                            <div className="text-center py-2 space-y-1">
-                              <Smartphone className="h-10 w-10 text-white mx-auto animate-bounce" />
-                              <h5 className="text-sm font-semibold text-white">SMS Security Challenge</h5>
-                              <p className="text-xs text-white/50 leading-relaxed">
-                                We sent a simulated verification OTP to <strong className="text-white">{whatsappNumber}</strong>.<br />
-                                <span className="font-mono text-white text-[10px] bg-white/5 border border-white/10 px-2 py-1 rounded-md inline-block mt-2 font-bold">
-                                  SIMULATION OTP: 4021
-                                </span>
-                              </p>
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="font-sans text-[10px] text-white/40 uppercase tracking-widest font-bold">Enter 4-Digit OTP Code</label>
-                              <input
-                                type="text"
-                                placeholder="0000"
-                                maxLength={4}
-                                value={whatsappOtpInput}
-                                onChange={(e) => {
-                                  setWhatsappOtpInput(e.target.value);
-                                  setWhatsappOtpError(false);
-                                }}
-                                className="w-full bg-[#050505] border border-white/10 rounded-lg p-3 text-center font-mono text-lg tracking-widest text-white focus:border-white/30 outline-none"
-                              />
-                              {whatsappOtpError && (
-                                <p className="text-red-400 font-mono text-[9px] uppercase tracking-wider font-semibold mt-1">
-                                  Invalid code. Enter 4021 to authenticate.
-                                </p>
-                              )}
-                            </div>
-                            <button 
-                              onClick={() => {
-                                if (whatsappOtpInput === '4021') {
-                                  setWizardStep(3);
-                                } else {
-                                  setWhatsappOtpError(true);
-                                }
-                              }}
-                              className="w-full bg-white hover:bg-white/95 text-black font-sans text-xs font-bold uppercase tracking-wider py-3 rounded-lg cursor-pointer"
-                            >
-                              Verify Code
-                            </button>
-                          </div>
-                        )}
-
-                        {wizardStep === 3 && (
                           <div className="space-y-4 text-center py-4">
-                            <CheckCircle2 className="h-12 w-12 text-white mx-auto" />
+                            <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto" />
                             <div className="space-y-1.5">
                               <h5 className="text-sm font-semibold text-white">WhatsApp Business Connected</h5>
                               <p className="text-xs text-white/50 max-w-sm mx-auto leading-relaxed">
-                                Phone number authorized via secure OAuth challenge. Meta webhook registrations activated for real-time lead ingestion.
+                                Your WhatsApp channel is now live. ShopMate AI will handle incoming messages and send replies automatically.
                               </p>
                             </div>
-                            <button 
+                            <button
                               onClick={() => handleCompleteWizard(activeWizardId)}
                               className="w-full bg-white hover:bg-white/95 text-black font-sans text-xs font-bold uppercase tracking-wider py-3 rounded-lg cursor-pointer"
                             >
-                              Deploy Chatbot Hub & Complete
+                              Done & Return to Integrations
                             </button>
                           </div>
                         )}
@@ -788,6 +898,71 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                   >
                     <span className="text-xs text-white font-sans font-medium">{page.name}</span>
                     <ChevronRight className="h-4 w-4 text-white/40" />
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* WhatsApp multi-number picker — shown when merchant has >1 phone number */}
+      <AnimatePresence>
+        {waPendingToken && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+              className="bg-[#0d0d0d] border border-white/10 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl flex flex-col text-left"
+            >
+              <header className="p-5 border-b border-white/5 bg-[#111111] flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                    <MessageSquare className="h-5 w-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="font-sans font-bold text-sm text-white">Select a WhatsApp Number</h4>
+                    <p className="font-mono text-[8px] text-white/40 uppercase tracking-widest mt-0.5">
+                      Multiple numbers found — choose one
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setWaPendingToken(null); setWaPendingNumbers([]); }}
+                  className="text-white/40 hover:text-white transition-colors cursor-pointer outline-none"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+
+              <div className="p-6 space-y-3">
+                <p className="text-xs text-white/50 leading-relaxed">
+                  Choose which WhatsApp Business number ShopMate AI should connect to:
+                </p>
+                {waError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-xs">
+                    {waError}
+                  </div>
+                )}
+                {waPendingNumbers.map((num) => (
+                  <button
+                    key={num.id}
+                    onClick={() => handleSelectWhatsAppNumber(num.id)}
+                    disabled={isSelectingWa}
+                    className="w-full p-3 text-left border rounded-lg flex justify-between items-center transition-all bg-[#060606] border-white/5 hover:border-emerald-500/30 cursor-pointer disabled:opacity-50"
+                  >
+                    <div>
+                      <span className="text-xs text-white font-sans font-medium block">{num.display_phone_number}</span>
+                      {num.name && <span className="text-[10px] text-white/40 font-sans">{num.name}</span>}
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-white/40 flex-shrink-0" />
                   </button>
                 ))}
               </div>

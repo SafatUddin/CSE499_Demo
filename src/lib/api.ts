@@ -186,6 +186,13 @@ export function disconnectChannel(type: string) {
   return request<{ success: boolean }>(`/api/channels/${type}`, { method: 'DELETE' });
 }
 
+export function connectWhatsAppChannel(input: { phoneNumberId: string; accessToken: string; phoneNumber?: string }) {
+  return request<{ success: boolean }>('/api/channels/whatsapp/connect', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 // Full-page redirect (not a fetch) since it hands off to Facebook's OAuth dialog.
 // The token travels as a query param because a browser navigation can't carry an
 // Authorization header.
@@ -207,6 +214,23 @@ export function selectFacebookPage(pendingToken: string, pageId: string) {
   return request<{ success: boolean }>('/api/channels/facebook/select', {
     method: 'POST',
     body: JSON.stringify({ pendingToken, pageId }),
+  });
+}
+
+export interface WhatsAppPendingNumber {
+  id: string;
+  display_phone_number: string;
+  name?: string;
+}
+
+export function getWhatsAppPendingNumbers(pendingToken: string) {
+  return request<{ numbers: WhatsAppPendingNumber[] }>(`/api/channels/whatsapp/pending?token=${encodeURIComponent(pendingToken)}`);
+}
+
+export function selectWhatsAppNumber(pendingToken: string, phoneNumberId: string) {
+  return request<{ success: boolean }>('/api/channels/whatsapp/select', {
+    method: 'POST',
+    body: JSON.stringify({ pendingToken, phoneNumberId }),
   });
 }
 

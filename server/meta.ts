@@ -27,6 +27,31 @@ export async function sendMessengerMessage(pageAccessToken: string, recipientPsi
   }
 }
 
+export async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, recipientWaId: string, text: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipientWaId,
+      type: 'text',
+      text: {
+        preview_url: false,
+        body: text,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WhatsApp send failed: ${res.status} ${body}`);
+  }
+}
+
 export async function fetchMessengerProfileName(pageAccessToken: string, psid: string): Promise<string | null> {
   try {
     const res = await fetch(
@@ -42,7 +67,14 @@ export async function fetchMessengerProfileName(pageAccessToken: string, psid: s
   }
 }
 
-const FACEBOOK_OAUTH_SCOPES = ['pages_messaging', 'pages_show_list', 'pages_manage_metadata', 'pages_read_engagement'];
+const FACEBOOK_OAUTH_SCOPES = [
+  'pages_messaging',
+  'pages_show_list',
+  'pages_manage_metadata',
+  'pages_read_engagement',
+  'whatsapp_business_messaging',
+  'whatsapp_business_management',
+];
 
 export function getFacebookOAuthUrl(redirectUri: string, state: string): string {
   const params = new URLSearchParams({
@@ -87,6 +119,32 @@ export async function listManagedPages(userAccessToken: string): Promise<Managed
   }
   const data = await res.json();
   return data.data || [];
+}
+
+export interface WhatsAppPhoneNumber {
+  id: string;
+  display_phone_number: string;
+  verified_name?: string;
+}
+
+export async function listWhatsAppPhoneNumbers(userAccessToken: string): Promise<{ wabaId: string; wabaName: string; phoneNumbers: WhatsAppPhoneNumber[] }[]> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/me/whatsapp_business_accounts?fields=id,name,phone_numbers{id,display_phone_number,verified_name}&access_token=${encodeURIComponent(userAccessToken)}`
+    );
+    if (!res.ok) {
+      return [];
+    }
+    const data = await res.json();
+    return (data.data || []).map((acc: any) => ({
+      wabaId: acc.id,
+      wabaName: acc.name || 'WhatsApp Business Account',
+      phoneNumbers: acc.phone_numbers?.data || [],
+    }));
+  } catch (err) {
+    console.error('Failed to list WhatsApp accounts:', err);
+    return [];
+  }
 }
 
 export async function subscribePageWebhook(pageId: string, pageAccessToken: string): Promise<void> {

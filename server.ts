@@ -11,7 +11,9 @@ import {
   verifyMetaSignature,
   sendMessengerMessage,
   sendWhatsAppMessage,
+  sendInstagramMessage,
   fetchMessengerProfileName,
+  fetchInstagramProfileName,
   getFacebookOAuthUrl,
   exchangeCodeForUserToken,
   listManagedPages,
@@ -190,6 +192,17 @@ async function startServer() {
       update: { connected: true, externalId: page.id, credentials },
       create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials },
     });
+
+    if (page.instagram_business_account?.id) {
+      const igId = page.instagram_business_account.id;
+      const igCredentials = { token: encryptSecret(page.access_token), name: `@${page.name}` };
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId, type: 'INSTAGRAM' } },
+        update: { connected: true, externalId: igId, credentials: igCredentials },
+        create: { storeId, type: 'INSTAGRAM', connected: true, externalId: igId, credentials: igCredentials },
+      });
+    }
+
     try {
       await subscribePageWebhook(page.id, page.access_token);
     } catch (err) {
@@ -730,6 +743,19 @@ async function startServer() {
     return null;
   }
 
+  async function getInstagramCredentialsForStore(storeId: string): Promise<{ igAccountId: string; accessToken: string } | null> {
+    const channel = await prisma.channel.findUnique({ where: { storeId_type: { storeId, type: 'INSTAGRAM' } } });
+    if (channel?.connected && channel.credentials && channel.externalId) {
+      try {
+        const { token } = channel.credentials as { token: string };
+        return { igAccountId: channel.externalId, accessToken: decryptSecret(token) };
+      } catch (err) {
+        console.error('Failed to decrypt stored Instagram credentials:', err);
+      }
+    }
+    return null;
+  }
+
   // Generates an AI reply for a conversation and either delivers it immediately (Copilot
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
@@ -905,6 +931,17 @@ async function startServer() {
         }
       }
     }
+
+    if (isAutopilot && conversation.channelType === 'INSTAGRAM' && conversation.externalUserId) {
+      const igCreds = await getInstagramCredentialsForStore(conversation.storeId);
+      if (igCreds) {
+        try {
+          await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, result.replyText);
+        } catch (err) {
+          console.error('Failed to deliver AI reply to Instagram:', err);
+        }
+      }
+    }
   }
 
   // Derived, real-time notifications: unread/complaint conversations + low-stock products.
@@ -1062,6 +1099,17 @@ async function startServer() {
           }
         }
 
+        if (conversation.channelType === 'INSTAGRAM' && conversation.externalUserId) {
+          const igCreds = await getInstagramCredentialsForStore(conversation.storeId);
+          if (igCreds) {
+            try {
+              await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, text);
+            } catch (err) {
+              console.error('Failed to deliver merchant reply to Instagram:', err);
+            }
+          }
+        }
+
         const updated = await prisma.conversation.findUnique({
           where: { id: conversation.id },
           include: { messages: { orderBy: { createdAt: 'asc' } } },
@@ -1115,6 +1163,17 @@ async function startServer() {
             await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, message.text);
           } catch (err) {
             console.error('Failed to deliver approved draft to WhatsApp:', err);
+          }
+        }
+      }
+
+      if (conversation.channelType === 'INSTAGRAM' && conversation.externalUserId) {
+        const igCreds = await getInstagramCredentialsForStore(conversation.storeId);
+        if (igCreds) {
+          try {
+            await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, message.text);
+          } catch (err) {
+            console.error('Failed to deliver approved draft to Instagram:', err);
           }
         }
       }
@@ -1267,6 +1326,52 @@ async function startServer() {
     await generateAndStoreAgentReply(conversation, messageText);
   }
 
+  async function handleIncomingInstagramMessage(igAccountId: string, senderIgUserId: string, messageText: string, externalMessageId: string) {
+    const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
+    if (alreadyProcessed) {
+      console.log('Duplicate Instagram webhook event, skipping:', externalMessageId);
+      return;
+    }
+
+    const channel = await prisma.channel.findFirst({ where: { type: 'INSTAGRAM', connected: true, externalId: igAccountId } });
+    if (!channel) {
+      console.error('Ignoring Instagram event for unconnected Account ID:', igAccountId);
+      return;
+    }
+    const storeId = channel.storeId;
+
+    let conversation = await prisma.conversation.findFirst({
+      where: { storeId, channelType: 'INSTAGRAM', externalUserId: senderIgUserId },
+    });
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: { storeId, channelType: 'INSTAGRAM', externalUserId: senderIgUserId, lastMessageAt: new Date() },
+      });
+    }
+
+    if (!conversation.customerName) {
+      const igCreds = await getInstagramCredentialsForStore(storeId);
+      const customerName = igCreds ? await fetchInstagramProfileName(igCreds.accessToken, senderIgUserId) : null;
+      if (customerName) {
+        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { customerName: `@${customerName}` } });
+      }
+    }
+
+    try {
+      await prisma.message.create({
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+      });
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        console.log('Duplicate Instagram webhook event (race), skipping:', externalMessageId);
+        return;
+      }
+      throw err;
+    }
+
+    await generateAndStoreAgentReply(conversation, messageText);
+  }
+
   // Meta webhook receiver — signature-verified before any payload is trusted
   app.post('/webhooks/meta', async (req: RequestWithRawBody, res) => {
     const signature = req.headers['x-hub-signature-256'] as string | undefined;
@@ -1292,6 +1397,18 @@ async function startServer() {
             if (!senderPsid || !messageText || !messageId || event.message?.is_echo) continue;
 
             await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
+          }
+        }
+      } else if (body.object === 'instagram') {
+        for (const entry of body.entry || []) {
+          const igAccountId = entry.id;
+          for (const event of entry.messaging || []) {
+            const senderIgUserId = event.sender?.id;
+            const messageText = event.message?.text;
+            const messageId = event.message?.mid;
+            if (!senderIgUserId || !messageText || !messageId || event.message?.is_echo) continue;
+
+            await handleIncomingInstagramMessage(igAccountId, senderIgUserId, messageText, messageId);
           }
         }
       } else if (body.object === 'whatsapp_business_account') {

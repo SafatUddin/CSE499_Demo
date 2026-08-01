@@ -49,13 +49,16 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [isSimulatingSync, setIsSimulatingSync] = useState(false);
 
-  // Real Facebook & WhatsApp connection state
+  // Real Facebook, Instagram & WhatsApp connection state
   const [fbConnected, setFbConnected] = useState(false);
   const [fbPageName, setFbPageName] = useState<string | null>(null);
   const [fbPendingToken, setFbPendingToken] = useState<string | null>(null);
   const [fbPendingPages, setFbPendingPages] = useState<FacebookPendingPage[]>([]);
   const [fbError, setFbError] = useState('');
   const [isSelectingPage, setIsSelectingPage] = useState(false);
+
+  const [igConnected, setIgConnected] = useState(false);
+  const [igAccountName, setIgAccountName] = useState<string | null>(null);
 
   const [waConnected, setWaConnected] = useState(false);
   const [waPhoneName, setWaPhoneName] = useState<string | null>(null);
@@ -73,6 +76,10 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         const facebook = channels.find((c) => c.type === 'facebook');
         setFbConnected(!!facebook?.connected);
         setFbPageName(facebook?.name || null);
+
+        const instagram = channels.find((c) => c.type === 'instagram');
+        setIgConnected(!!instagram?.connected);
+        setIgAccountName(instagram?.name || null);
 
         const whatsapp = channels.find((c) => c.type === 'whatsapp');
         setWaConnected(!!whatsapp?.connected);
@@ -199,6 +206,21 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  const handleInstagramCardClick = async () => {
+    if (igConnected) {
+      try {
+        await disconnectChannel('instagram');
+        setIgConnected(false);
+        setIgAccountName(null);
+        refreshChannelsStatus();
+      } catch (err) {
+        console.error('Failed to disconnect Instagram:', err);
+      }
+      return;
+    }
+    window.location.href = getFacebookConnectUrl();
+  };
+
   // Form states for Wizards
   const [shopifyDomain, setShopifyDomain] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('+1 (555) 019-2834');
@@ -248,13 +270,20 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
-  // Overlay real Facebook & WhatsApp connection states onto the integration list
+  // Overlay real Facebook, Instagram & WhatsApp connection states onto the integration list
   const displayIntegrations = integrations.map((item) => {
     if (item.id === 'int-fb') {
       return {
         ...item,
         connected: fbConnected,
         statusText: fbConnected ? (fbPageName ? `Connected: ${fbPageName}` : 'Active Sync') : 'Not Connected',
+      };
+    }
+    if (item.id === 'int-ig') {
+      return {
+        ...item,
+        connected: igConnected,
+        statusText: igConnected ? (igAccountName ? `Connected: ${igAccountName}` : 'Active Sync') : 'Not Connected',
       };
     }
     if (item.id === 'int-wa') {
@@ -380,6 +409,8 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                   onClick={() => {
                     if (item.id === 'int-fb') {
                       handleFacebookCardClick();
+                    } else if (item.id === 'int-ig') {
+                      handleInstagramCardClick();
                     } else if (item.id === 'int-wa') {
                       if (waConnected) {
                         handleWhatsAppDisconnect();
@@ -396,7 +427,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                       : 'bg-transparent hover:bg-white/5 border border-white/10 text-white'
                   }`}
                 >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : 'Manage'}
                 </button>
               </div>
 

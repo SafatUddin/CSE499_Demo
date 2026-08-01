@@ -67,11 +67,47 @@ export async function fetchMessengerProfileName(pageAccessToken: string, psid: s
   }
 }
 
+export async function sendInstagramMessage(igAccountId: string, accessToken: string, recipientIgUserId: string, text: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(igAccountId)}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientIgUserId },
+      message: { text },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Instagram send failed: ${res.status} ${body}`);
+  }
+}
+
+export async function fetchInstagramProfileName(accessToken: string, igUserId: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${igUserId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.username || data.name || null;
+  } catch (err) {
+    console.error('Failed to fetch Instagram profile name:', err);
+    return null;
+  }
+}
+
 const FACEBOOK_OAUTH_SCOPES = [
   'pages_messaging',
   'pages_show_list',
   'pages_manage_metadata',
   'pages_read_engagement',
+  'instagram_basic',
+  'instagram_manage_messages',
+  'instagram_manage_comments',
   'whatsapp_business_messaging',
   'whatsapp_business_management',
 ];
@@ -107,11 +143,12 @@ export interface ManagedPage {
   id: string;
   name: string;
   access_token: string;
+  instagram_business_account?: { id: string };
 }
 
 export async function listManagedPages(userAccessToken: string): Promise<ManagedPage[]> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(userAccessToken)}`
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=${encodeURIComponent(userAccessToken)}`
   );
   if (!res.ok) {
     const body = await res.text();

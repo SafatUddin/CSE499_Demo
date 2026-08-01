@@ -107,7 +107,7 @@ const FACEBOOK_OAUTH_SCOPES = [
   'pages_read_engagement',
   'instagram_basic',
   'instagram_manage_messages',
-  'instagram_manage_comments',
+  'business_management',
   'whatsapp_business_messaging',
   'whatsapp_business_management',
 ];
@@ -186,7 +186,7 @@ export async function listWhatsAppPhoneNumbers(userAccessToken: string): Promise
 
 export async function subscribePageWebhook(pageId: string, pageAccessToken: string): Promise<void> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(pageAccessToken)}`,
+    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,instagram_messages&access_token=${encodeURIComponent(pageAccessToken)}`,
     { method: 'POST' }
   );
   if (!res.ok) {

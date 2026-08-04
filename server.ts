@@ -22,6 +22,7 @@ import {
   ManagedPage,
 } from './server/meta';
 import { encryptSecret, decryptSecret } from './server/crypto';
+import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
 
 dotenv.config();
 
@@ -95,6 +96,11 @@ async function startServer() {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
 
+      // Google-only accounts have no password — treat as invalid credentials.
+      if (!merchant.passwordHash) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
       const valid = await bcrypt.compare(password, merchant.passwordHash);
       if (!valid) {
         return res.status(401).json({ error: 'Invalid email or password' });
@@ -109,6 +115,93 @@ async function startServer() {
     } catch (err: any) {
       console.error('Login error:', err);
       res.status(500).json({ error: 'Failed to log in' });
+    }
+  });
+
+  // Google OAuth — step 1: redirect the browser to Google's consent page
+  app.get('/api/auth/google/connect', (_req, res) => {
+    try {
+      const state = signState({ purpose: 'google_oauth' }, '10m');
+      const url = buildGoogleAuthUrl(state);
+      res.redirect(url);
+    } catch (err: any) {
+      console.error('Google connect error:', err);
+      res.status(500).json({ error: 'Failed to start Google sign-in' });
+    }
+  });
+
+  // Google OAuth — step 2: Google redirects here with code + state
+  app.get('/api/auth/google/callback', async (req, res) => {
+    try {
+      const { code, state } = req.query as { code?: string; state?: string };
+
+      if (!state) return res.status(400).json({ error: 'Missing OAuth state' });
+      try {
+        verifyState<{ purpose: string }>(state);
+      } catch {
+        return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+      }
+      if (!code) return res.status(400).json({ error: 'Missing authorization code' });
+
+      const profile = await exchangeCodeForProfile(code);
+
+      // Upsert: find by googleId first, then by email, else create new
+      let merchant = await prisma.merchant.findUnique({
+        where: { googleId: profile.googleId },
+        include: { store: true },
+      });
+
+      if (!merchant) {
+        const byEmail = await prisma.merchant.findUnique({
+          where: { email: profile.email },
+          include: { store: true },
+        });
+
+        if (byEmail) {
+          if (byEmail.googleId && byEmail.googleId !== profile.googleId) {
+            return res.status(409).json({ error: 'This email is already linked to a different Google account' });
+          }
+          merchant = await prisma.merchant.update({
+            where: { id: byEmail.id },
+            data: {
+              googleId: profile.googleId,
+              ...(!byEmail.avatarUrl && profile.picture ? { avatarUrl: profile.picture } : {}),
+            },
+            include: { store: true },
+          });
+        } else {
+          const newMerchant = await prisma.merchant.create({
+            data: {
+              email: profile.email,
+              passwordHash: null,
+              googleId: profile.googleId,
+              name: profile.name,
+              avatarUrl: profile.picture,
+            },
+          });
+          const store = await prisma.store.create({
+            data: {
+              merchantId: newMerchant.id,
+              name: `${profile.name}'s Store`,
+            },
+          });
+          merchant = { ...newMerchant, store };
+        }
+      }
+
+      if (!merchant.store) {
+        return res.status(500).json({ error: 'Merchant has no store' });
+      }
+
+      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
+      res.json({
+        token,
+        merchant: toPublicMerchant(merchant),
+        store: { id: merchant.store.id, name: merchant.store.name },
+      });
+    } catch (err: any) {
+      console.error('Google callback error:', err);
+      res.status(500).json({ error: 'Google sign-in failed' });
     }
   });
 
@@ -153,6 +246,9 @@ async function startServer() {
       }
 
       if (password) {
+        if (!merchant.passwordHash) {
+          return res.status(400).json({ error: 'This account uses Google sign-in and does not have a password' });
+        }
         if (!currentPassword) {
           return res.status(400).json({ error: 'Current password is required to set a new password' });
         }

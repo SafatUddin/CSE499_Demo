@@ -619,6 +619,236 @@ async function startServer() {
     }
   });
 
+  // Analytics: aggregated metrics for the authenticated merchant's store.
+  // Returns a day-by-day series (suitable for the existing Recharts AreaChart),
+  // summary KPIs, and a combined recent-activity feed — all scoped to the JWT
+  // store. No schema changes are required; data is derived at query time.
+  //
+  // GET /api/analytics?range=30   (default)
+  // GET /api/analytics?range=90
+  app.get('/api/analytics', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const storeId = req.auth!.storeId;
+
+      // Accept 30 or 90; anything else (including missing) defaults to 30.
+      const rawRange = Number(req.query.range);
+      const range: 30 | 90 = rawRange === 90 ? 90 : 30;
+
+      // Inclusive start boundary: midnight `range` days ago in UTC.
+      const start = new Date();
+      start.setUTCDate(start.getUTCDate() - range);
+      start.setUTCHours(0, 0, 0, 0);
+
+      // ------------------------------------------------------------------
+      // Parallel fetch — one round-trip for each logical data category.
+      // All queries are scoped to storeId; none load full message bodies.
+      // ------------------------------------------------------------------
+      const [
+        conversationsInRange,
+        ordersInRange,
+        aiMessageCount,
+        recentOrders,
+        recentComplaints,
+        lowStockProducts,
+      ] = await Promise.all([
+        // Slim conversation rows: only the fields needed for series + KPIs.
+        prisma.conversation.findMany({
+          where: { storeId, createdAt: { gte: start } },
+          select: { createdAt: true, status: true, isComplaint: true },
+        }),
+
+        // Slim order rows: enough for series bucketing + revenue aggregation.
+        prisma.order.findMany({
+          where: { storeId, createdAt: { gte: start } },
+          select: { createdAt: true, status: true, total: true },
+        }),
+
+        // AI message count — scoped via the conversation relation so we never
+        // load message text, and we stay within the authenticated store.
+        prisma.message.count({
+          where: {
+            sender: 'AI',
+            createdAt: { gte: start },
+            conversation: { storeId },
+          },
+        }),
+
+        // Activity feed: recent orders (not range-filtered — latest overall).
+        prisma.order.findMany({
+          where: { storeId },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, customerName: true, total: true, status: true, createdAt: true },
+        }),
+
+        // Activity feed: recent complaint conversations.
+        prisma.conversation.findMany({
+          where: { storeId, isComplaint: true },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 10,
+          select: { id: true, customerName: true, channelType: true, lastMessageAt: true },
+        }),
+
+        // Activity feed: low-stock products — same threshold (< 10) as
+        // /api/notifications so merchant sees a consistent picture across the app.
+        prisma.product.findMany({
+          where: { storeId, inventory: { lt: 10 } },
+          orderBy: { inventory: 'asc' },
+          take: 10,
+          select: { id: true, name: true, inventory: true },
+        }),
+      ]);
+
+      // ------------------------------------------------------------------
+      // Series: one entry per calendar day in [start, today].
+      // Both conversations and FULFILLED orders (verified as the only
+      // "completed" OrderStatus in this project — schema: PENDING | FULFILLED
+      // | CANCELLED; creation always writes PENDING; the merchant promotes to
+      // FULFILLED via PATCH /api/orders/:id) are bucketed by their UTC date.
+      //
+      // If the store has no data at all we return series: [] (empty state).
+      // ------------------------------------------------------------------
+      const hasData = conversationsInRange.length > 0 || ordersInRange.length > 0;
+
+      // Helper: ISO date string key e.g. "2024-10-14" from a Date.
+      const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+
+      // Helper: human-readable label matching the mock style ("Oct 14").
+      const dayLabel = (isoKey: string) => {
+        const d = new Date(`${isoKey}T00:00:00Z`);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      };
+
+      let series: { date: string; conversations: number; convertedSales: number }[] = [];
+
+      if (hasData) {
+        // Build a map of all days in the window → zero counts.
+        const dayMap = new Map<string, { conversations: number; convertedSales: number }>();
+        const cursor = new Date(start);
+        const today = new Date();
+        while (cursor <= today) {
+          dayMap.set(dayKey(cursor), { conversations: 0, convertedSales: 0 });
+          cursor.setUTCDate(cursor.getUTCDate() + 1);
+        }
+
+        // Bucket conversations.
+        for (const c of conversationsInRange) {
+          const key = dayKey(c.createdAt);
+          const entry = dayMap.get(key);
+          if (entry) entry.conversations += 1;
+        }
+
+        // Bucket converted sales — FULFILLED orders only.
+        for (const o of ordersInRange) {
+          if (o.status === 'FULFILLED') {
+            const key = dayKey(o.createdAt);
+            const entry = dayMap.get(key);
+            if (entry) entry.convertedSales += 1;
+          }
+        }
+
+        series = Array.from(dayMap.entries()).map(([key, counts]) => ({
+          date: dayLabel(key),
+          ...counts,
+        }));
+      }
+
+      // ------------------------------------------------------------------
+      // KPIs
+      // ------------------------------------------------------------------
+
+      // Automation rate: % of in-range conversations handled by AI.
+      const totalConvs = conversationsInRange.length;
+      const aiManagedCount = conversationsInRange.filter(c => c.status === 'AI_MANAGED').length;
+      const automationRate = totalConvs > 0 ? Math.round((aiManagedCount / totalConvs) * 100) : 0;
+
+      // Average response time is omitted in M1. Computing reliable first-reply
+      // latency requires pairing each CUSTOMER message with the next AI or
+      // MERCHANT reply, accounting for pending drafts (Copilot mode) and human-
+      // takeover gaps. That logic is out of scope for this milestone.
+      const averageResponseTime: null = null;
+
+      const orderCount = ordersInRange.length;
+
+      // Revenue: sum of all order totals in range regardless of status, so
+      // merchants see gross committed revenue, not just fulfilled orders.
+      const revenue = ordersInRange.reduce((sum, o) => sum + Number(o.total), 0);
+
+      const complaints = conversationsInRange.filter(c => c.isComplaint).length;
+
+      // ------------------------------------------------------------------
+      // Recent activity: merge orders, complaints, and low-stock alerts
+      // into one consistent array, sorted newest-first, capped at 10 items.
+      // ------------------------------------------------------------------
+
+      // Map order status enum back to the display value already used across
+      // the project (same logic as toPublicOrder above).
+      const orderStatusLabel = (s: string) =>
+        s === 'FULFILLED' ? 'Fulfilled' : s === 'CANCELLED' ? 'Cancelled' : 'Pending';
+
+      const activityItems: {
+        id: string;
+        type: 'order' | 'complaint' | 'inventory';
+        title: string;
+        body: string;
+        time: string | null;
+      }[] = [
+        ...recentOrders.map(o => ({
+          id: `order-${o.id}`,
+          type: 'order' as const,
+          title: `Order`,
+          body: `${o.customerName} · $${Number(o.total).toFixed(2)} · ${orderStatusLabel(o.status)}`,
+          time: o.createdAt.toISOString(),
+        })),
+        ...recentComplaints.map(c => ({
+          id: `complaint-${c.id}`,
+          type: 'complaint' as const,
+          title: 'Complaint',
+          body: `${c.customerName || 'A customer'} via ${c.channelType.toLowerCase()}`,
+          time: c.lastMessageAt.toISOString(),
+        })),
+        // Inventory alerts have no meaningful timestamp; they sort after timed items.
+        ...lowStockProducts.map(p => ({
+          id: `inventory-${p.id}`,
+          type: 'inventory' as const,
+          title: 'Inventory Alert',
+          body: `${p.name} is running low (${p.inventory} unit${p.inventory === 1 ? '' : 's'} left)`,
+          time: null,
+        })),
+      ];
+
+      // Sort: timed items newest-first; null-time items always last.
+      activityItems.sort((a, b) => {
+        if (!a.time && !b.time) return 0;
+        if (!a.time) return 1;
+        if (!b.time) return -1;
+        return new Date(b.time).getTime() - new Date(a.time).getTime();
+      });
+
+      const recentActivity = activityItems.slice(0, 10);
+
+      // ------------------------------------------------------------------
+      // Response
+      // ------------------------------------------------------------------
+      res.json({
+        range,
+        series,
+        kpis: {
+          automationRate,
+          averageResponseTime,
+          orderCount,
+          revenue: Math.round(revenue * 100) / 100,
+          aiMessages: aiMessageCount,
+          complaints,
+        },
+        recentActivity,
+      });
+    } catch (err: any) {
+      console.error('Analytics error:', err);
+      res.status(500).json({ error: 'Failed to load analytics' });
+    }
+  });
+
   // Get this store's AI persona
   app.get('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
     try {

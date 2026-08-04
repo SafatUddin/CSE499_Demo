@@ -132,16 +132,20 @@ async function startServer() {
 
   // Google OAuth — step 2: Google redirects here with code + state
   app.get('/api/auth/google/callback', async (req, res) => {
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
+    const errorRedirect = (msg: string) =>
+      res.redirect(`${appUrl}/#login?googleError=${encodeURIComponent(msg)}`);
+
     try {
       const { code, state } = req.query as { code?: string; state?: string };
 
-      if (!state) return res.status(400).json({ error: 'Missing OAuth state' });
+      if (!state) return errorRedirect('Missing OAuth state');
       try {
         verifyState<{ purpose: string }>(state);
       } catch {
-        return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+        return errorRedirect('Invalid or expired OAuth state');
       }
-      if (!code) return res.status(400).json({ error: 'Missing authorization code' });
+      if (!code) return errorRedirect('Missing authorization code');
 
       const profile = await exchangeCodeForProfile(code);
 
@@ -159,7 +163,7 @@ async function startServer() {
 
         if (byEmail) {
           if (byEmail.googleId && byEmail.googleId !== profile.googleId) {
-            return res.status(409).json({ error: 'This email is already linked to a different Google account' });
+            return errorRedirect('This email is already linked to a different Google account');
           }
           merchant = await prisma.merchant.update({
             where: { id: byEmail.id },
@@ -190,18 +194,19 @@ async function startServer() {
       }
 
       if (!merchant.store) {
-        return res.status(500).json({ error: 'Merchant has no store' });
+        return errorRedirect('Merchant has no store');
       }
 
       const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
-      res.json({
-        token,
-        merchant: toPublicMerchant(merchant),
-        store: { id: merchant.store.id, name: merchant.store.name },
+      const params = new URLSearchParams({
+        googleToken: token,
+        googleMerchant: JSON.stringify(toPublicMerchant(merchant)),
+        googleStore: JSON.stringify({ id: merchant.store.id, name: merchant.store.name }),
       });
+      res.redirect(`${appUrl}/#login?${params.toString()}`);
     } catch (err: any) {
       console.error('Google callback error:', err);
-      res.status(500).json({ error: 'Google sign-in failed' });
+      errorRedirect('Google sign-in failed');
     }
   });
 

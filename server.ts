@@ -543,55 +543,102 @@ async function startServer() {
   // real order/financial record needs explicit confirmation, same reasoning as the
   // AI-Copilot pending-draft approval flow.
   // Shared by the manual "Generate Order" endpoint and the AI's auto-finalize path
-  // (see generateAndStoreAgentReply) — builds line items from the current catalog,
-  // creates the Order row, and clears the conversation's cart.
+  // (see generateAndStoreAgentReply) — validates stock, atomically decrements inventory,
+  // creates the Order row, and clears the conversation's cart in one transaction.
   async function createOrderForConversation(
     conversation: { id: string; storeId: string; customerName: string | null },
     cart: { sku: string; quantity: number }[],
     address: string,
     customerNameOverride?: string
   ) {
-    const products = await prisma.product.findMany({
-      where: { storeId: conversation.storeId, sku: { in: cart.map((item) => item.sku) } },
-    });
+    const insufficientStock = (message: string) => {
+      const err = new Error(message) as Error & { code: string };
+      err.code = 'INSUFFICIENT_STOCK';
+      return err;
+    };
 
-    const items = cart.map((cartItem) => {
-      const product = products.find((p) => p.sku === cartItem.sku);
-      return {
-        sku: cartItem.sku,
-        name: product?.name || cartItem.sku,
-        price: product ? Number(product.price) : 0,
-        quantity: cartItem.quantity,
-      };
-    });
-    const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    return prisma.$transaction(async (tx) => {
+      const products = await tx.product.findMany({
+        where: { storeId: conversation.storeId, sku: { in: cart.map((item) => item.sku) } },
+      });
 
-    const order = await prisma.order.create({
-      data: {
-        storeId: conversation.storeId,
-        conversationId: conversation.id,
-        items,
-        customerName: customerNameOverride || conversation.customerName || 'Customer',
-        address,
-        status: 'PENDING',
-        total,
-      },
-    });
+      // M1: every cart line must resolve to a real product with enough stock.
+      for (const cartItem of cart) {
+        const quantity = Math.floor(Number(cartItem.quantity));
+        if (!Number.isFinite(quantity) || quantity < 1) {
+          throw insufficientStock(`Invalid quantity for SKU ${cartItem.sku}`);
+        }
+        const product = products.find((p) => p.sku === cartItem.sku);
+        if (!product) {
+          throw insufficientStock(`Product not found for SKU ${cartItem.sku}`);
+        }
+        if (product.inventory < quantity) {
+          throw insufficientStock(
+            `Insufficient stock for ${product.name} (SKU ${product.sku}). Requested ${quantity}, available ${product.inventory}.`
+          );
+        }
+      }
 
-    // Checked out — clear the conversation's cart and reset order-flow state so a
-    // later purchase in the same conversation starts a fresh confirmation cycle.
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        cart: null,
-        orderConfirmationRequested: false,
-        orderConfirmed: false,
-        orderSummaryShown: false,
-        awaitingQuantityFor: null,
-      },
-    });
+      // M2: decrement under an inventory >= quantity predicate so concurrent checkouts
+      // cannot both claim the same unit. Sort by product id for a stable lock order.
+      const cartByProductId = [...cart].sort((a, b) => {
+        const pa = products.find((p) => p.sku === a.sku)!;
+        const pb = products.find((p) => p.sku === b.sku)!;
+        return pa.id.localeCompare(pb.id);
+      });
 
-    return order;
+      for (const cartItem of cartByProductId) {
+        const quantity = Math.floor(Number(cartItem.quantity));
+        const product = products.find((p) => p.sku === cartItem.sku)!;
+        const updated = await tx.product.updateMany({
+          where: { id: product.id, inventory: { gte: quantity } },
+          data: { inventory: { decrement: quantity } },
+        });
+        if (updated.count !== 1) {
+          throw insufficientStock(
+            `Insufficient stock for ${product.name} (SKU ${product.sku}).`
+          );
+        }
+      }
+
+      const items = cart.map((cartItem) => {
+        const product = products.find((p) => p.sku === cartItem.sku)!;
+        return {
+          sku: cartItem.sku,
+          name: product.name,
+          price: Number(product.price),
+          quantity: Math.floor(Number(cartItem.quantity)),
+        };
+      });
+      const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+      const order = await tx.order.create({
+        data: {
+          storeId: conversation.storeId,
+          conversationId: conversation.id,
+          items,
+          customerName: customerNameOverride || conversation.customerName || 'Customer',
+          address,
+          status: 'PENDING',
+          total,
+        },
+      });
+
+      // Checked out — clear the conversation's cart and reset order-flow state so a
+      // later purchase in the same conversation starts a fresh confirmation cycle.
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          cart: null,
+          orderConfirmationRequested: false,
+          orderConfirmed: false,
+          orderSummaryShown: false,
+          awaitingQuantityFor: null,
+        },
+      });
+
+      return order;
+    });
   }
 
   app.post('/api/conversations/:id/orders', requireAuth, async (req: AuthedRequest, res) => {
@@ -614,6 +661,9 @@ async function startServer() {
       const order = await createOrderForConversation(conversation, cart, address, req.body.customerName);
       res.status(201).json(toPublicOrder(order));
     } catch (err: any) {
+      if (err?.code === 'INSUFFICIENT_STOCK') {
+        return res.status(409).json({ error: err.message || 'Insufficient stock to create this order' });
+      }
       console.error('Create order error:', err);
       res.status(500).json({ error: 'Failed to create order' });
     }

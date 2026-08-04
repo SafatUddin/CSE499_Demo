@@ -68,7 +68,8 @@ export async function fetchMessengerProfileName(pageAccessToken: string, psid: s
 }
 
 export async function sendInstagramMessage(igAccountId: string, accessToken: string, recipientIgUserId: string, text: string): Promise<void> {
-  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(igAccountId)}/messages`, {
+  // Try sending via IG account endpoint first
+  let res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(igAccountId)}/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -82,6 +83,21 @@ export async function sendInstagramMessage(igAccountId: string, accessToken: str
 
   if (!res.ok) {
     const body = await res.text();
+    // If Meta returns capability error (#3), fallback to /me/messages (supported by Page Access Tokens for connected IG accounts)
+    if (body.includes('"code":3') || body.includes('capability')) {
+      console.log('IG endpoint returned Code 3 capability error, trying /me/messages fallback...');
+      const fallbackRes = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(accessToken)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientIgUserId },
+          message: { text },
+        }),
+      });
+      if (fallbackRes.ok) return;
+      const fallbackBody = await fallbackRes.text();
+      throw new Error(`Instagram send failed (fallback): ${fallbackRes.status} ${fallbackBody}`);
+    }
     throw new Error(`Instagram send failed: ${res.status} ${body}`);
   }
 }

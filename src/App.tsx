@@ -98,6 +98,35 @@ export default function App() {
       .finally(() => setIsCheckingAuth(false));
   }, []);
 
+  // Detect a successful Google OAuth callback — the backend redirects back to
+  // /#login?googleToken=...&googleMerchant=...&googleStore=... after sign-in.
+  useEffect(() => {
+    const hash = window.location.hash;
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex === -1) return;
+    const params = new URLSearchParams(hash.slice(queryIndex + 1));
+
+    const googleToken = params.get('googleToken');
+    const googleError = params.get('googleError');
+    if (!googleToken && !googleError) return;
+
+    // Clean the URL before any state change
+    window.history.replaceState(null, '', '#login');
+
+    if (googleError) {
+      setActiveTab('login');
+      return;
+    }
+
+    try {
+      const merchantData = JSON.parse(params.get('googleMerchant')!);
+      const storeData = JSON.parse(params.get('googleStore')!);
+      handleAuthSuccess({ token: googleToken!, merchant: merchantData, store: storeData });
+    } catch {
+      setActiveTab('login');
+    }
+  }, []);
+
   // Listen to custom header actions for seamless routing & logging out
   useEffect(() => {
     const handleNavigateEvent = (e: Event) => {

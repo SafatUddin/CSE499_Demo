@@ -201,6 +201,12 @@ export function getFacebookConnectUrl(): string {
   return `/api/channels/facebook/connect?token=${encodeURIComponent(token)}`;
 }
 
+// Full-page redirect to the Google OAuth consent screen (no auth token required —
+// this is the merchant login/signup entry point, not a channel connection).
+export function getGoogleConnectUrl(): string {
+  return '/api/auth/google/connect';
+}
+
 export interface FacebookPendingPage {
   id: string;
   name: string;

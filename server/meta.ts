@@ -186,7 +186,7 @@ export async function listWhatsAppPhoneNumbers(userAccessToken: string): Promise
 
 export async function subscribePageWebhook(pageId: string, pageAccessToken: string): Promise<void> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,instagram_messages&access_token=${encodeURIComponent(pageAccessToken)}`,
+    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(pageAccessToken)}`,
     { method: 'POST' }
   );
   if (!res.ok) {

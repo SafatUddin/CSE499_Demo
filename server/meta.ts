@@ -107,7 +107,6 @@ const FACEBOOK_OAUTH_SCOPES = [
   'pages_read_engagement',
   'instagram_basic',
   'instagram_manage_messages',
-  'instagram_business_manage_messages',
   'business_management',
   'whatsapp_business_messaging',
   'whatsapp_business_management',

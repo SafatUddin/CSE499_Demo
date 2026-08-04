@@ -266,3 +266,29 @@ export function createOrderFromConversation(conversationId: string, input: { cus
     body: JSON.stringify(input),
   });
 }
+
+export interface ApiAnalyticsActivity {
+  id: string;
+  type: 'order' | 'complaint' | 'inventory';
+  title: string;
+  body: string;
+  time: string | null;
+}
+
+export interface ApiAnalytics {
+  range: 30 | 90;
+  series: { date: string; conversations: number; convertedSales: number }[];
+  kpis: {
+    automationRate: number;
+    averageResponseTime: null;
+    orderCount: number;
+    revenue: number;
+    aiMessages: number;
+    complaints: number;
+  };
+  recentActivity: ApiAnalyticsActivity[];
+}
+
+export function fetchAnalytics(range: 30 | 90 = 30) {
+  return request<ApiAnalytics>(`/api/analytics?range=${range}`);
+}

@@ -36,28 +36,27 @@ export default function OrdersPage() {
   return (
     <div className="w-full flex-grow flex flex-col text-left">
       <DashboardHeader
-        title="Orders"
-        searchPlaceholder="Search orders..."
+        searchPlaceholder="Search orders…"
         searchValue={searchTerm}
         onSearchChange={setSearchTerm}
       />
 
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow space-y-6 pb-16">
-        <div className="bg-[#0c0c0e]/80 border border-white/[0.06] rounded-xl p-5 space-y-5">
-          <div className="flex justify-between items-center pb-3 border-b border-white/[0.04]">
+      <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
+        <div className="zone-b-grey2 p-6 space-y-5">
+          <div className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
             <div>
-              <h3 className="font-sans font-bold text-base text-white tracking-tight">Real Orders</h3>
-              <p className="text-[11px] text-white/45 mt-0.5">
-                {filteredOrders.length} order{filteredOrders.length === 1 ? '' : 's'} created from real conversations
+              <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Real orders</h3>
+              <p className="text-[13px] text-white/55 mt-0.5">
+                {filteredOrders.length} order{filteredOrders.length === 1 ? '' : 's'} generated from customer conversations
               </p>
             </div>
           </div>
 
-          <div className="border border-white/[0.06] rounded-xl overflow-hidden bg-[#0c0c0e]/30 w-full">
+          <div className="border border-white/[0.07] rounded-2xl overflow-hidden bg-black/30 w-full">
             <div className="max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 w-full">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-[#121215] border-b border-white/[0.04] text-[9px] font-sans text-white/40 uppercase tracking-widest font-bold">
+                  <tr className="bg-white/[0.05] border-b border-white/[0.07] text-[11px] font-sans text-white/50 tracking-[0.11em] font-bold">
                     <th className="p-4">Customer</th>
                     <th className="p-4">Items</th>
                     <th className="p-4">Address</th>
@@ -66,45 +65,45 @@ export default function OrdersPage() {
                     <th className="p-4">Placed</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.03] font-sans text-xs">
+                <tbody className="divide-y divide-white/[0.055] font-sans text-[14px]">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-white/30 font-sans text-xs">
-                        No orders yet. Orders appear here once a merchant confirms a customer's cart from the Inbox.
+                      <td colSpan={6} className="p-8 text-center text-white/40 font-sans text-xs">
+                        No orders recorded yet. Orders appear here once confirmed from customer conversations.
                       </td>
                     </tr>
                   ) : (
-                    filteredOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-white/[0.01] transition-colors">
-                        <td className="p-4 font-sans font-bold text-white">{order.customerName}</td>
-                        <td className="p-4 text-white/60">
-                          {order.items.map((item) => `${item.name} x${item.quantity}`).join(', ')}
-                        </td>
-                        <td className="p-4 text-white/45 max-w-[220px] truncate" title={order.address}>{order.address}</td>
-                        <td className="p-4 font-sans text-white font-bold">${order.total.toFixed(2)}</td>
-                        <td className="p-4">
-                          <select
-                            value={order.status}
-                            disabled={updatingId === order.id}
-                            onChange={(e) => handleStatusChange(order.id, e.target.value as 'Pending' | 'Fulfilled' | 'Cancelled')}
-                            className={`bg-transparent border rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wider cursor-pointer outline-none disabled:opacity-50 ${
-                              order.status === 'Fulfilled'
-                                ? 'text-emerald-400 border-emerald-500/20'
-                                : order.status === 'Cancelled'
-                                  ? 'text-red-400 border-red-500/20'
-                                  : 'text-amber-500 border-amber-500/20'
-                            }`}
-                          >
-                            <option className="bg-[#121215]" value="Pending">Pending</option>
-                            <option className="bg-[#121215]" value="Fulfilled">Fulfilled</option>
-                            <option className="bg-[#121215]" value="Cancelled">Cancelled</option>
-                          </select>
-                        </td>
-                        <td className="p-4 text-white/30 text-[10px]">
-                          {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                        </td>
-                      </tr>
-                    ))
+                    filteredOrders.map((order) => {
+                      const statusClass = 
+                        order.status === 'Fulfilled' ? 'status-success' :
+                        order.status === 'Cancelled' ? 'status-danger' : 'status-warning';
+
+                      return (
+                        <tr key={order.id} className="hover:bg-white/[0.03] transition-colors">
+                          <td className="p-4 font-sans font-bold text-white">{order.customerName}</td>
+                          <td className="p-4 text-white/70">
+                            {order.items.map((item) => `${item.name} ×${item.quantity}`).join(', ')}
+                          </td>
+                          <td className="p-4 text-white/50 max-w-[240px] truncate" title={order.address}>{order.address}</td>
+                          <td className="p-4 font-sans text-white font-bold">${order.total.toFixed(2)}</td>
+                          <td className="p-4">
+                            <select
+                              value={order.status}
+                              disabled={updatingId === order.id}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value as 'Pending' | 'Fulfilled' | 'Cancelled')}
+                              className={`appearance-none rounded-full px-3 py-1.5 text-xs font-bold cursor-pointer outline-none transition-colors ${statusClass}`}
+                            >
+                              <option className="bg-[#121215] text-white" value="Pending">Pending</option>
+                              <option className="bg-[#121215] text-white" value="Fulfilled">Fulfilled</option>
+                              <option className="bg-[#121215] text-white" value="Cancelled">Cancelled</option>
+                            </select>
+                          </td>
+                          <td className="p-4 text-white/40 text-xs">
+                            {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

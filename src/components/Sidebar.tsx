@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { Tab } from '../types';
 
+import { ShopMateLogo } from './ShopMateLogo';
+
 interface SidebarProps {
   activeTab: Tab;
   onNavigate: (tab: Tab) => void;
@@ -33,8 +35,8 @@ export default function Sidebar({
   onToggleCollapse
 }: SidebarProps) {
   const menuItems = [
-    { id: 'inbox', label: 'Unified Inbox', icon: MessageSquare },
-    { id: 'catalog', label: 'Product Catalog', icon: Package },
+    { id: 'inbox', label: 'Unified inbox', icon: MessageSquare },
+    { id: 'catalog', label: 'Product catalog', icon: Package },
     { id: 'orders', label: 'Orders', icon: ClipboardList },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'integrations', label: 'Integrations', icon: Grid },
@@ -42,69 +44,65 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Backdrop overlay on mobile */}
+      {/* Mobile Overlay */}
       {isOpen && (
         <div 
           onClick={onClose}
-          className="md:hidden fixed inset-0 bg-black/70 backdrop-blur-xs z-45 transition-opacity duration-300"
+          className="md:hidden fixed inset-0 bg-black/80 backdrop-blur-md z-45 transition-opacity duration-300"
         />
       )}
 
-      <aside className={`bg-[#0a0a0c] border-r border-white/[0.06] flex flex-col justify-between h-screen fixed top-0 left-0 z-50 md:z-30 select-none transition-all duration-300 ease-out ${
-        isCollapsed ? 'w-16' : 'w-64'
+      <aside className={`zone-a-sidebar flex flex-col justify-between h-screen fixed top-0 left-0 z-50 md:z-30 select-none transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
+        isCollapsed ? 'w-[92px]' : 'w-[290px]'
       } ${
         isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
-        <div className="flex flex-col flex-grow">
-          {/* Brand Logo Header */}
-          <header className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} border-b border-white/[0.04] relative`}>
-            <div className="flex items-center gap-2.5">
-              <img 
-                className="h-6 w-6 object-contain brightness-100 shrink-0" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-                alt="ShopMate Logo"
-              />
+        <div className="flex flex-col flex-grow no-scrollbar overflow-y-auto">
+          {/* Brand Block matching Picture 1 */}
+          <header className={`p-5 flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between'} border-b border-white/[0.08] relative`}>
+            <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
+              <ShopMateLogo size={22} className="w-10 h-10" />
               {!isCollapsed && (
                 <div>
-                  <span className="font-sans font-bold text-[15px] text-white block leading-none tracking-tight">ShopMate AI</span>
-                  <span className="font-sans text-[10px] text-white/50 block mt-1 tracking-wide leading-none">Elite Sales Command</span>
+                  <span className="font-sans font-extrabold text-[16px] text-white block leading-tight tracking-tight">ShopMate AI</span>
+                  <span className="font-sans text-[11px] text-blue-200/60 block mt-0.5 leading-tight font-medium">Elite sales command</span>
                 </div>
               )}
             </div>
             
-            {/* Collapse button when expanded */}
+            {/* Collapse toggle when expanded */}
             {!isCollapsed && (
               <button 
                 onClick={onToggleCollapse}
-                className="hidden md:flex p-1.5 text-white/40 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
-                title="Collapse Sidebar"
+                className="hidden md:flex p-1.5 text-white/50 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer transition-colors"
+                title="Collapse sidebar"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
             )}
 
-            {/* Expand button on the edge when collapsed */}
+            {/* Expand toggle when collapsed */}
             {isCollapsed && (
               <button 
                 onClick={onToggleCollapse}
-                className="hidden md:flex p-1 text-white/50 hover:text-white bg-[#0a0a0c] border border-white/[0.08] rounded-full hover:bg-white/5 cursor-pointer absolute -right-2.5 top-5 z-50 shadow-md"
-                title="Expand Sidebar"
+                className="hidden md:flex p-1 text-white/80 bg-[#163691] border border-blue-400/40 rounded-full hover:bg-white/20 cursor-pointer absolute -right-3 top-7 z-50 shadow-lg"
+                title="Expand sidebar"
               >
-                <ChevronRight className="h-3 w-3" />
+                <ChevronRight className="h-3.5 w-3.5" />
               </button>
             )}
 
-            {/* Close button on mobile */}
+            {/* Mobile close */}
             <button 
               onClick={onClose}
-              className="md:hidden p-1.5 text-white/40 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
+              className="md:hidden p-1.5 text-white/50 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
           </header>
 
-          {/* Navigation Items */}
-          <nav className={`px-3 py-4 flex-grow space-y-1.5 ${isCollapsed ? 'flex flex-col items-center' : ''}`}>
+          {/* Nav Items matching Picture 1 */}
+          <nav className={`px-4 py-6 flex-grow space-y-2.5 ${isCollapsed ? 'flex flex-col items-center gap-2 px-0' : ''}`}>
             {menuItems.map((item) => {
               const IconComponent = item.icon;
               const isActive = activeTab === item.id;
@@ -113,14 +111,24 @@ export default function Sidebar({
                   key={item.id}
                   onClick={() => onNavigate(item.id as Tab)}
                   title={isCollapsed ? item.label : undefined}
-                  className={`flex items-center gap-3 transition-all duration-150 cursor-pointer ${
+                  className={`flex items-center transition-all duration-200 cursor-pointer ${
                     isCollapsed 
-                      ? `p-3 rounded-lg justify-center ${isActive ? 'bg-white/[0.08] text-white' : 'bg-transparent text-white/60 hover:text-white hover:bg-white/[0.03]'}`
-                      : `w-full text-left px-3 py-2.5 rounded-lg ${isActive ? 'bg-white/[0.08] text-white font-medium' : 'bg-transparent text-white/60 hover:text-white hover:bg-white/[0.03]'}`
+                      ? `w-12 h-12 rounded-xl justify-center ${
+                          isActive 
+                            ? 'bg-gradient-to-r from-[#2757d8] to-[#183aa7] border border-blue-400/40 text-white shadow-[0_4px_18px_rgba(39,87,216,0.45)]' 
+                            : 'bg-transparent text-white/70 hover:text-white hover:bg-white/[0.08]'
+                        }`
+                      : `w-full text-left px-4 py-3 rounded-xl gap-3.5 ${
+                          isActive 
+                            ? 'bg-gradient-to-r from-[#2757d8] to-[#183aa7] border border-blue-400/40 text-white font-medium shadow-[0_4px_20px_rgba(39,87,216,0.45)]' 
+                            : 'bg-transparent text-white/70 hover:text-white hover:bg-white/[0.08]'
+                        }`
                   }`}
                 >
-                  <IconComponent className="h-4.5 w-4.5 shrink-0" />
-                  {!isCollapsed && <span className="font-sans text-xs tracking-normal">{item.label}</span>}
+                  <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                    <IconComponent className="h-4.5 w-4.5" />
+                  </div>
+                  {!isCollapsed && <span className="font-sans text-[14px] leading-none">{item.label}</span>}
                 </button>
               );
             })}
@@ -128,50 +136,54 @@ export default function Sidebar({
         </div>
 
         {/* Footer / AI Training & Settings */}
-        <div className={`p-4 border-t border-white/[0.06] ${isCollapsed ? 'flex flex-col items-center gap-4' : 'space-y-4'}`}>
+        <div className={`p-4 border-t border-white/[0.08] ${isCollapsed ? 'flex flex-col items-center gap-4 px-0' : 'space-y-4'}`}>
           {/* AI Training Active Card */}
           {isCollapsed ? (
-            <div className="p-1 bg-white/[0.03] border border-white/[0.06] rounded-full" title="AI Training Active (82%)">
-              <span className="w-2 h-2 rounded-full bg-[#e2e2e2] block animate-pulse" />
+            <div className="p-2 bg-white/[0.06] border border-white/10 rounded-full" title="AI training active (78%)">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#3ddc84] block animate-pulse-dot shadow-[0_0_10px_rgba(61,220,132,0.9)]" />
             </div>
           ) : (
-            <div className="p-3.5 bg-white/[0.03] border border-white/[0.06] rounded-xl">
+            <div className="p-3.5 bg-white/[0.06] border border-white/10 rounded-2xl">
               <div className="flex items-center gap-2 mb-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#e2e2e2]" />
-                <span className="font-sans text-[10px] uppercase tracking-[0.12em] font-bold text-white/80">AI Training Active</span>
+                <span className="w-2 h-2 rounded-full bg-[#3ddc84] block animate-pulse-dot shadow-[0_0_8px_rgba(61,220,132,0.9)]" />
+                <span className="font-sans text-[11.5px] font-bold text-white">AI training active</span>
               </div>
-              <div className="w-full bg-white/[0.08] h-1 rounded-full overflow-hidden">
-                <div className="bg-[#e2e2e2] h-full w-[82%]" />
+              <div className="w-full bg-white/10 h-[5px] rounded-full overflow-hidden">
+                <div className="bg-gradient-to-r from-white to-[#a9c6ff] h-full w-[78%] shadow-[0_0_10px_rgba(169,198,255,0.7)]" />
               </div>
             </div>
           )}
 
-          {/* Settings & Logout buttons */}
-          <div className={`space-y-1.5 ${isCollapsed ? 'w-full flex flex-col items-center' : ''}`}>
+          {/* Settings & Logout */}
+          <div className={`space-y-1.5 ${isCollapsed ? 'w-full flex flex-col items-center gap-1.5' : ''}`}>
             <button
               onClick={() => onNavigate('settings')}
               title={isCollapsed ? 'Settings' : undefined}
-              className={`flex items-center gap-3 transition-all duration-150 cursor-pointer ${
+              className={`flex items-center transition-all duration-180 cursor-pointer ${
                 isCollapsed 
-                  ? `p-3 rounded-lg justify-center ${activeTab === 'settings' ? 'bg-white/[0.08] text-white' : 'bg-transparent text-white/60 hover:text-white hover:bg-white/[0.03]'}`
-                  : `w-full text-left px-3 py-2.5 rounded-lg ${activeTab === 'settings' ? 'bg-white/[0.08] text-white font-medium' : 'bg-transparent text-white/60 hover:text-white hover:bg-white/[0.03]'}`
+                  ? `w-12 h-12 rounded-xl justify-center ${activeTab === 'settings' ? 'bg-[#2757d8] text-white' : 'text-white/65 hover:text-white hover:bg-white/[0.08]'}`
+                  : `w-full text-left px-4 py-2.5 rounded-xl gap-3.5 ${activeTab === 'settings' ? 'bg-[#2757d8] text-white font-medium' : 'text-white/65 hover:text-white hover:bg-white/[0.08]'}`
               }`}
             >
-              <Settings className="h-4.5 w-4.5 shrink-0" />
-              {!isCollapsed && <span className="font-sans text-xs">Settings</span>}
+              <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                <Settings className="h-4.5 w-4.5" />
+              </div>
+              {!isCollapsed && <span className="font-sans text-[13.5px]">Settings</span>}
             </button>
 
             <button 
               onClick={onLogout}
-              title={isCollapsed ? 'Log Out' : undefined}
-              className={`flex items-center gap-3 transition-all duration-150 cursor-pointer ${
+              title={isCollapsed ? 'Log out' : undefined}
+              className={`flex items-center transition-all duration-180 cursor-pointer ${
                 isCollapsed 
-                  ? 'p-3 rounded-lg justify-center text-white/40 hover:text-red-400 hover:bg-red-500/5'
-                  : 'w-full text-left px-3 py-2.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/5'
+                  ? 'w-12 h-12 rounded-xl justify-center text-white/50 hover:text-[#ffb4b4] hover:bg-[rgba(255,90,90,0.14)]'
+                  : 'w-full text-left px-4 py-2.5 rounded-xl gap-3.5 text-white/50 hover:text-[#ffb4b4] hover:bg-[rgba(255,90,90,0.14)]'
               }`}
             >
-              <LogOut className="h-4.5 w-4.5 shrink-0" />
-              {!isCollapsed && <span className="font-sans text-xs">Log Out</span>}
+              <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                <LogOut className="h-4.5 w-4.5" />
+              </div>
+              {!isCollapsed && <span className="font-sans text-[13.5px]">Log out</span>}
             </button>
           </div>
         </div>

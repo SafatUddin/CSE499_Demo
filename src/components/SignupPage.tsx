@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, ArrowRight, Check, CreditCard, Zap } from 'lucide-react';
+import { ShopMateLogo } from './ShopMateLogo';
 import { Tab } from '../types';
 import { signup, getGoogleConnectUrl, AuthResponse } from '../lib/api';
 
@@ -37,9 +38,13 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
   };
 
   return (
-    <div className="min-h-screen bg-[#070708] text-[#e2e2e2] font-sans flex overflow-x-hidden overflow-y-auto selection:bg-white/10 selection:text-white relative">
+    <div className="min-h-screen app-bg-gradient text-[#e2e2e2] font-sans flex overflow-x-hidden overflow-y-auto selection:bg-white/10 selection:text-white relative">
+      {/* Background soft blurs according to DESIGN.md */}
+      <div className="ambient-bloom-tl" />
+      <div className="ambient-bloom-br" />
+
       {/* Left Sidebar branding (40%) */}
-      <aside className="hidden lg:flex lg:w-[40%] bg-[#0c0c0e] flex-col justify-between p-12 relative border-r border-white/[0.06]">
+      <aside className="hidden lg:flex lg:w-[40%] zone-b-grey1 flex-col justify-between p-12 relative border-r border-white/10">
         {/* Ambient top light aura */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
           <div className="absolute -top-1/4 -left-1/4 w-full h-full rounded-full bg-white/[0.015] blur-[120px]" />
@@ -48,13 +53,7 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
         <div className="relative z-10 space-y-12">
           {/* Brand Logo Header */}
           <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => onNavigate('landing')}>
-            <div className="bg-white p-1 rounded-md w-7 h-7 flex items-center justify-center">
-              <img 
-                alt="ShopMate AI Logo" 
-                className="w-full h-full object-contain brightness-100" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-              />
-            </div>
+            <ShopMateLogo size={18} className="w-7 h-7 !rounded-lg" />
             <span className="font-sans font-bold text-md text-white tracking-tight">ShopMate AI</span>
           </div>
 
@@ -104,13 +103,7 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
         <div className="w-full max-w-[480px]">
           {/* Mobile brand header (shown on small screens) */}
           <div className="lg:hidden flex flex-col items-center justify-center mb-10">
-            <div className="bg-white p-1 rounded-md w-8 h-8 flex items-center justify-center mb-2">
-              <img 
-                alt="ShopMate AI Logo" 
-                className="w-full h-full object-contain brightness-100" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-              />
-            </div>
+            <ShopMateLogo size={20} className="w-8 h-8 mb-2 !rounded-lg" />
             <span className="font-sans font-bold text-md text-white tracking-tight">ShopMate AI</span>
           </div>
 
@@ -241,7 +234,7 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
             <button 
               type="submit"
               disabled={isLoading || !agreeTerms}
-              className="w-full bg-[#ceced2] hover:bg-white text-black py-4 rounded font-bold font-sans text-[11px] uppercase tracking-widest transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full bg-gradient-to-br from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white shadow-[0_6px_22px_rgba(37,82,198,0.45)] hover:brightness-110 py-4 rounded-xl font-bold font-sans text-[11px] uppercase tracking-widest transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isLoading ? (
                 <span>CREATING COMMAND CENTER...</span>

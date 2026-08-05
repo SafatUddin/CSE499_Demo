@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Tab, Product, Integration, AIPersona, Conversation, ChatMessage } from './types';
 import {
@@ -40,6 +40,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('landing');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Reset scroll to top whenever the active tab changes
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+  }, [activeTab]);
 
   // Pushes a browser history entry per tab change so the back button undoes the last
   // in-app navigation instead of leaving the whole app.
@@ -396,10 +402,14 @@ export default function App() {
   }
 
   return (
-    <div className="bg-background min-h-screen text-on-surface overflow-x-hidden w-full max-w-full">
+    <div className="app-bg-gradient min-h-screen text-on-surface w-full relative">
+      {/* Ambient bloom effects */}
+      <div className="ambient-bloom-tl" />
+      <div className="ambient-bloom-br" />
+
       {/* If authenticated, wrap in persistent Sidebar layout */}
       {isAuthenticated ? (
-        <div className="flex w-full max-w-full overflow-x-hidden">
+        <div className="flex w-full min-h-screen">
           {/* Sidebar Left Navigation */}
           <Sidebar 
             activeTab={activeTab} 
@@ -411,8 +421,8 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
           />
 
-          {/* Core Content Area */}
-          <main className={`flex-grow pl-0 ${isSidebarCollapsed ? 'md:pl-16' : 'md:pl-64'} h-screen bg-[#060608] flex flex-col min-w-0 w-full overflow-hidden transition-all duration-300`}>
+          {/* Core Content Area — h-screen, inner page content scrolls without visible scrollbar */}
+          <main ref={mainRef} className={`pl-0 ${isSidebarCollapsed ? 'md:pl-24' : 'md:pl-[290px]'} h-screen flex flex-col flex-1 min-w-0 ${activeTab === 'inbox' ? 'overflow-hidden' : 'overflow-y-auto'} no-scrollbar transition-all duration-300 relative z-10`}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -420,7 +430,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className={`w-full flex-grow flex flex-col ${activeTab === 'inbox' ? 'overflow-hidden h-full' : 'overflow-y-auto h-full scrollbar-thin scrollbar-thumb-white/10'}`}
+                className={`flex-1 min-h-0 w-full flex flex-col ${activeTab === 'inbox' ? 'overflow-hidden' : ''}`}
               >
                 {renderPageContent()}
               </motion.div>

@@ -7,19 +7,13 @@ import {
   Instagram, 
   MessageSquare, 
   User, 
-  Bot, 
-  ShoppingBag, 
-  ToggleLeft, 
-  ToggleRight,
   ShieldAlert,
   Plus,
-  Coins,
-  Check,
   FileText,
   Zap,
   ChevronLeft,
-  Info,
-  Trash2
+  Trash2,
+  Paperclip
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
 import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart } from '../lib/api';
@@ -42,7 +36,7 @@ export default function InboxConsole({
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('ALL CONVERSATIONS');
+  const [activeFilter, setActiveFilter] = useState('All conversations');
   const [orderAddress, setOrderAddress] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState('');
@@ -55,7 +49,6 @@ export default function InboxConsole({
     if (!chat) return '';
     if (chat.platform !== 'websocket') return chat.customerName;
 
-    // Check if the conversation has asked and answered name/address
     let askedIndex = -1;
     for (let i = 0; i < chat.messages.length; i++) {
       const msg = chat.messages[i];
@@ -69,32 +62,30 @@ export default function InboxConsole({
     }
 
     if (askedIndex !== -1) {
-      // Find customer response after the question
       const customerReplies = chat.messages.slice(askedIndex + 1).filter(m => m.sender === 'customer');
       if (customerReplies.length > 0) {
-        return chat.customerName; // Revealed name
+        return chat.customerName;
       }
     }
 
-    // Otherwise, use the number from ID
     const num = chat.id.replace(/\D/g, '') || '1';
-    return `Unknown#${num}`;
+    return `Unknown #${num}`;
   };
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   
   const activeChat = conversations.find(c => c.id === selectedChatId) || conversations[0];
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [activeChat?.messages, isTyping]);
 
-  // Pre-fill (never overwrite) the order address from what the AI detected in the
-  // conversation — the merchant can still edit it before confirming the order.
   useEffect(() => {
     if (activeChat?.detectedAddress && !orderAddress.trim()) {
       setOrderAddress(activeChat.detectedAddress);
@@ -105,11 +96,6 @@ export default function InboxConsole({
     if (!textToSend.trim() || !activeChat) return;
 
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // The 'websocket' channel is the demo/testing widget with no real external customer,
-    // so typing here simulates an incoming customer message. Every other channel (Facebook,
-    // Instagram, WhatsApp) already has a real customer on the other end — typing here is the
-    // merchant's own reply, sent back to that real customer instead of impersonating them.
     const isSimulatedCustomerChannel = activeChat.platform === 'websocket';
 
     const optimisticMsg: ChatMessage = {
@@ -125,7 +111,7 @@ export default function InboxConsole({
     onUpdateConversation(activeChat.id, {
       messages: [...activeChat.messages, optimisticMsg],
       lastMessage: textToSend,
-      time: 'Just Now'
+      time: 'Just now'
     });
     setInputText('');
 
@@ -134,9 +120,6 @@ export default function InboxConsole({
     }
 
     try {
-      // The backend persists the message and, for a simulated customer message, generates
-      // a reply too — either auto-sent (Copilot on) or held as a pending draft (Copilot
-      // off) — either way it returns the authoritative conversation state.
       const updated = await sendConversationMessage(
         activeChat.id,
         textToSend,
@@ -203,26 +186,42 @@ export default function InboxConsole({
     onUpdateConversationStatus(activeChat.id, newStatus);
   };
 
-  // Filter list of chats
   const filteredChats = conversations.filter(chat => {
     const displayName = getChatDisplayName(chat);
     const matchesSearch = displayName.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
     
     if (!matchesSearch) return false;
-    if (activeFilter === 'ALL CONVERSATIONS') return true;
-    if (activeFilter === 'UNREAD') return chat.unread;
-    if (activeFilter === 'COMPLAINTS') return chat.isComplaint;
-    if (activeFilter === 'FACEBOOK') return chat.platform === 'facebook';
-    if (activeFilter === 'INSTAGRAM') return chat.platform === 'instagram';
-    if (activeFilter === 'WHATSAPP') return chat.platform === 'whatsapp';
-    if (activeFilter === 'WEBSOCKET') return chat.platform === 'websocket';
-    if (activeFilter === 'UNRESOLVED') return chat.status === 'Active';
-    if (activeFilter === 'RESOLVED') return chat.status === 'Closed';
+    const f = activeFilter.toLowerCase();
+    if (f === 'all conversations') return true;
+    if (f === 'unread') return chat.unread;
+    if (f === 'complaints') return chat.isComplaint;
+    if (f === 'facebook') return chat.platform === 'facebook';
+    if (f === 'instagram') return chat.platform === 'instagram';
+    if (f === 'whatsapp') return chat.platform === 'whatsapp';
+    if (f === 'websocket') return chat.platform === 'websocket';
+    if (f === 'unresolved') return chat.status === 'Active';
+    if (f === 'resolved') return chat.status === 'Closed';
     return true;
   });
 
-  const renderPlatformIcon = (platform: string, size = 13) => {
+  const getFilterCount = (filterName: string) => {
+    const f = filterName.toLowerCase();
+    return conversations.filter(chat => {
+      if (f === 'all conversations') return true;
+      if (f === 'unread') return chat.unread;
+      if (f === 'complaints') return chat.isComplaint;
+      if (f === 'facebook') return chat.platform === 'facebook';
+      if (f === 'instagram') return chat.platform === 'instagram';
+      if (f === 'whatsapp') return chat.platform === 'whatsapp';
+      if (f === 'websocket') return chat.platform === 'websocket';
+      if (f === 'unresolved') return chat.status === 'Active';
+      if (f === 'resolved') return chat.status === 'Closed';
+      return false;
+    }).length;
+  };
+
+  const renderPlatformIcon = (platform: string, size = 12) => {
     switch (platform) {
       case 'facebook':
         return <Facebook size={size} className="text-[#1877F2]" />;
@@ -231,332 +230,313 @@ export default function InboxConsole({
       case 'whatsapp':
         return <MessageSquare size={size} className="text-[#25D366]" />;
       case 'websocket':
-        return <Zap size={size} className="text-[#00F2FE]" />;
+        return <Zap size={size} className="text-[#4d8bff]" />;
       default:
         return <User size={size} className="text-white/40" />;
     }
   };
 
-  // Static list of filter options matching screenshot
   const FILTERS = [
-    'ALL CONVERSATIONS', 'UNREAD', 'UNRESOLVED', 'RESOLVED', 'COMPLAINTS', 
-    'ARCHIVED', 'SPAM', 'FACEBOOK', 'INSTAGRAM', 'WHATSAPP', 'WEBSOCKET'
+    'All conversations', 'Unread', 'Unresolved', 'Resolved', 'Complaints', 
+    'Archived', 'Spam', 'Facebook', 'Instagram', 'WhatsApp', 'Websocket'
   ];
 
   return (
-    <div className="w-full flex-grow flex flex-col text-left h-full overflow-hidden">
-      {/* Page header with search functionality linked */}
+    <div className="w-full flex-1 min-h-0 flex flex-col text-left overflow-hidden">
       <DashboardHeader 
-        title="SHOPMATE MERCHANT" 
-        searchPlaceholder="Search conversations..." 
+        searchPlaceholder="Search conversations…" 
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
       />
 
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 md:px-8 lg:px-10 py-4 sm:py-6 md:py-8 lg:py-10 w-full flex-grow flex flex-col min-h-0 space-y-5 pb-10 overflow-hidden">
+      <div className="w-full flex-grow flex flex-col min-h-0 space-y-3 p-4 md:p-5 overflow-hidden">
 
-        {/* Channel Filters Row */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 -mt-2 no-scrollbar shrink-0">
+        {/* 99px Filter Tabs Row matching Picture 1 */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar shrink-0 flex-nowrap">
           {FILTERS.map((f) => {
             const isActive = activeFilter === f;
+            const count = getFilterCount(f);
+            const isRedCount = ['unread', 'complaints', 'spam'].includes(f.toLowerCase());
+
             return (
               <button
                 key={f}
                 onClick={() => setActiveFilter(f)}
-                className={`text-[9px] font-sans font-bold uppercase tracking-wider px-3.5 py-1.5 rounded-full border shrink-0 transition-all cursor-pointer ${
+                className={`text-[12px] font-sans font-medium px-4 py-2 rounded-[99px] border shrink-0 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
                   isActive 
-                    ? 'bg-[#121215] border-white text-white' 
-                    : 'bg-transparent border-white/10 text-white/40 hover:text-white hover:border-white/20'
+                    ? 'bg-[#183478] border-blue-400/50 text-white font-bold shadow-[0_0_14px_rgba(37,82,198,0.45)]' 
+                    : 'bg-white/[0.06] border-white/12 text-white/70 hover:text-white hover:bg-white/12'
                 }`}
               >
-                {f}
+                <span>{f}</span>
+                {count > 0 && (
+                  <span className={`text-[10px] font-bold text-white px-2 py-0.5 rounded-full ${
+                    isRedCount 
+                      ? 'bg-gradient-to-r from-[#e53935] to-[#c62828]' 
+                      : 'bg-gradient-to-r from-[#2552c6] to-[#14307c]'
+                  }`}>
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
-        {/* Main Console Box layout */}
-        <div className="bg-[#0c0c0e] border border-white/[0.06] rounded-xl flex-grow flex overflow-hidden min-h-0 w-full">
+        {/* 3-Pane Workspace Container strictly fitting 100vh height */}
+        <div className="flex-grow min-h-0 flex gap-4 overflow-hidden w-full">
         
-        {/* 1. Left Thread List */}
-        <aside className={`border-r border-white/[0.06] flex flex-col h-full bg-[#0a0a0c] lg:w-[28%] w-full lg:flex ${mobileView === 'list' ? 'flex' : 'hidden'}`}>
-          <header className="p-4 border-b border-white/[0.05] flex items-center justify-between">
-            <h3 className="font-sans font-bold text-xs text-white uppercase tracking-wider">
-              Conversations
-            </h3>
-            <span className="bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-[9px] font-bold text-white font-mono">
-              {filteredChats.length}
-            </span>
-          </header>
+          {/* Pane 1: Left Conversation List */}
+          <aside className={`zone-b-grey1 flex flex-col h-full lg:w-[34%] min-w-[290px] w-full overflow-hidden shrink-0 ${mobileView === 'list' ? 'flex' : 'hidden lg:flex'}`}>
+            <header className="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0">
+              <h3 className="font-sans font-bold text-[16px] text-white">
+                Conversations
+              </h3>
+              <span className="bg-white/10 border border-white/15 rounded-lg px-2.5 py-0.5 text-[11px] font-bold text-white/80 font-mono">
+                {filteredChats.length}
+              </span>
+            </header>
 
-          <div className="flex-grow overflow-y-auto divide-y divide-white/[0.03] scrollbar-thin scrollbar-thumb-white/10 scroll-smooth">
-            {filteredChats.map((chat) => {
-              const isSelected = chat.id === selectedChatId;
-              return (
-                <button
-                  key={chat.id}
-                  onClick={() => {
-                    setSelectedChatId(chat.id);
-                    if (chat.unread) {
-                      onUpdateConversation(chat.id, { unread: false });
-                    }
-                    setMobileView('chat');
-                  }}
-                  className={`w-full text-left p-4 flex gap-3 items-start transition-all cursor-pointer border-l-2 ${
-                    isSelected 
-                      ? 'bg-white/[0.03] border-white text-white' 
-                      : 'bg-transparent border-transparent hover:bg-white/[0.01] text-white/75'
-                  }`}
+            <div className="flex-grow min-h-0 overflow-y-auto divide-y divide-white/[0.05] p-2 space-y-1 no-scrollbar">
+              {filteredChats.map((chat) => {
+                const isSelected = chat.id === selectedChatId;
+                return (
+                  <button
+                    key={chat.id}
+                    onClick={() => {
+                      setSelectedChatId(chat.id);
+                      if (chat.unread) {
+                        onUpdateConversation(chat.id, { unread: false });
+                      }
+                      setMobileView('chat');
+                    }}
+                    className={`w-full text-left p-3.5 flex gap-3 items-start transition-all cursor-pointer rounded-xl ${
+                      isSelected 
+                        ? 'bg-[#1a1d26] border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(0,0,0,0.4)]' 
+                        : 'bg-transparent border border-transparent hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    {/* 40px Avatar with channel badge */}
+                    <div className="relative shrink-0 mt-0.5">
+                      <div className="w-10 h-10 rounded-full bg-[#2a2d36] border border-white/15 flex items-center justify-center font-sans text-white text-[13px] font-bold uppercase">
+                        {getChatDisplayName(chat).split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 bg-[#09090b] p-0.5 rounded-full border border-white/20 shadow-md">
+                        {renderPlatformIcon(chat.platform, 11)}
+                      </div>
+                    </div>
+
+                    <div className="flex-grow min-w-0 space-y-0.5">
+                      <div className="flex justify-between items-center">
+                        <span className={`font-sans text-[13.5px] truncate ${chat.unread ? 'font-bold text-white' : 'font-semibold text-white/90'}`}>
+                          {getChatDisplayName(chat)}
+                        </span>
+                        <span className="font-sans text-[10.5px] text-white/40 shrink-0 ml-2">{chat.time}</span>
+                      </div>
+                      <p className="font-sans text-[12px] text-white/50 truncate leading-snug">
+                        {chat.lastMessage}
+                      </p>
+                      
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <span className={`inline-block font-sans text-[10.5px] px-2.5 py-0.5 rounded-full font-semibold ${
+                          chat.status === 'AI Managed' ? 'status-info' : 'status-neutral'
+                        }`}>
+                          {chat.status === 'AI Managed' ? 'AI managed' : 'Manual'}
+                        </span>
+                        {chat.isComplaint && (
+                          <span className="inline-block font-sans text-[10.5px] px-2 py-0.5 rounded-full font-semibold status-danger">
+                            Complaint
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* Pane 2: Middle Message Thread matching Picture 1 */}
+          <main className={`zone-b-black flex flex-col h-full min-w-[360px] flex-1 overflow-hidden relative ${mobileView === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
+            <header className="p-4 border-b border-white/[0.08] flex items-center justify-between bg-black/40 shrink-0">
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setMobileView('list')}
+                  className="lg:hidden p-1.5 text-white/60 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
                 >
-                  <div className="relative shrink-0 mt-0.5">
-                    <div className="w-8 h-8 rounded-full bg-[#18181b] border border-white/10 flex items-center justify-center font-sans text-white text-[11px] font-bold uppercase">
-                      {getChatDisplayName(chat).split(' ').map(n => n[0]).join('')}
-                    </div>
-                    {chat.unread && (
-                      <span className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-blue-500 rounded-full border border-[#0a0a0c] shadow-md animate-pulse" />
-                    )}
-                    <div className="absolute -bottom-1 -right-1 bg-[#0a0a0c] p-0.5 rounded-full border border-white/10">
-                      {renderPlatformIcon(chat.platform, 10)}
-                    </div>
-                  </div>
-
-                  <div className="flex-grow min-w-0 space-y-1">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className={`font-sans text-xs text-white truncate ${chat.unread ? 'font-extrabold' : 'font-bold'}`}>{getChatDisplayName(chat)}</span>
-                        {chat.unread && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />}
-                      </div>
-                      <span className="font-sans text-[9px] text-white/30">{chat.time}</span>
-                    </div>
-                    <p className={`font-sans text-[11px] truncate pr-2 leading-tight ${chat.unread ? 'text-white/80 font-semibold' : 'text-white/45'}`}>
-                      {chat.lastMessage}
-                    </p>
-                    
-                    <div className="flex items-center gap-1.5 pt-0.5">
-                      <span className={`inline-block font-sans text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                        chat.status === 'AI Managed' 
-                          ? 'text-white bg-white/[0.04] border-white/10' 
-                          : 'text-white/40 bg-transparent border-white/5'
-                      }`}>
-                        {chat.status === 'AI Managed' ? 'AI MANAGED' : 'MANUAL'}
-                      </span>
-                      {chat.isComplaint && (
-                        <span className="inline-block font-sans text-[8px] px-2 py-0.5 rounded font-bold uppercase tracking-wider text-red-400 bg-red-500/10 border-red-500/20">
-                          COMPLAINT
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  <ChevronLeft className="h-5 w-5" />
                 </button>
-              );
-            })}
-          </div>
-        </aside>
 
-        {/* 2. Middle Conversation Stream */}
-        <main className={`border-r border-white/[0.06] flex flex-col h-full bg-[#0d0d10] relative lg:w-[47%] w-full lg:flex ${mobileView === 'chat' ? 'flex' : 'hidden'}`}>
-          <header className="p-4 border-b border-white/[0.05] flex items-center justify-between bg-[#0a0a0c]">
-            <div className="flex items-center gap-3">
-              {/* Back button on mobile */}
-              <button 
-                type="button"
-                onClick={() => setMobileView('list')}
-                className="lg:hidden p-1.5 -ml-1 text-white/50 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer shrink-0"
-              >
-                <ChevronLeft className="h-4.5 w-4.5" />
-              </button>
-
-              <div className="w-8 h-8 rounded-full bg-[#18181b] border border-white/10 flex items-center justify-center font-sans text-white text-[11px] font-bold">
-                {activeChat ? getChatDisplayName(activeChat).split(' ').map(n => n[0]).join('') : ''}
-              </div>
-              <div>
-                <h4 className="font-sans text-xs font-bold text-white leading-none">{activeChat ? getChatDisplayName(activeChat) : ''}</h4>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="inline-block w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="font-sans text-[9px] text-white/40 uppercase tracking-wider font-semibold">
-                    Active via {activeChat?.platform}
-                  </span>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2757d8] to-[#14307c] border border-blue-400/40 text-white font-bold flex items-center justify-center font-sans text-[13px] shadow-md">
+                  {activeChat ? getChatDisplayName(activeChat).split(' ').map(n => n[0]).join('') : ''}
                 </div>
-              </div>
-            </div>
-
-            {/* Utility icons */}
-            <div className="flex items-center gap-1.5">
-              {/* Mobile Cart toggle */}
-              <button
-                type="button"
-                onClick={() => setMobileView('info')}
-                className="lg:hidden p-1.5 text-white/50 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
-                title="View Cart"
-              >
-                <ShoppingBag className="h-4 w-4" />
-              </button>
-            </div>
-          </header>
-
-          {/* Messages Viewport */}
-          <div className="flex-grow overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10 scroll-smooth">
-            {activeChat?.isComplaint && (
-              <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3 flex gap-2 text-left">
-                <ShieldAlert className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-sans text-[9px] text-red-400 font-bold uppercase tracking-wider">Complaint Isolation Override</p>
-                  <p className="text-[11px] text-white/50 leading-normal mt-0.5">Customer is highly dissatisfied. Review conversation below carefully.</p>
-                </div>
-              </div>
-            )}
-
-            {activeChat?.messages.map((m) => {
-              const isCustomer = m.sender === 'customer';
-              const isPendingDraft = m.sender === 'ai' && m.pending;
-              return (
-                <div key={m.id} className={`flex w-full ${isCustomer ? 'justify-start' : 'justify-end'}`}>
-                  {isPendingDraft ? (
-                    /* AI DRAFT MESSAGE TYPE — awaiting merchant approval, not yet delivered */
-                    <div className="bg-white/[0.03] border border-white/[0.08] p-4 rounded-xl max-w-[85%] text-left space-y-3 shadow-lg">
-                      <div className="flex items-center justify-between">
-                        <span className="font-sans text-[9px] font-bold text-white/60 uppercase tracking-widest flex items-center gap-1">
-                          ✨ AI-GENERATED REPLY (DRAFT)
-                        </span>
-                        <span className="font-sans text-[8px] text-white/30">{m.time}</span>
-                      </div>
-                      <p className="text-xs text-white leading-relaxed">{m.text}</p>
-
-                      {/* Action trigger buttons */}
-                      <div className="flex items-center gap-2 pt-1 border-t border-white/[0.04]">
-                        <button
-                          onClick={() => handleApproveDraft(m.id)}
-                          disabled={approvingId === m.id}
-                          className="bg-white hover:bg-white/90 text-black font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          {approvingId === m.id ? 'Sending...' : 'Send Now'}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setInputText(m.text);
-                            setEditingDraftId(m.id);
-                          }}
-                          className="bg-transparent hover:bg-white/5 text-white/80 border border-white/15 font-sans font-extrabold text-[9px] uppercase tracking-wider px-3 py-1.5 rounded transition-all cursor-pointer"
-                        >
-                          Edit Reply
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* NORMAL MESSAGE TYPE — customer message, or already-delivered AI/merchant reply */
-                    <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 border text-left ${
-                      isCustomer
-                        ? 'bg-[#121215] border-white/[0.04] text-white font-sans text-xs'
-                        : 'bg-white/[0.04] border-white/[0.06] text-white/95 font-sans text-xs'
-                    }`}>
-                      {m.sender === 'ai' && (
-                        <span className="font-sans text-[8px] font-bold text-white/40 uppercase tracking-widest block mb-1">
-                          ✨ AI
-                        </span>
-                      )}
-                      <p className="leading-relaxed leading-normal">{m.text}</p>
-                      <div className="text-right text-[8px] text-white/30 mt-1 font-sans">
-                        {m.time}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {isTyping && (
-              <div className="flex w-full justify-end">
-                <div className="bg-white/[0.02] border border-white/[0.05] max-w-[85%] rounded-xl px-3.5 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce [animation-delay:0.2s]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce [animation-delay:0.4s]" />
-                    <span className="font-sans text-[9px] text-white/40 uppercase tracking-wider font-bold ml-1">
-                      AI is formulating response...
+                  <h4 className="font-sans text-[15px] font-bold text-white leading-tight">{activeChat ? getChatDisplayName(activeChat) : ''}</h4>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="w-2 h-2 rounded-full bg-[#3ddc84] shadow-[0_0_8px_rgba(61,220,132,0.9)] animate-pulse-dot" />
+                    <span className="font-sans text-[11.5px] text-white/50">
+                      Active via {activeChat?.platform}
                     </span>
                   </div>
                 </div>
               </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
 
-          {/* User Input Interaction Panel */}
-          <footer className="p-4 border-t border-white/[0.05] bg-[#0a0a0c] space-y-3.5">
-            {/* Input Bar */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage(inputText);
-              }}
-              className="flex gap-2 relative bg-[#121215] border border-white/[0.06] rounded-xl px-3 py-2 items-center"
-            >
-              <button 
-                type="button" 
-                className="text-white/40 hover:text-white p-1 rounded transition-colors cursor-pointer"
-                onClick={() => setInputText("What other sizes are available?")}
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-              
-              <input
-                type="text"
-                required
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Type a message or use '/' for templates..."
-                className="flex-grow bg-transparent text-xs text-white placeholder-white/30 focus:outline-none px-1"
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMobileView('info')}
+                  className="lg:hidden p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+                >
+                  <FileText className="h-5 w-5" />
+                </button>
+              </div>
+            </header>
 
-              <button
-                type="submit"
-                disabled={isTyping || !inputText.trim()}
-                className="bg-white hover:bg-white/90 text-black font-semibold p-1.5 rounded-lg transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 flex items-center justify-center shrink-0"
-              >
-                <Send className="h-3 w-3" />
-              </button>
-            </form>
+            {/* Message Thread Area */}
+            <div ref={messagesContainerRef} className="flex-grow min-h-0 overflow-y-auto p-5 space-y-4 no-scrollbar">
+              {activeChat?.isComplaint && (
+                <div className="status-danger rounded-2xl p-3.5 flex gap-3 text-left">
+                  <ShieldAlert className="h-5 w-5 text-[#ff9d92] mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-sans text-xs font-bold uppercase tracking-wider">Complaint isolation override</p>
+                    <p className="text-[13px] text-white/80 leading-normal mt-0.5">Customer requested human support. Review conversation history below.</p>
+                  </div>
+                </div>
+              )}
 
-            {/* Quick Action Shortcuts */}
-            <div className="flex items-center gap-2">
-              <button 
-                type="button"
-                onClick={() => setInputText("Here is a customized quote for a bulk order of 5 units of the SM-99 Professional Series. We can offer a discounted rate of $1,199.00 per unit (totaling $5,995.00).")}
-                className="bg-[#121215] hover:bg-white/[0.03] border border-white/[0.06] text-white/50 hover:text-white rounded px-2.5 py-1 text-left font-sans text-[8px] font-bold uppercase tracking-wider transition-all cursor-pointer"
-              >
-                ⚡ SUGGEST QUOTE
-              </button>
-              <button 
-                type="button"
-                onClick={() => setInputText("The SM-99 Carbon L is one of our premium executive units featuring fully customized hardware.")}
-                className="bg-[#121215] hover:bg-white/[0.03] border border-white/[0.06] text-white/50 hover:text-white rounded px-2.5 py-1 text-left font-sans text-[8px] font-bold uppercase tracking-wider transition-all cursor-pointer"
-              >
-                📋 INSERT SKU
-              </button>
+              {activeChat?.messages.map((m) => {
+                const isCustomer = m.sender === 'customer';
+                const isPendingDraft = m.sender === 'ai' && m.pending;
+                return (
+                  <div key={m.id} className={`flex w-full ${isCustomer ? 'justify-start' : 'justify-end'}`}>
+                    {isPendingDraft ? (
+                      <div className="zone-b-grey3 p-4 rounded-2xl max-w-[72%] text-left space-y-3 shadow-xl border border-blue-400/40">
+                        <div className="flex items-center justify-between">
+                          <span className="font-sans text-[11px] font-bold text-[#a9c6ff] tracking-wider flex items-center gap-1.5">
+                            ✦ AI draft reply
+                          </span>
+                          <span className="font-sans text-[10.5px] text-white/50">{m.time}</span>
+                        </div>
+                        <p className="text-[13.5px] text-white leading-relaxed">{m.text}</p>
 
-              {activeChat?.platform === 'websocket' && (
+                        <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
+                          <button
+                            onClick={() => handleApproveDraft(m.id)}
+                            disabled={approvingId === m.id}
+                            className="btn-accent px-4 py-1.5 text-xs cursor-pointer disabled:opacity-50"
+                          >
+                            {approvingId === m.id ? 'Sending…' : 'Send now'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setInputText(m.text);
+                              setEditingDraftId(m.id);
+                            }}
+                            className="btn-glass px-4 py-1.5 text-xs cursor-pointer"
+                          >
+                            Edit reply
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Message Bubbles matching Picture 1 */
+                      <div className={`flex flex-col ${isCustomer ? 'items-start max-w-[62%]' : 'items-end max-w-[72%]'}`}>
+                        <div className={`p-4 font-sans text-[13.5px] leading-relaxed ${
+                          isCustomer
+                            ? 'bg-[#202228] border border-white/10 text-white rounded-[16px] rounded-bl-[4px]'
+                            : 'bg-gradient-to-br from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white rounded-[16px] rounded-br-[4px] shadow-[0_6px_22px_rgba(37,82,198,0.45)]'
+                        }`}>
+                          {m.sender === 'ai' && (
+                            <div className="flex items-center gap-1 mb-1 text-blue-200">
+                              <span className="text-[11px]">✦</span>
+                              <span className="font-sans text-[10.5px] font-bold tracking-wider">AI</span>
+                            </div>
+                          )}
+                          <p>{m.text}</p>
+                        </div>
+                        <span className="text-[10.5px] text-white/40 mt-1 px-1">{m.time}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {isTyping && (
+                <div className="flex w-full justify-end">
+                  <div className="bg-gradient-to-br from-[#2552c6]/80 to-[#14307c]/80 border border-blue-400/40 max-w-[72%] rounded-[16px] rounded-br-[4px] p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce [animation-delay:0.4s]" />
+                      <span className="font-sans text-[11px] text-blue-200 font-bold ml-1">
+                        AI formulating response…
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div />
+            </div>
+
+            {/* Composer matching Picture 1 */}
+            <footer className="p-4 border-t border-white/[0.08] bg-black/40 space-y-3">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendMessage(inputText);
+                }}
+                className="flex gap-2 bg-[#131418] border border-white/15 rounded-full p-1.5 pl-3 items-center shadow-lg"
+              >
+                <button 
+                  type="button" 
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                  onClick={() => setInputText("What other sizes are available?")}
+                  title="Attach"
+                >
+                  <Plus className="h-4.5 w-4.5" />
+                </button>
+                
+                <input
+                  type="text"
+                  required
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="Type a message or use '/' for templates…"
+                  className="flex-grow bg-transparent text-[13.5px] text-white placeholder-white/40 focus:outline-none px-2 font-sans"
+                />
+
+                <button
+                  type="submit"
+                  disabled={isTyping || !inputText.trim()}
+                  className="w-8 h-8 rounded-full bg-[#2552c6] hover:bg-[#2e5ee6] text-white flex items-center justify-center cursor-pointer disabled:opacity-40 shrink-0 shadow-md transition-colors"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </form>
+
+              {/* Action Chips + AI Copilot Control matching Picture 1 */}
+              <div className="flex items-center gap-3 flex-wrap">
                 <button 
                   type="button"
-                  onClick={() => {
-                    const hasAsked = activeChat.messages.some(m => {
-                      const t = m.text.toLowerCase();
-                      return (t.includes('name') && t.includes('address')) || t.includes('confirming your order') || t.includes('confirm your order');
-                    });
-                    
-                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    if (!hasAsked) {
-                      const aiMsg = {
-                        id: `m-ai-ws-${Date.now()}`,
-                        sender: 'ai' as const,
-                        text: "Thanks for choosing ShopMate! To finalize and confirm your order, could you please tell me your full name and delivery address?",
-                        time: timestamp
-                      };
-                      onUpdateConversation(activeChat.id, {
-                        messages: [...activeChat.messages, aiMsg],
-                        lastMessage: aiMsg.text,
-                        time: 'Just Now'
-                      });
-                    } else {
+                  onClick={() => setInputText("Here is a customized quote for a bulk order of 5 units. We can offer a discounted rate of $1,199.00 per unit.")}
+                  className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <span className="text-white/60">✦</span> Suggest quote
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setInputText("The SM-99 Carbon L is one of our premium executive units featuring fully customized hardware.")}
+                  className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <span className="text-white/60">📄</span> Insert SKU
+                </button>
+
+                {activeChat?.platform === 'websocket' && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                       const custMsg = {
                         id: `m-cust-ws-${Date.now()}`,
                         sender: 'customer' as const,
@@ -566,133 +546,135 @@ export default function InboxConsole({
                       onUpdateConversation(activeChat.id, {
                         messages: [...activeChat.messages, custMsg],
                         lastMessage: custMsg.text,
-                        time: 'Just Now'
+                        time: 'Just now'
                       });
-                    }
-                  }}
-                  className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 text-cyan-400 hover:text-white rounded px-2.5 py-1 text-left font-sans text-[8px] font-bold uppercase tracking-wider transition-all cursor-pointer animate-pulse"
-                >
-                  ⚡ SIMULATE SOCKET EVENT
-                </button>
-              )}
+                    }}
+                    className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-[#7aa8ff] font-medium text-[11.5px] px-3.5 py-2 rounded-xl cursor-pointer transition-colors"
+                  >
+                    ⚡ Simulate customer order reply
+                  </button>
+                )}
 
-              {/* Automation toggle */}
-              <div className="ml-auto flex items-center gap-2 bg-white/[0.02] border border-white/[0.05] px-2.5 py-1 rounded-lg">
-                <span className="font-sans text-[8px] text-white/40 uppercase tracking-widest font-bold">
-                  AI Copilot
-                </span>
-                <button
-                  type="button"
+                {/* AI Copilot toggle control matching Picture 1 */}
+                <div 
                   onClick={handleToggleAutomation}
-                  className="text-white hover:text-white transition-all cursor-pointer outline-none"
+                  className={`ml-auto flex items-center gap-3 px-4 py-2 rounded-full cursor-pointer select-none transition-all ${
+                    activeChat?.status === 'AI Managed'
+                      ? 'bg-gradient-to-r from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(37,82,198,0.45)]'
+                      : 'bg-[#1a1c22] border border-white/15 text-white/70'
+                  }`}
                 >
-                  {activeChat?.status === 'AI Managed' ? (
-                    <ToggleRight className="h-4.5 w-4.5 text-white" />
-                  ) : (
-                    <ToggleLeft className="h-4.5 w-4.5 text-white/20" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </footer>
-        </main>
-
-        {/* 3. Right Sidebar */}
-        <aside className={`flex flex-col h-full bg-[#0a0a0c] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scroll-smooth lg:w-[25%] w-full lg:flex ${mobileView === 'info' ? 'flex' : 'hidden'}`}>
-          {/* Mobile Back to Chat Header */}
-          <div className="lg:hidden p-4 border-b border-white/[0.05] flex items-center gap-2 bg-[#0a0a0c] shrink-0">
-            <button 
-              type="button"
-              onClick={() => setMobileView('chat')}
-              className="p-1.5 -ml-1 text-white/50 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer shrink-0"
-            >
-              <ChevronLeft className="h-4.5 w-4.5" />
-            </button>
-            <span className="font-sans text-xs font-bold text-white uppercase tracking-wider">Back to Chat</span>
-          </div>
-          
-          {/* Panel: Cart */}
-          <section className="p-4 space-y-3.5 shrink-0">
-            <div className="flex items-center justify-between">
-              <h4 className="font-sans text-[9px] font-extrabold text-white/50 uppercase tracking-widest">
-                Cart
-              </h4>
-              {activeChat?.cart && activeChat.cart.length > 0 && (
-                <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[8px] font-sans font-bold px-1.5 py-0.5 rounded">
-                  ACTIVE
-                </span>
-              )}
-            </div>
-
-            {!activeChat?.cart || activeChat.cart.length === 0 ? (
-              <div className="bg-[#121215] border border-white/[0.06] p-4 rounded-lg text-center">
-                <p className="text-[10px] text-white/30 font-sans">No items in cart yet.</p>
-              </div>
-            ) : (
-              <div className="bg-[#121215] border border-white/[0.06] p-3 rounded-lg space-y-3 max-h-[450px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-                {activeChat.cart.map((item) => {
-                  const product = products.find((p) => p.sku === item.sku);
-                  return (
-                    <div key={item.sku} className="flex justify-between items-center text-[10px] font-sans border-b border-white/[0.04] pb-2 last:border-0 last:pb-0">
-                      <div className="flex-grow min-w-0 pr-2">
-                        <span className="text-white font-bold block truncate">{product?.name || item.sku}</span>
-                        <span className="text-white/30">{item.quantity} x ${(product?.price || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCartItem(item.sku)}
-                          className="text-white/30 hover:text-red-400 p-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
-                          title="Remove item from cart"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div className="flex justify-between items-center pt-2 border-t border-white/[0.06] text-xs font-sans font-bold text-white">
-                  <span>Total</span>
-                  <span>
-                    ${activeChat.cart.reduce((sum, item) => sum + (products.find((p) => p.sku === item.sku)?.price || 0) * item.quantity, 0).toFixed(2)}
+                  <span className="font-sans text-[12px] font-bold">
+                    AI copilot
                   </span>
+                  
+                  {/* Track 40x22 & Knob 16px */}
+                  <div className="w-[38px] h-[20px] bg-black/60 border border-white/20 rounded-full relative p-[2px] box-sizing-border-box">
+                    <div 
+                      className={`w-[14px] h-[14px] rounded-full bg-white transition-all duration-200 cubic-bezier(0.4,0,0.2,1) shadow-md ${
+                        activeChat?.status === 'AI Managed' ? 'translate-x-[18px]' : 'translate-x-0'
+                      }`}
+                    />
+                  </div>
                 </div>
-
-                {orderError && (
-                  <div className="bg-[#ea4335]/10 border border-[#ea4335]/20 text-[#ea4335] text-[9px] p-2 rounded text-center font-sans">
-                    {orderError}
-                  </div>
-                )}
-                {orderSuccess && (
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] p-2 rounded text-center font-sans">
-                    {orderSuccess}
-                  </div>
-                )}
-
-                <input
-                  type="text"
-                  value={orderAddress}
-                  onChange={(e) => setOrderAddress(e.target.value)}
-                  placeholder="Shipping address..."
-                  className="w-full bg-[#0a0a0c] border border-white/[0.06] rounded-md px-2.5 py-2 font-sans text-[10px] text-white placeholder-white/20 outline-none focus:border-white/20 transition-all"
-                />
-
-                <button
-                  onClick={handleGenerateOrder}
-                  disabled={isCreatingOrder}
-                  className="w-full bg-[#e2e2e2] hover:bg-white text-black font-sans font-bold text-[9px] uppercase tracking-wider py-2 rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <FileText className="h-3 w-3" /> {isCreatingOrder ? 'Creating...' : 'Generate Order'}
-                </button>
               </div>
-            )}
-          </section>
+            </footer>
+          </main>
 
-        </aside>
+          {/* Pane 3: Right Cart Panel matching Picture 1 */}
+          <aside className={`zone-b-grey1 flex flex-col h-full lg:w-[22%] min-w-[240px] overflow-hidden shrink-0 ${mobileView === 'info' ? 'flex' : 'hidden lg:flex'}`}>
+            <div className="lg:hidden p-4 border-b border-white/[0.07] flex items-center gap-2 shrink-0">
+              <button 
+                type="button"
+                onClick={() => setMobileView('chat')}
+                className="p-1.5 text-white/60 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <span className="font-sans text-sm font-bold text-white">Back to thread</span>
+            </div>
+            
+            <section className="p-5 space-y-4 flex-grow min-h-0 overflow-y-auto no-scrollbar">
+              <div className="flex items-center justify-between">
+                <h4 className="font-sans text-[13px] font-bold text-white/80">
+                  Cart
+                </h4>
+                {activeChat?.cart && activeChat.cart.length > 0 && (
+                  <span className="status-success px-2.5 py-0.5 text-[10.5px] font-bold rounded-full">
+                    Active
+                  </span>
+                )}
+              </div>
 
-      </div>
+              {!activeChat?.cart || activeChat.cart.length === 0 ? (
+                <div className="bg-[#15161a] p-8 rounded-2xl border border-dashed border-white/12 text-center">
+                  <p className="text-[13px] text-white/40 font-sans">No items in cart yet.</p>
+                </div>
+              ) : (
+                <div className="zone-b-grey3 p-4 rounded-2xl space-y-3">
+                  {activeChat.cart.map((item) => {
+                    const product = products.find((p) => p.sku === item.sku);
+                    return (
+                      <div key={item.sku} className="flex justify-between items-center text-[13px] font-sans border-b border-white/[0.05] pb-2.5 last:border-0 last:pb-0">
+                        <div className="flex-grow min-w-0 pr-2">
+                          <span className="text-white font-bold block truncate">{product?.name || item.sku}</span>
+                          <span className="text-white/50 text-[11.5px]">{item.quantity} × ${(product?.price || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCartItem(item.sku)}
+                            className="text-white/40 hover:text-[#ff9d92] p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                            title="Remove item"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="flex justify-between items-center pt-2 border-t border-white/[0.08] text-sm font-sans font-bold text-white">
+                    <span>Total</span>
+                    <span>
+                      ${activeChat.cart.reduce((sum, item) => sum + (products.find((p) => p.sku === item.sku)?.price || 0) * item.quantity, 0).toFixed(2)}
+                    </span>
+                  </div>
+
+                  {orderError && (
+                    <div className="status-danger text-[11px] p-2.5 rounded-xl text-center font-sans">
+                      {orderError}
+                    </div>
+                  )}
+                  {orderSuccess && (
+                    <div className="status-success text-[11px] p-2.5 rounded-xl text-center font-sans">
+                      {orderSuccess}
+                    </div>
+                  )}
+
+                  <input
+                    type="text"
+                    value={orderAddress}
+                    onChange={(e) => setOrderAddress(e.target.value)}
+                    placeholder="Shipping address…"
+                    className="w-full zone-b-input px-3 py-2.5 font-sans text-xs placeholder-white/38 outline-none"
+                  />
+
+                  <button
+                    onClick={handleGenerateOrder}
+                    disabled={isCreatingOrder}
+                    className="w-full btn-light-primary py-2.5 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <FileText className="h-4 w-4" /> {isCreatingOrder ? 'Creating…' : 'Generate order'}
+                  </button>
+                </div>
+              )}
+            </section>
+
+          </aside>
+
+        </div>
       </div>
     </div>
   );

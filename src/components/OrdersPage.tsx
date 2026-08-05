@@ -63,6 +63,7 @@ export default function OrdersPage() {
                     <th className="p-4">Total</th>
                     <th className="p-4">Status</th>
                     <th className="p-4">Placed</th>
+                    <th className="p-4">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.055] font-sans text-[14px]">
@@ -100,6 +101,17 @@ export default function OrdersPage() {
                           </td>
                           <td className="p-4 text-white/40 text-xs">
                             {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </td>
+                          <td className="p-4">
+                            {order.status !== 'Cancelled' && (
+                              <button
+                                onClick={() => handleStatusChange(order.id, 'Cancelled')}
+                                disabled={updatingId === order.id}
+                                className="px-3 py-1.5 text-xs font-bold rounded-full bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                {updatingId === order.id ? 'Cancelling…' : 'Cancel'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

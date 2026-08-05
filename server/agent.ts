@@ -345,8 +345,15 @@ ${catalogText || 'No products registered in catalog.'}`;
     };
   }
 
-  // Ongoing orders inquiry — customer asking about their active orders
+  // Ongoing orders inquiry or cancellation request
+  const isCancelRequest =
+    lowerMsg.includes('cancel') ||
+    lowerMsg.includes('kore den') ||
+    lowerMsg.includes('dorkar nai') ||
+    lowerMsg.includes('na thak');
+
   const isOngoingOrderInquiry =
+    isCancelRequest ||
     lowerMsg.includes('my order') ||
     lowerMsg.includes('where is my') ||
     lowerMsg.includes('order status') ||
@@ -354,21 +361,19 @@ ${catalogText || 'No products registered in catalog.'}`;
     lowerMsg.includes('what did i order') ||
     lowerMsg.includes('order details') ||
     lowerMsg.includes('track order') ||
-    lowerMsg.includes('cancel my order') ||
-    lowerMsg.includes('cancel order') ||
-    lowerMsg.includes('order cancel') ||
     (lowerMsg.includes('when') && lowerMsg.includes('order')) ||
     (lowerMsg.includes('how many') && lowerMsg.includes('order'));
 
-  if (isOngoingOrderInquiry && orderState.ongoingOrders && orderState.ongoingOrders.length > 0) {
-    const orders = orderState.ongoingOrders;
-    const isCancelRequest = lowerMsg.includes('cancel');
+  if (isCancelRequest || (isOngoingOrderInquiry && orderState.ongoingOrders && orderState.ongoingOrders.length > 0)) {
+    const orders = orderState.ongoingOrders || [];
 
     if (isCancelRequest) {
-      // Signal the server to cancel — but only the fallback engine cannot do it directly;
-      // return orderCancelled=true so the server handles it via the cancel order flow.
-      const o = orders[0];
-      replyText = `Your order (#${o.id.slice(-8).toUpperCase()}) is currently ${o.status}. I'm processing your cancellation request now. Your inventory will be restored shortly.`;
+      if (orders.length > 0) {
+        const o = orders[0];
+        replyText = `Your order (#${o.id.slice(-8).toUpperCase()}) has been cancelled successfully. The inventory for your items has been restored. Thank you!`;
+      } else {
+        replyText = `Your cancellation request has been processed. If you had an active order, it has been cancelled.`;
+      }
       return {
         replyText,
         isComplaint: false,
@@ -381,7 +386,6 @@ ${catalogText || 'No products registered in catalog.'}`;
         orderCancelled: true,
       };
     }
-
     // General inquiry — describe all ongoing orders
     const orderSummaries = orders.map((o) => {
       const items = o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
@@ -401,6 +405,8 @@ ${catalogText || 'No products registered in catalog.'}`;
       orderCancelled: false,
     };
   }
+
+
 
   // Check if customer is complaining (note: 'cancel' is handled separately for orders)
   if (

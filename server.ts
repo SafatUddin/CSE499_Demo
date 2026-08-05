@@ -1210,6 +1210,18 @@ async function startServer() {
     const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
     const isAutopilot = conversation.status === 'AI_MANAGED';
 
+    // ── DIAGNOSTIC LOG (remove once stable) ──────────────────────────────────
+    console.log('[CHECKOUT DEBUG] customerText:', JSON.stringify(customerText));
+    console.log('[CHECKOUT DEBUG] rawAWQ:', rawAWQ);
+    console.log('[CHECKOUT DEBUG] isConfirmState:', isConfirmState, '| isDetailsState:', isDetailsState);
+    console.log('[CHECKOUT DEBUG] pendingEncodedSku:', pendingEncodedSku, '| pendingEncodedQty:', pendingEncodedQty);
+    console.log('[CHECKOUT DEBUG] result.cartAction:', JSON.stringify(result.cartAction));
+    console.log('[CHECKOUT DEBUG] result.askQuantityForSku:', result.askQuantityForSku);
+    console.log('[CHECKOUT DEBUG] result.orderConfirmed:', result.orderConfirmed, '| result.orderCancelled:', result.orderCancelled);
+    console.log('[CHECKOUT DEBUG] result.extractedAddress:', result.extractedAddress);
+    console.log('[CHECKOUT DEBUG] currentConversation.orderConfirmationRequested:', currentConversation.orderConfirmationRequested);
+    // ─────────────────────────────────────────────────────────────────────────
+
     // CART-ADD INTERCEPTION: If the agent (Ollama or fallback) returned cartAction='add',
     // redirect through the confirmation-first flow rather than writing to cart immediately.
     // This fires when Ollama ignores our "NEVER cartAction='add'" instruction (quantized models
@@ -1353,11 +1365,16 @@ async function startServer() {
 
     if (isConfirmState) {
       if (result.orderConfirmed && pendingEncodedSku && pendingEncodedQty > 0) {
-        // Customer confirmed the pre-add summary → move to DETAILS state
+        // Customer confirmed the pre-add summary → move to DETAILS state.
+        // Write the pending item to cart NOW so the merchant's cart panel shows what
+        // is being ordered while phone+address are being collected. createOrderForConversation
+        // will clear this cart (cart: null) once the order row is created.
         conversationData.awaitingQuantityFor = `DETAILS:${pendingEncodedSku}:${pendingEncodedQty}`;
+        conversationData.cart = [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }];
       } else if (result.orderCancelled) {
-        // Customer declined → clear state entirely, keep cart (which is empty at this stage)
+        // Customer declined → clear all pending state
         conversationData.awaitingQuantityFor = null;
+        conversationData.cart = [];
       } else {
         // No clear answer yet (unclear message / re-ask) → stay in CONFIRM state
         conversationData.awaitingQuantityFor = rawAWQ;
@@ -1378,21 +1395,28 @@ async function startServer() {
       }
     }
 
+    console.log('[CHECKOUT DEBUG] conversationData.cart BEFORE update:', JSON.stringify(conversationData.cart));
+    console.log('[CHECKOUT DEBUG] conversationData.awaitingQuantityFor BEFORE update:', conversationData.awaitingQuantityFor);
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: conversationData,
     });
+    console.log('[CHECKOUT DEBUG] prisma.conversation.update() executed');
 
     // DETAILS state: customer provided phone+address (or already had address on file and
     // confirmed) → add the pending item to cart and create the order atomically.
     // Use extractedAddress from this turn OR the previously stored detectedAddress so that
     // an Ollama model that notes the address in replyText but forgets to fill extractedAddress
     // still triggers order creation on a subsequent "Yes" / affirmative turn.
+    console.log('[CHECKOUT DEBUG] isDetailsState check:', isDetailsState, '| pendingEncodedSku:', pendingEncodedSku, '| pendingEncodedQty:', pendingEncodedQty);
     if (isDetailsState && pendingEncodedSku && pendingEncodedQty > 0) {
       const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
+      console.log('[CHECKOUT DEBUG] detailsContactInfo:', detailsContactInfo);
       if (detailsContactInfo) {
         const detailsProduct = products.find((p) => p.sku === pendingEncodedSku);
+        console.log('[CHECKOUT DEBUG] detailsProduct found:', !!detailsProduct, '| inventory:', detailsProduct?.inventory);
         if (detailsProduct && detailsProduct.inventory >= pendingEncodedQty) {
+          console.log('[CHECKOUT DEBUG] calling createOrderForConversation (DETAILS path)');
           try {
             await createOrderForConversation(
               { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
@@ -1403,7 +1427,21 @@ async function startServer() {
             console.error('New-flow order creation failed:', err.message);
           }
         } else {
-          console.warn(`New-flow order skipped: product "${pendingEncodedSku}" not found in catalog or insufficient inventory (need ${pendingEncodedQty})`);
+          // Product not found or out of stock — surface a clear error to the customer
+          // instead of silently doing nothing (Ollama already said "order placed" in
+          // its replyText, so we must correct that message in the DB).
+          const errorText = !detailsProduct
+            ? `Sorry, we couldn't find that product in our catalog. Please contact us for assistance.`
+            : `Sorry, we only have ${detailsProduct.inventory} unit(s) of ${detailsProduct.name} in stock, but you requested ${pendingEncodedQty}. Please adjust your quantity and try again.`;
+          await prisma.message.updateMany({
+            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+            data: { text: errorText },
+          });
+          // Reset state so the customer can start a new order attempt
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { awaitingQuantityFor: null, cart: [] },
+          });
         }
       }
     }

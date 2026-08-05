@@ -14,6 +14,7 @@ import {
   Clock,
   ChevronRight
 } from 'lucide-react';
+import { ShopMateLogo } from './ShopMateLogo';
 import { Tab } from '../types';
 
 interface LandingPageProps {
@@ -24,20 +25,16 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
   const [activeLink, setActiveLink] = useState<'product' | 'features' | 'pricing'>('product');
   // We will display all messages in a beautiful static or staggered visual flow to match the exact mockup in the image.
   return (
-    <div className="bg-[#070708] text-[#e2e2e2] font-sans min-h-screen flex flex-col overflow-x-hidden selection:bg-white/10 selection:text-white relative">
-      {/* Background gradients */}
-      <div className="absolute top-[-5%] right-[-5%] w-[600px] h-[600px] bg-white/[0.02] rounded-full blur-[140px] pointer-events-none"></div>
-      <div className="absolute bottom-[20%] left-[-5%] w-[500px] h-[500px] bg-white/[0.01] rounded-full blur-[120px] pointer-events-none"></div>
+    <div className="app-bg-gradient text-[#e2e2e2] font-sans min-h-screen flex flex-col overflow-x-hidden selection:bg-white/10 selection:text-white relative">
+      {/* Background gradients according to DESIGN.md */}
+      <div className="ambient-bloom-tl" />
+      <div className="ambient-bloom-br" />
 
       {/* Top Navigation */}
-      <header className="fixed top-0 w-full bg-[#070708]/85 backdrop-blur-md border-b border-white/[0.06] z-50">
+      <header className="fixed top-0 w-full zone-a-topbar backdrop-blur-md border-b border-white/10 z-50">
         <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-5 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate('landing')}>
-            <img 
-              className="h-6 w-6 object-contain brightness-100" 
-              src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-              alt="ShopMate AI Logo"
-            />
+            <ShopMateLogo size={18} className="w-7 h-7 !rounded-lg" />
             <span className="font-sans font-bold text-lg text-white tracking-tight">ShopMate AI</span>
           </div>
 
@@ -144,7 +141,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
           {/* Right Live Conversation Simulator */}
           <div className="lg:col-span-5 relative">
-            <div className="bg-[#0c0c0e]/95 border border-white/[0.07] p-6 rounded-lg shadow-2xl backdrop-blur-xl space-y-4">
+            <div className="zone-b-grey2 border border-white/10 p-6 rounded-2xl shadow-2xl backdrop-blur-xl space-y-4">
               <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

@@ -1,87 +1,214 @@
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Inter", Georgia, serif;
-  --font-mono: "Geist Mono", monospace;
-  --font-geist: "Geist", sans-serif;
-  
-  --radius-sm: 0.125rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
-  --radius-full: 9999px;
+@layer base {
+  :root {
+    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
 
-  --color-surface: #131313;
-  --color-surface-dim: #131313;
-  --color-surface-bright: #393939;
-  --color-surface-container-lowest: #0e0e0e;
-  --color-surface-container-low: #1b1b1b;
-  --color-surface-container: #1f1f1f;
-  --color-surface-container-high: #2a2a2a;
-  --color-surface-container-highest: #353535;
-  --color-on-surface: #e2e2e2;
-  --color-on-surface-variant: #c4c7c7;
-  --color-inverse-surface: #e2e2e2;
-  --color-inverse-on-surface: #303030;
-  --color-outline: #8e9192;
-  --color-outline-variant: #444748;
-  --color-surface-tint: #c6c6c6;
-  --color-primary: #dcdcdc;
-  --color-on-primary: #2f3131;
-  --color-primary-container: #c0c0c0;
-  --color-on-primary-container: #4d4e4f;
-  --color-inverse-primary: #5d5e5f;
-  --color-secondary: #c8c6c6;
-  --color-on-secondary: #303030;
-  --color-secondary-container: #474747;
-  --color-on-secondary-container: #b6b5b4;
-  --color-tertiary: #dedcdb;
-  --color-on-tertiary: #313030;
-  --color-tertiary-container: #c2c0bf;
-  --color-on-tertiary-container: #4f4e4e;
-  --color-error: #ffb4ab;
-  --color-on-error: #690005;
-  --color-error-container: #93000a;
-  --color-on-error-container: #ffdad6;
-  --color-primary-fixed: #e3e2e2;
-  --color-primary-fixed-dim: #c6c6c6;
-  --color-on-primary-fixed: #1a1c1c;
-  --color-on-primary-fixed-variant: #464747;
-  --color-secondary-fixed: #e4e2e1;
-  --color-secondary-fixed-dim: #c8c6c6;
-  --color-on-secondary-fixed: #1b1c1c;
-  --color-on-secondary-fixed-variant: #474747;
-  --color-tertiary-fixed: #e5e2e1;
-  --color-tertiary-fixed-dim: #c8c6c5;
-  --color-on-tertiary-fixed: #1c1b1b;
-  --color-on-tertiary-fixed-variant: #474746;
-  --color-background: #131313;
-  --color-on-background: #e2e2e2;
-  --color-surface-variant: #353535;
+  body {
+    background-color: #040a1a;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
 }
 
-body {
-  background-color: #131313;
-  color: #e2e2e2;
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+/* Base Ambient Page Background - Rich Luminous Navy Atmosphere (Picture 1) */
+.app-bg-gradient {
+  background: linear-gradient(165deg, #0b1f54 0%, #07153d 40%, #040c26 75%, #020614 100%);
+  background-attachment: fixed;
 }
 
-/* Custom premium desaturated scrollbars */
+.ambient-bloom-tl {
+  position: absolute;
+  top: -10vw;
+  left: -10vw;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(37,82,198,0.45) 0%, rgba(37,82,198,0) 70%);
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+.ambient-bloom-br {
+  position: absolute;
+  bottom: -10vw;
+  right: -10vw;
+  width: 55vw;
+  height: 55vw;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20,50,140,0.35) 0%, rgba(20,50,140,0) 70%);
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+/* Zone A — Chrome (Sidebar & Top Bar) - Vibrant Navy Glass matching Picture 1 */
+.zone-a-sidebar {
+  background: linear-gradient(180deg, rgba(14, 34, 90, 0.90) 0%, rgba(10, 24, 66, 0.92) 55%, rgba(6, 15, 45, 0.96) 100%);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  border-right: 1px solid rgba(77, 139, 255, 0.20);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.zone-a-topbar {
+  background: linear-gradient(180deg, rgba(12, 30, 80, 0.85), rgba(8, 20, 58, 0.90));
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border-bottom: 1px solid rgba(77, 139, 255, 0.18);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Zone B — Workspace Greyscale / Dark Cards */
+.zone-b-grey1 {
+  background: linear-gradient(180deg, rgba(22, 23, 27, 0.95), rgba(15, 16, 19, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+}
+
+.zone-b-grey2 {
+  background: linear-gradient(160deg, rgba(20, 21, 25, 0.95), rgba(12, 13, 15, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+}
+
+.zone-b-grey3 {
+  background: linear-gradient(160deg, rgba(24, 25, 30, 0.95), rgba(11, 12, 14, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+.zone-b-black {
+  background: linear-gradient(175deg, rgba(12, 13, 16, 0.98), rgba(6, 7, 9, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
+  border-radius: 18px;
+}
+
+.zone-b-input {
+  background: rgba(8, 9, 12, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.6);
+  border-radius: 12px;
+  color: #ffffff;
+}
+.zone-b-input:focus {
+  border-color: rgba(77, 139, 255, 0.6);
+  outline: none;
+}
+
+/* Deep Search Bar Gradient - Rich Navy Pill */
+.search-bar-gradient {
+  background: linear-gradient(180deg, #091c4d 0%, #0d2666 100%);
+  border: 1px solid rgba(77, 139, 255, 0.35);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 12px rgba(37, 82, 198, 0.25);
+}
+
+/* Accent Buttons - Vibrant Royal Blue */
+.btn-accent {
+  background: linear-gradient(180deg, #2552c6 0%, #163691 100%);
+  border: 1px solid rgba(122, 168, 255, 0.45);
+  box-shadow: 0 8px 24px rgba(37, 82, 198, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 12px;
+  transition: all .18s ease;
+}
+.btn-accent:hover {
+  background: linear-gradient(180deg, #2d5de2 0%, #1b40aa 100%);
+  box-shadow: 0 10px 28px rgba(37, 82, 198, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.40);
+}
+
+.btn-light-primary {
+  background: linear-gradient(180deg, #ffffff, #dfe6f5);
+  color: #061128;
+  font-weight: 750;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.80);
+  transition: all .18s ease;
+}
+.btn-light-primary:hover {
+  background: linear-gradient(180deg, #ffffff, #f0f4fd);
+  transform: translateY(-1px);
+}
+
+.btn-glass {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  color: #ffffff;
+  border-radius: 12px;
+  transition: all .18s ease;
+}
+.btn-glass:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Status Badges & Chips */
+.status-success {
+  border: 1px solid rgba(61,220,132,0.42);
+  background: rgba(20,90,55,0.35);
+  color: #7ff0b0;
+}
+.status-warning {
+  border: 1px solid rgba(240,180,60,0.45);
+  background: rgba(96,66,10,0.40);
+  color: #ffcf6b;
+}
+.status-danger {
+  border: 1px solid rgba(244,72,58,0.45);
+  background: rgba(96,20,14,0.40);
+  color: #ff9d92;
+}
+.status-info {
+  border: 1px solid rgba(122,168,255,0.45);
+  background: rgba(24,58,150,0.40);
+  color: #bcd2ff;
+}
+.status-neutral {
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.75);
+}
+
+/* Animations */
+@keyframes pulseDot {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-pulse-dot {
+  animation: pulseDot 2.2s ease-in-out infinite;
+}
+
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #131313;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(220, 220, 220, 0.15);
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 99px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(220, 220, 220, 0.3);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

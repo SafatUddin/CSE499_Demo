@@ -30,6 +30,7 @@ export interface AgentReply {
   askQuantityForSku: string;
   orderConfirmationRequested: boolean;
   orderConfirmed: boolean;
+  orderCancelled: boolean;
 }
 
 // Current order-flow state for this conversation, so the model knows whether it's mid
@@ -40,6 +41,11 @@ export interface AgentOrderState {
   hasCartItems?: boolean;
   hasAddress?: boolean;
   cartItems?: { sku: string; name: string; quantity: number }[];
+  // Set when the customer gave a quantity and the AI asked them to confirm the order.
+  // The server decodes "CONFIRM:SKU:QTY" from awaitingQuantityFor and passes this.
+  pendingItem?: { sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
+  // True after the customer confirmed the pending item; the AI must now collect phone+address.
+  awaitingContactDetails?: boolean;
 }
 
 export async function generateAgentReply({
@@ -79,33 +85,35 @@ export async function generateAgentReply({
     orderState.awaitingQuantityFor
       ? `You just asked the customer how many units of SKU "${orderState.awaitingQuantityFor}" they want. If their message answers that (a number, or a spelled-out quantity like "two"), treat it as the quantity for that SKU rather than a new unrelated request.`
       : '',
+    // CONFIRM state: quantity was given, we need a yes/no before adding to cart
+    orderState.pendingItem
+      ? `The customer wants to buy ${orderState.pendingItem.quantity}x "${orderState.pendingItem.name}" at $${orderState.pendingItem.unitPrice.toFixed(2)} each (total $${orderState.pendingItem.lineTotal.toFixed(2)}). You just showed this and asked them to confirm. If their reply is affirmative (yes/confirm/ok/sure/proceed/go ahead), set orderConfirmed=true and cartAction=none. If they decline (no/cancel/never mind), set orderCancelled=true and cartAction=none.`
+      : '',
+    // DETAILS state: customer confirmed, now collect phone+address
+    orderState.awaitingContactDetails
+      ? `The customer confirmed their order. You must now ask for (or extract from this message) their phone number and delivery address together. Combine them as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Set orderConfirmed=true once you have both. cartAction must be none.`
+      : '',
     orderState.orderConfirmationRequested
-      ? `You already showed the customer an order summary and asked them to confirm it. If their message is an affirmative reply ("yes", "confirm", "go ahead", "place it", etc.), set orderConfirmed to true and set cartAction to 'none' — do not re-add items on a confirmation turn. If they're asking to change something instead, don't set orderConfirmed.`
+      ? `You already showed the customer an order summary and asked them to confirm or cancel it. If their message is affirmative ("yes", "confirm", "go ahead", "place it", etc.), set orderConfirmed to true and cartAction to 'none' — do not re-add items on a confirmation turn. If their message is a cancellation ("cancel", "never mind", "stop", "don't order", etc.), set orderCancelled to true and cartAction to 'none'. If they're asking to change something, set neither.`
       : orderState.hasCartItems && orderState.hasAddress
-      ? `The customer has items in their cart and a shipping address on file. If the conversation naturally reaches a checkout moment, summarize the cart and address in your reply and ask them to confirm before you place the order — set orderConfirmationRequested to true when you do this, and set cartAction to 'none' on that turn.`
+      ? `The customer has items in their cart and a shipping address on file. If the conversation naturally reaches a checkout moment, show a clean order summary (product name, quantity, price per unit, line total, subtotal, shipping address) and ask "Would you like to confirm or cancel this order?" — set orderConfirmationRequested to true when you do this, and set cartAction to 'none' on that turn.`
       : '',
   ].filter(Boolean).join(' ');
 
   const systemInstruction = `You are ShopMate AI, an elite autonomous sales agent representing the merchant's store.
 Your goal is to answer customer questions with precision, guide customers through their purchase, and strictly adhere to the following mandatory interaction rules:
 
-CRITICAL CART RULE — READ THIS FIRST:
-cartAction.action must be 'add' IN ONE CASE ONLY: the customer's current message explicitly states a number of units to buy for a specific product (e.g. "3 units", "ami 2ta nebo", "I want 5"). In every other case — price inquiries, general questions, addresses, "yes I want to buy", order confirmations — cartAction MUST be { action: 'none', sku: '', quantity: 0 }.
-
 Mandatory Interaction Rules:
 1. PRICE INQUIRY → ASK TO BUY: If customer asks price (e.g. "price of X?", "how much?"), reply with the price and ask "Would you like to buy this product?". cartAction = none.
-2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart yet.
-3. QUANTITY GIVEN → ADD TO CART: ONLY when customer explicitly gives a quantity (number) in their message AND awaitingQuantityFor is set for that product, set cartAction = { action:'add', sku: <awaitingQuantityForSku>, quantity: <number customer said> }. Clear askQuantityForSku after.
-4. ADDRESS MISSING → ASK FOR ADDRESS: After adding to cart, if no address is on file, ask for their delivery address. cartAction = none.
-5. CONFIRMATION PROMPT: Once cart has items AND address is on file, show a full order summary (items × qty × price, total, address) and ask "Do you want to confirm this order?". Set orderConfirmationRequested = true. cartAction = none.
-6. ORDER CONFIRMED → THANK YOU: When customer confirms (says yes/confirm after step 5), show final order details and say "Thank you for shopping with us!". Set orderConfirmed = true. cartAction = none. DO NOT add any new products.
+2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart.
+3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity.
+4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → ORDER PLACED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply confirming the order. Set orderConfirmed=true. cartAction = none.
+5. ORDER CANCELLED: When orderConfirmationRequested is already true and the customer cancels ("cancel", "never mind", "stop", "no", etc.), reply "No problem! Your order has been cancelled. Let me know if you'd like to order something else." Set orderCancelled=true.
 
 FORBIDDEN:
-- Never set cartAction='add' on a price-inquiry turn.
-- Never set cartAction='add' on a confirmation turn (when orderConfirmationRequested is already true).
-- Never set cartAction='add' on an address-providing turn.
-- Never set cartAction='add' when the customer just says "yes" without a number.
-- Never add a product that the customer did not specifically ask about in the current message.
+- Never set cartAction='add' unless the customer explicitly stated a number to buy in this exact message.
+- Never set orderCancelled=true unless orderConfirmationRequested is already true or pendingItem is in orderState.
+- Never set cartAction='add' on a price-inquiry turn, confirmation turn, or address-providing turn.
 
 Core Directives:
 1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
@@ -211,11 +219,11 @@ ${catalogText || 'No products registered in catalog.'}`;
           },
           cartAction: {
             type: 'object',
-            description: 'Action to build customer cart. Use action="none" unless customer explicitly specified a quantity to buy in this turn.',
+            description: "Action to signal a cart add. Set action='add' when the customer gives an explicit quantity to buy in this turn. Use action='none' for all other turns (price inquiries, confirmations, address turns).",
             properties: {
               action: {
                 type: 'string',
-                description: "Can be 'add' or 'none'. Set to 'add' ONLY when customer explicitly specifies a quantity of a product to buy."
+                description: "Set to 'add' when customer explicitly states a quantity to buy (e.g. '2 Pepsi', 'I want 1 Void Audio'). Set to 'none' otherwise."
               },
               sku: {
                 type: 'string',
@@ -239,22 +247,59 @@ ${catalogText || 'No products registered in catalog.'}`;
           },
           askQuantityForSku: {
             type: 'string',
-            description: 'SKU to ask the customer for a quantity clarification on. Empty string otherwise.'
+            description: 'Set to the product SKU when asking the customer how many they want (e.g. "NX-402-B"). Empty string otherwise.'
           },
           orderConfirmationRequested: {
             type: 'boolean',
-            description: 'True only on the turn where replyText presents an order summary (items, quantity, address, total) and asks "Do you want to confirm this order?".'
+            description: 'True only on the turn where replyText presents an order summary and asks "Would you like to confirm or cancel this order?".'
           },
           orderConfirmed: {
             type: 'boolean',
             description: 'True only when the customer explicitly confirms an order summary that was already presented in a previous turn.'
+          },
+          orderCancelled: {
+            type: 'boolean',
+            description: 'True only when orderConfirmationRequested is already true and the customer explicitly cancels ("cancel", "never mind", "stop", "don\'t order", etc.). Never set this to true on any other turn.'
           }
         },
-        required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs', 'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed']
+        required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs', 'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled']
       });
 
       if (content) {
-        return JSON.parse(content.trim()) as AgentReply;
+        const parsed = JSON.parse(content.trim()) as AgentReply;
+
+        // Some quantized models (e.g. qwen2.5:3b) bleed their training-time XML tool-call
+        // format into the replyText string even when a JSON schema is enforced. When that
+        // happens the outer JSON is valid so no exception is thrown, but replyText contains
+        // raw markup visible to the customer and cartAction is left as action='none'.
+        // The two steps below detect and repair both problems before returning.
+
+        // Step 1: Recover cartAction from embedded <CartData><Item .../></CartData> when
+        // the model forgot to populate the structured cartAction field.
+        if (
+          parsed.cartAction?.action !== 'add' &&
+          /<(?:CartData|[Ii]tem)\b/i.test(parsed.replyText)
+        ) {
+          const skuMatch = parsed.replyText.match(/<[Ii]tem[^>]+sku=["']([^"']+)["']/);
+          const qtyMatch = parsed.replyText.match(/<[Ii]tem[^>]+quantity=["'](\d+)["']/);
+          if (skuMatch && qtyMatch) {
+            parsed.cartAction = {
+              action: 'add',
+              sku: skuMatch[1],
+              quantity: parseInt(qtyMatch[1], 10),
+            };
+          }
+        }
+
+        // Step 2: Strip all XML tags from replyText so customers never see raw markup.
+        // First unwrap <Response>...</Response> to preserve the human-readable text inside
+        // it, then remove any remaining tags (<CartData>, <Item>, stray closes, etc.).
+        parsed.replyText = parsed.replyText
+          .replace(/<Response>([\s\S]*?)<\/Response>/gi, '$1')
+          .replace(/<[^>]+>/g, '')
+          .trim();
+
+        return parsed;
       }
     } catch (ollamaError: any) {
       console.error('Ollama call failed, falling back to simulated logic:', ollamaError.message);
@@ -275,6 +320,132 @@ ${catalogText || 'No products registered in catalog.'}`;
     || message.match(/(?:house|road|block|street|sector|avenue|dhaka|chittagong|sylhet|rajshahi|khulna|barisal|chattogram)[^\n,\.]{0,60}/i);
   if (addressMatch) {
     extractedAddress = addressMatch[0].trim();
+  }
+
+  // Cancellation must be checked before the complaint handler because 'cancel' appears in
+  // both lists. When a confirmation is in progress, "cancel" is a checkout action, not a
+  // complaint — the complaint handler must not intercept it.
+  const isOrderCancellation = orderState.orderConfirmationRequested && (
+    lowerMsg.includes('cancel') ||
+    lowerMsg.includes('never mind') ||
+    lowerMsg.includes('nevermind') ||
+    lowerMsg.includes("don't order") ||
+    lowerMsg.includes('dont order') ||
+    lowerMsg.includes('stop order') ||
+    lowerMsg.includes('na thak') ||
+    lowerMsg.includes('dorkaar nai')
+  );
+
+  if (isOrderCancellation) {
+    return {
+      replyText: `No problem! Your order has been cancelled. Your cart is still saved — feel free to keep shopping or start a new order.`,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress,
+      askQuantityForSku: '',
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: true,
+    };
+  }
+
+  // CONFIRM state: customer is responding to "Would you like to confirm this order?"
+  // The server set pendingItem when awaitingQuantityFor starts with "CONFIRM:SKU:QTY".
+  if (orderState.pendingItem) {
+    const isPreConfirm =
+      lowerMsg === 'yes' || lowerMsg === 'ha' || lowerMsg === 'haa' || lowerMsg === 'ok' ||
+      lowerMsg.includes('confirm') || lowerMsg.includes('sure') || lowerMsg.includes('proceed') ||
+      lowerMsg.includes('go ahead') || lowerMsg.includes('place') || lowerMsg.includes('haan') ||
+      lowerMsg.includes('korbo') || lowerMsg.includes('dao') || lowerMsg.includes('nao');
+    const isPreCancel =
+      lowerMsg.includes('cancel') || lowerMsg.includes('never mind') ||
+      lowerMsg.includes('nevermind') || lowerMsg.includes("don't") ||
+      lowerMsg.includes('dont') || lowerMsg.includes('na thak') ||
+      lowerMsg === 'no' || lowerMsg === 'na';
+
+    if (isPreConfirm) {
+      return {
+        replyText: `Great! Please provide your phone number and delivery address to complete your order.`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress: '',
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: true,
+        orderCancelled: false,
+      };
+    }
+    if (isPreCancel) {
+      return {
+        replyText: `No problem! I've cancelled that. Let me know if you'd like to order something else.`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress: '',
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: true,
+      };
+    }
+    // Unclear response — re-ask the confirmation
+    return {
+      replyText: `You'd like ${orderState.pendingItem.quantity}x ${orderState.pendingItem.name} at $${orderState.pendingItem.unitPrice.toFixed(2)} each (total $${orderState.pendingItem.lineTotal.toFixed(2)}). Would you like to confirm this order?`,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress: '',
+      askQuantityForSku: '',
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: false,
+    };
+  }
+
+  // DETAILS state: customer confirmed and is now providing phone + address.
+  // The server set awaitingContactDetails=true when awaitingQuantityFor starts with "DETAILS:".
+  if (orderState.awaitingContactDetails) {
+    const phoneMatch = message.match(/(?:\+?880|01)[0-9\s\-]{7,12}/);
+    const phone = phoneMatch ? phoneMatch[0].replace(/[\s\-]/g, '') : '';
+
+    const addrFromKeyword =
+      message.match(/(?:address\s*(?:is|:)?\s*|deliver\s*to\s*|ship\s*to\s*)([^\n]{4,})/i) ||
+      message.match(/(?:house|road|block|street|sector|avenue|dhaka|chittagong|sylhet|rajshahi|khulna|barisal|chattogram)[^\n,\.]{0,80}/i);
+    const addr = addrFromKeyword ? addrFromKeyword[0].trim() : (phone ? '' : message.trim());
+
+    const hasSomething = phone || addr;
+    if (hasSomething) {
+      const combined = [
+        phone ? `Phone: ${phone}` : '',
+        addr ? `Address: ${addr}` : '',
+      ].filter(Boolean).join(' | ');
+
+      return {
+        replyText: `Thank you! Your order is being confirmed. We'll deliver to: ${combined}. Thank you for shopping with us!`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress: combined,
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: true,
+        orderCancelled: false,
+      };
+    }
+    // No phone or address found — re-ask
+    return {
+      replyText: `Could you please provide your phone number and delivery address so we can complete your order?`,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress: '',
+      askQuantityForSku: '',
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: false,
+    };
   }
 
   // Check if customer is complaining
@@ -301,6 +472,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
+      orderCancelled: false,
     };
   }
 
@@ -342,6 +514,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
+      orderCancelled: false,
     };
   }
 
@@ -361,6 +534,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
+      orderCancelled: false,
     };
   }
 
@@ -397,6 +571,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: true,
+      orderCancelled: false,
     };
   }
 
@@ -406,56 +581,26 @@ ${catalogText || 'No products registered in catalog.'}`;
     message.match(/\b(\d+)\b/);
   const statedQuantity = qtyMatch ? parseInt(qtyMatch[1], 10) : null;
 
-  // Rule 5 & Rule 3: Customer explicitly specifies quantity for item being asked or bought
+  // Two-step flow: customer previously asked about a product, AI asked "how many?",
+  // now customer is providing the quantity. Ask them to confirm BEFORE adding to cart.
   if (orderState.awaitingQuantityFor && statedQuantity && statedQuantity > 0) {
     const targetSku = orderState.awaitingQuantityFor;
     const product = catalog.find((p) => p.sku === targetSku);
     const productName = product ? product.name : targetSku;
-    const price = product ? product.price : 0;
+    const pricePer = product ? product.price : 0;
+    const lineTotal = pricePer * statedQuantity;
 
-    cartAction = { action: 'add', sku: targetSku, quantity: statedQuantity };
-    const currentAddress = extractedAddress || (orderState.hasAddress ? 'Address on file' : '');
-
-    // Rule 2: Ask address before confirming order
-    if (!currentAddress) {
-      replyText = `Great! I have updated your cart with ${statedQuantity}x ${productName} ($${price.toFixed(2)} each).\nCould you please provide your shipping address before we confirm your order?`;
-      return {
-        replyText,
-        isComplaint: false,
-        cartAction,
-        suggestedProductsSKUs: [],
-        extractedAddress,
-        askQuantityForSku: '',
-        orderConfirmationRequested: false,
-        orderConfirmed: false,
-      };
-    } else {
-      // Rule 4: Paste cart products, quantity, address & ask to confirm
-      const tempCart = [...(orderState.cartItems || []).filter((i) => i.sku !== targetSku), { sku: targetSku, name: productName, quantity: statedQuantity }];
-      const itemsSummary = tempCart
-        .map((i) => {
-          const p = catalog.find((prod) => prod.sku === i.sku);
-          const pr = p ? p.price : 0;
-          return `• ${i.quantity}x ${i.name} ($${pr.toFixed(2)} each)`;
-        })
-        .join('\n');
-      const total = tempCart.reduce((sum, i) => {
-        const p = catalog.find((prod) => prod.sku === i.sku);
-        return sum + (p ? p.price * i.quantity : 0);
-      }, 0);
-
-      replyText = `Here is your order summary:\n${itemsSummary}\nShipping Address: ${currentAddress}\nTotal Price: $${total.toFixed(2)}\n\nDo you want to confirm this order?`;
-      return {
-        replyText,
-        isComplaint: false,
-        cartAction,
-        suggestedProductsSKUs: [],
-        extractedAddress,
-        askQuantityForSku: '',
-        orderConfirmationRequested: true,
-        orderConfirmed: false,
-      };
-    }
+    return {
+      replyText: `You'd like ${statedQuantity}x ${productName} at $${pricePer.toFixed(2)} each — total $${lineTotal.toFixed(2)}. Would you like to confirm this order?`,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress,
+      askQuantityForSku: `CONFIRM:${targetSku}:${statedQuantity}`,
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: false,
+    };
   }
 
   // Rule 3: When user asks to buy any product, say the price and ask how many they want to buy (DO NOT ADD TO CART UNTIL QUANTITY IS GIVEN)
@@ -480,50 +625,22 @@ ${catalogText || 'No products registered in catalog.'}`;
 
     if (found) {
       if (statedQuantity && statedQuantity > 0) {
-        // User stated quantity directly in the buy request e.g. "I want to buy 2 Void Audio One" (Rule 3 + Rule 5)
-        cartAction = { action: 'add', sku: found.sku, quantity: statedQuantity };
-        const currentAddress = extractedAddress || (orderState.hasAddress ? 'Address on file' : '');
+        // One-step: customer gave product + quantity together (e.g. "I want 2 Coca Cola").
+        // Ask to confirm BEFORE adding to cart.
+        const pricePer = found.price;
+        const lineTotal = pricePer * statedQuantity;
 
-        // Rule 2: Ask address before confirming order
-        if (!currentAddress) {
-          replyText = `The price of ${found.name} is $${found.price.toFixed(2)} each. I have added ${statedQuantity} unit(s) to your cart.\nCould you please provide your shipping address before we confirm your order?`;
-          return {
-            replyText,
-            isComplaint: false,
-            cartAction,
-            suggestedProductsSKUs: [],
-            extractedAddress,
-            askQuantityForSku: '',
-            orderConfirmationRequested: false,
-            orderConfirmed: false,
-          };
-        } else {
-          // Rule 4: Paste cart products, quantity, address & ask to confirm
-          const tempCart = [...(orderState.cartItems || []).filter((i) => i.sku !== found.sku), { sku: found.sku, name: found.name, quantity: statedQuantity }];
-          const itemsSummary = tempCart
-            .map((i) => {
-              const p = catalog.find((prod) => prod.sku === i.sku);
-              const pr = p ? p.price : 0;
-              return `• ${i.quantity}x ${i.name} ($${pr.toFixed(2)} each)`;
-            })
-            .join('\n');
-          const total = tempCart.reduce((sum, i) => {
-            const p = catalog.find((prod) => prod.sku === i.sku);
-            return sum + (p ? p.price * i.quantity : 0);
-          }, 0);
-
-          replyText = `The price of ${found.name} is $${found.price.toFixed(2)} each.\nHere is your order summary:\n${itemsSummary}\nShipping Address: ${currentAddress}\nTotal Price: $${total.toFixed(2)}\n\nDo you want to confirm this order?`;
-          return {
-            replyText,
-            isComplaint: false,
-            cartAction,
-            suggestedProductsSKUs: [],
-            extractedAddress,
-            askQuantityForSku: '',
-            orderConfirmationRequested: true,
-            orderConfirmed: false,
-          };
-        }
+        return {
+          replyText: `You'd like ${statedQuantity}x ${found.name} at $${pricePer.toFixed(2)} each — total $${lineTotal.toFixed(2)}. Would you like to confirm this order?`,
+          isComplaint: false,
+          cartAction: { action: 'none', sku: '', quantity: 0 },
+          suggestedProductsSKUs: [],
+          extractedAddress,
+          askQuantityForSku: `CONFIRM:${found.sku}:${statedQuantity}`,
+          orderConfirmationRequested: false,
+          orderConfirmed: false,
+          orderCancelled: false,
+        };
       } else {
         // Customer said they want to buy, BUT HAS NOT SPECIFIED QUANTITY YET.
         // DO NOT add to cart! Set action='none' and ask how many they want to buy.
@@ -537,6 +654,7 @@ ${catalogText || 'No products registered in catalog.'}`;
           askQuantityForSku: found.sku,
           orderConfirmationRequested: false,
           orderConfirmed: false,
+          orderCancelled: false,
         };
       }
     }
@@ -565,6 +683,7 @@ ${catalogText || 'No products registered in catalog.'}`;
         askQuantityForSku: '',
         orderConfirmationRequested: false,
         orderConfirmed: false,
+        orderCancelled: false,
       };
     }
   }
@@ -584,22 +703,21 @@ ${catalogText || 'No products registered in catalog.'}`;
         askQuantityForSku: '',
         orderConfirmationRequested: false,
         orderConfirmed: false,
+        orderCancelled: false,
       };
     } else if (orderState.hasCartItems) {
-      // Rule 4: Paste cart, quantity, address & ask to confirm
-      const itemsSummary = (orderState.cartItems || [])
-        .map((i) => {
-          const p = catalog.find((prod) => prod.sku === i.sku);
-          const pr = p ? p.price : 0;
-          return `• ${i.quantity}x ${i.name} ($${pr.toFixed(2)} each)`;
-        })
-        .join('\n');
-      const total = (orderState.cartItems || []).reduce((sum, i) => {
+      // Rule 5: Show clean order summary and ask to confirm or cancel
+      const lines = (orderState.cartItems || []).map((i) => {
+        const p = catalog.find((prod) => prod.sku === i.sku);
+        const pr = p ? p.price : 0;
+        return `• ${i.name} — ${i.quantity} × $${pr.toFixed(2)} = $${(pr * i.quantity).toFixed(2)}`;
+      }).join('\n');
+      const subtotal = (orderState.cartItems || []).reduce((sum, i) => {
         const p = catalog.find((prod) => prod.sku === i.sku);
         return sum + (p ? p.price * i.quantity : 0);
       }, 0);
 
-      replyText = `Here is your order summary:\n${itemsSummary}\nShipping Address: ${addressToUse}\nTotal Price: $${total.toFixed(2)}\n\nDo you want to confirm this order?`;
+      replyText = `Order Summary:\n${lines}\n\nSubtotal: $${subtotal.toFixed(2)}\nShipping Address: ${addressToUse}\n\nWould you like to confirm or cancel this order?`;
       return {
         replyText,
         isComplaint: false,
@@ -609,6 +727,7 @@ ${catalogText || 'No products registered in catalog.'}`;
         askQuantityForSku: '',
         orderConfirmationRequested: true,
         orderConfirmed: false,
+        orderCancelled: false,
       };
     }
   }
@@ -628,5 +747,6 @@ ${catalogText || 'No products registered in catalog.'}`;
     askQuantityForSku: '',
     orderConfirmationRequested: false,
     orderConfirmed: false,
+    orderCancelled: false,
   };
 }

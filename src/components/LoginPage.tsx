@@ -4,6 +4,8 @@ import { Eye, EyeOff, ArrowRight, Facebook } from 'lucide-react';
 import { Tab } from '../types';
 import { login, getGoogleConnectUrl, AuthResponse } from '../lib/api';
 
+import { ShopMateLogo } from './ShopMateLogo';
+
 interface LoginPageProps {
   onNavigate: (tab: Tab) => void;
   onLoginSuccess: (auth: AuthResponse) => void;
@@ -51,10 +53,10 @@ export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps
   };
 
   return (
-    <div className="bg-[#070708] text-[#e2e2e2] font-sans min-h-screen flex flex-col justify-between selection:bg-white/10 selection:text-white relative overflow-x-hidden overflow-y-auto">
-      {/* Background soft blurs */}
-      <div className="absolute top-[-10%] right-[-10%] w-[450px] h-[450px] bg-white/[0.015] rounded-full blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] left-[-10%] w-[450px] h-[450px] bg-white/[0.01] rounded-full blur-[120px] pointer-events-none"></div>
+    <div className="app-bg-gradient text-[#e2e2e2] font-sans min-h-screen flex flex-col justify-between selection:bg-white/10 selection:text-white relative overflow-x-hidden overflow-y-auto">
+      {/* Background soft blurs according to DESIGN.md */}
+      <div className="ambient-bloom-tl" />
+      <div className="ambient-bloom-br" />
 
       {/* Header spacer */}
       <div />
@@ -64,19 +66,15 @@ export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-[420px] bg-[#0c0c0e]/95 border border-white/[0.07] p-6 sm:p-10 flex flex-col items-center rounded-lg shadow-2xl backdrop-blur-xl"
+          className="w-full max-w-[420px] zone-b-grey2 border border-white/12 p-6 sm:p-10 flex flex-col items-center rounded-2xl shadow-2xl backdrop-blur-xl"
         >
           {/* Brand Identity */}
           <div className="mb-8 flex flex-col items-center">
             <div 
-              className="bg-white p-2.5 rounded-lg w-16 h-16 mb-5 flex items-center justify-center cursor-pointer shadow-md hover:opacity-95 transition-opacity"
+              className="cursor-pointer mb-5"
               onClick={() => onNavigate('landing')}
             >
-              <img 
-                alt="ShopMate AI Logo" 
-                className="w-full h-full object-contain brightness-100" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-              />
+              <ShopMateLogo size={32} className="w-16 h-16" />
             </div>
             
             {mode === 'login' ? (
@@ -160,7 +158,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps
               <button 
                 type="submit"
                 disabled={isLoading}
-                className="w-full mt-2 bg-[#ceced2] hover:bg-white text-black py-3.5 font-sans text-[11px] uppercase tracking-widest font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 rounded"
+                className="w-full mt-2 bg-gradient-to-br from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white shadow-[0_6px_22px_rgba(37,82,198,0.45)] hover:brightness-110 py-3.5 font-sans text-[11px] uppercase tracking-widest font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 rounded-xl"
               >
                 {isLoading ? (
                   <span>SIGNING IN...</span>

@@ -73,6 +73,7 @@ export default function InboxConsole({
   };
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const userIsAtBottom = useRef(true);
   
   const activeChat = conversations.find(c => c.id === selectedChatId) || conversations[0];
 
@@ -82,9 +83,23 @@ export default function InboxConsole({
     }
   };
 
+  const handleMessagesScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    userIsAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
+  // When a new message arrives or typing indicator changes, only auto-scroll if the
+  // user is already near the bottom — preserves scroll position when reading history.
   useEffect(() => {
-    scrollToBottom();
+    if (userIsAtBottom.current) scrollToBottom();
   }, [activeChat?.messages, isTyping]);
+
+  // When switching conversations, always jump to the bottom and reset the flag.
+  useEffect(() => {
+    userIsAtBottom.current = true;
+    scrollToBottom();
+  }, [activeChat?.id]);
 
   useEffect(() => {
     if (activeChat?.detectedAddress && !orderAddress.trim()) {
@@ -394,7 +409,7 @@ export default function InboxConsole({
             </header>
 
             {/* Message Thread Area */}
-            <div ref={messagesContainerRef} className="flex-grow min-h-0 overflow-y-auto p-5 space-y-4 no-scrollbar">
+            <div ref={messagesContainerRef} onScroll={handleMessagesScroll} className="flex-grow min-h-0 overflow-y-auto p-5 space-y-4 no-scrollbar">
               {activeChat?.isComplaint && (
                 <div className="status-danger rounded-2xl p-3.5 flex gap-3 text-left">
                   <ShieldAlert className="h-5 w-5 text-[#ff9d92] mt-0.5 shrink-0" />
@@ -418,7 +433,7 @@ export default function InboxConsole({
                           </span>
                           <span className="font-sans text-[10.5px] text-white/50">{m.time}</span>
                         </div>
-                        <p className="text-[13.5px] text-white leading-relaxed">{m.text}</p>
+                        <p className="text-[13.5px] text-white leading-relaxed">{m.text.replace(/<[^>]+>/g, '').trim()}</p>
 
                         <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
                           <button
@@ -453,7 +468,7 @@ export default function InboxConsole({
                               <span className="font-sans text-[10.5px] font-bold tracking-wider">AI</span>
                             </div>
                           )}
-                          <p>{m.text}</p>
+                          <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
                         </div>
                         <span className="text-[10.5px] text-white/40 mt-1 px-1">{m.time}</span>
                       </div>

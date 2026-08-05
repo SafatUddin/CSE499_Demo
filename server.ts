@@ -1222,14 +1222,21 @@ async function startServer() {
 
     let updatedCart = existingCart;
 
-    // SERVER-SIDE CART GUARD: Only allow a cart write when the AI was explicitly waiting
-    // for a quantity answer for that exact SKU. This prevents the Ollama model from
-    // autonomously adding items on price-inquiry turns, confirmation turns, or any other
-    // turn where the customer didn't actually state a quantity.
+    // SERVER-SIDE CART GUARD: Allow a cart write in two cases:
+    //   (a) Two-step flow: the AI was explicitly waiting for a quantity for this exact SKU
+    //       (awaitingQuantityFor === cartAction.sku).
+    //   (b) One-step flow: the customer stated a product name and quantity in one message
+    //       (e.g. "I want 2 Coca Cola") and awaitingQuantityFor is null — no prior
+    //       quantity-request turn is required when the quantity is already explicit.
+    // Both cases still require the SKU to resolve to a real, in-stock product (checked
+    // in the block below). Confirmation turns, price-inquiry turns, and address turns are
+    // all rejected because the AI returns action='none' on those turns.
     const cartAddAllowed =
       result.cartAction?.action === 'add' &&
       result.cartAction.sku &&
-      currentConversation.awaitingQuantityFor === result.cartAction.sku;
+      result.cartAction.quantity > 0 &&
+      (currentConversation.awaitingQuantityFor === result.cartAction.sku ||
+       (currentConversation.awaitingQuantityFor === null && !currentConversation.orderConfirmationRequested));
 
     if (cartAddAllowed) {
       const product = products.find((p) => p.sku === result.cartAction.sku);

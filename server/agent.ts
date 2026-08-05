@@ -196,7 +196,40 @@ ${catalogText || 'No products registered in catalog.'}`;
       });
 
       if (content) {
-        return JSON.parse(content.trim()) as AgentReply;
+        const parsed = JSON.parse(content.trim()) as AgentReply;
+
+        // Some quantized models (e.g. qwen2.5:3b) bleed their training-time XML tool-call
+        // format into the replyText string even when a JSON schema is enforced. When that
+        // happens the outer JSON is valid so no exception is thrown, but replyText contains
+        // raw markup visible to the customer and cartAction is left as action='none'.
+        // The two steps below detect and repair both problems before returning.
+
+        // Step 1: Recover cartAction from embedded <CartData><Item .../></CartData> when
+        // the model forgot to populate the structured cartAction field.
+        if (
+          parsed.cartAction?.action !== 'add' &&
+          /<(?:CartData|[Ii]tem)\b/i.test(parsed.replyText)
+        ) {
+          const skuMatch = parsed.replyText.match(/<[Ii]tem[^>]+sku=["']([^"']+)["']/);
+          const qtyMatch = parsed.replyText.match(/<[Ii]tem[^>]+quantity=["'](\d+)["']/);
+          if (skuMatch && qtyMatch) {
+            parsed.cartAction = {
+              action: 'add',
+              sku: skuMatch[1],
+              quantity: parseInt(qtyMatch[1], 10),
+            };
+          }
+        }
+
+        // Step 2: Strip all XML tags from replyText so customers never see raw markup.
+        // First unwrap <Response>...</Response> to preserve the human-readable text inside
+        // it, then remove any remaining tags (<CartData>, <Item>, stray closes, etc.).
+        parsed.replyText = parsed.replyText
+          .replace(/<Response>([\s\S]*?)<\/Response>/gi, '$1')
+          .replace(/<[^>]+>/g, '')
+          .trim();
+
+        return parsed;
       }
     } catch (ollamaError: any) {
       console.error('Ollama call failed, falling back to simulated logic:', ollamaError.message);

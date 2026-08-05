@@ -1,6 +1,5 @@
 import { Type } from '@google/genai';
 import { ai } from './gemini';
-import { ollamaChatJSON, ollamaEnabled } from './ollama';
 
 export interface AgentPersona {
   tone?: string;
@@ -175,10 +174,11 @@ ${catalogText || 'No products registered in catalog.'}`;
               askQuantityForSku: { type: Type.STRING },
               orderConfirmationRequested: { type: Type.BOOLEAN },
               orderConfirmed: { type: Type.BOOLEAN },
+              orderCancelled: { type: Type.BOOLEAN },
             },
             required: [
               'replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs',
-              'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed',
+              'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled',
             ],
           },
         },
@@ -188,122 +188,8 @@ ${catalogText || 'No products registered in catalog.'}`;
         return JSON.parse(response.text.trim()) as AgentReply;
       }
     } catch (geminiError: any) {
-      console.error('Gemini call failed, falling back to Ollama:', geminiError.message);
-      // Fall through to Ollama
-    }
-  }
-
-  // Assemble chat message history for Ollama's /api/chat
-  const chatMessages = [
-    { role: 'system' as const, content: systemInstruction },
-    ...history.map((h) => ({
-      role: (h.sender === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: h.text,
-    })),
-    { role: 'user' as const, content: message },
-  ];
-
-  // If the local Ollama model is reachable, run it
-  if (ollamaEnabled) {
-    try {
-      const content = await ollamaChatJSON(chatMessages, {
-        type: 'object',
-        properties: {
-          replyText: {
-            type: 'string',
-            description: 'The conversational response to the customer.'
-          },
-          isComplaint: {
-            type: 'boolean',
-            description: 'Whether the user is complaining or dissatisfied.'
-          },
-          cartAction: {
-            type: 'object',
-            description: "Action to signal a cart add. Set action='add' when the customer gives an explicit quantity to buy in this turn. Use action='none' for all other turns (price inquiries, confirmations, address turns).",
-            properties: {
-              action: {
-                type: 'string',
-                description: "Set to 'add' when customer explicitly states a quantity to buy (e.g. '2 Pepsi', 'I want 1 Void Audio'). Set to 'none' otherwise."
-              },
-              sku: {
-                type: 'string',
-                description: 'The exact SKU of the product to add to cart, e.g., NX-402-B.'
-              },
-              quantity: {
-                type: 'integer',
-                description: 'How many units to add based on customer request.'
-              }
-            },
-            required: ['action', 'sku', 'quantity']
-          },
-          suggestedProductsSKUs: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'SKUs of relevant products to suggest for cross-sell.'
-          },
-          extractedAddress: {
-            type: 'string',
-            description: 'A shipping/delivery address the customer has stated in the conversation, verbatim. Empty string if none was given.'
-          },
-          askQuantityForSku: {
-            type: 'string',
-            description: 'Set to the product SKU when asking the customer how many they want (e.g. "NX-402-B"). Empty string otherwise.'
-          },
-          orderConfirmationRequested: {
-            type: 'boolean',
-            description: 'True only on the turn where replyText presents an order summary and asks "Would you like to confirm or cancel this order?".'
-          },
-          orderConfirmed: {
-            type: 'boolean',
-            description: 'True only when the customer explicitly confirms an order summary that was already presented in a previous turn.'
-          },
-          orderCancelled: {
-            type: 'boolean',
-            description: 'True only when orderConfirmationRequested is already true and the customer explicitly cancels ("cancel", "never mind", "stop", "don\'t order", etc.). Never set this to true on any other turn.'
-          }
-        },
-        required: ['replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs', 'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled']
-      });
-
-      if (content) {
-        const parsed = JSON.parse(content.trim()) as AgentReply;
-
-        // Some quantized models (e.g. qwen2.5:3b) bleed their training-time XML tool-call
-        // format into the replyText string even when a JSON schema is enforced. When that
-        // happens the outer JSON is valid so no exception is thrown, but replyText contains
-        // raw markup visible to the customer and cartAction is left as action='none'.
-        // The two steps below detect and repair both problems before returning.
-
-        // Step 1: Recover cartAction from embedded <CartData><Item .../></CartData> when
-        // the model forgot to populate the structured cartAction field.
-        if (
-          parsed.cartAction?.action !== 'add' &&
-          /<(?:CartData|[Ii]tem)\b/i.test(parsed.replyText)
-        ) {
-          const skuMatch = parsed.replyText.match(/<[Ii]tem[^>]+sku=["']([^"']+)["']/);
-          const qtyMatch = parsed.replyText.match(/<[Ii]tem[^>]+quantity=["'](\d+)["']/);
-          if (skuMatch && qtyMatch) {
-            parsed.cartAction = {
-              action: 'add',
-              sku: skuMatch[1],
-              quantity: parseInt(qtyMatch[1], 10),
-            };
-          }
-        }
-
-        // Step 2: Strip all XML tags from replyText so customers never see raw markup.
-        // First unwrap <Response>...</Response> to preserve the human-readable text inside
-        // it, then remove any remaining tags (<CartData>, <Item>, stray closes, etc.).
-        parsed.replyText = parsed.replyText
-          .replace(/<Response>([\s\S]*?)<\/Response>/gi, '$1')
-          .replace(/<[^>]+>/g, '')
-          .trim();
-
-        return parsed;
-      }
-    } catch (ollamaError: any) {
-      console.error('Ollama call failed, falling back to simulated logic:', ollamaError.message);
-      // Fall through to fallback simulator
+      console.error('Gemini call failed, falling back to simulated logic:', geminiError.message);
+      // Fall through to the rule-based simulator
     }
   }
 

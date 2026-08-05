@@ -5,7 +5,6 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
-import { ollamaEnabled, warmUpOllama } from './server/ollama';
 import { ai } from './server/gemini';
 import { generateAgentReply } from './server/agent';
 import {
@@ -2023,7 +2022,7 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', geminiActive: !!ai, ollamaEnabled });
+    res.json({ status: 'ok', geminiActive: !!ai });
   });
 
   // Static privacy policy page (required by Meta's App Basic Settings to enable
@@ -2088,7 +2087,6 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
-    warmUpOllama();
   });
 }
 

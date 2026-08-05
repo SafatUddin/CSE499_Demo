@@ -1141,6 +1141,7 @@ async function startServer() {
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
   async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
+    console.log('[AGENT REPLY] generateAndStoreAgentReply ENTERED — conversationId:', conversation.id, '| text:', JSON.stringify(customerText));
     const [store, products, recentMessages, currentConversation] = await Promise.all([
       prisma.store.findUnique({ where: { id: conversation.storeId } }),
       prisma.product.findMany({ where: { storeId: conversation.storeId } }),
@@ -1633,6 +1634,7 @@ async function startServer() {
   // message for demo/testing channels that have no real external customer, and triggers
   // an AI reply if the conversation is AI-managed.
   app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthedRequest, res) => {
+    console.log('[ROUTE] POST /api/conversations/:id/messages — id:', req.params.id, '| sender:', req.body?.sender, '| text:', JSON.stringify(req.body?.text));
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
@@ -1800,6 +1802,7 @@ async function startServer() {
   });
 
   async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
+    console.log('[WEBHOOK] handleIncomingMessengerMessage — pageId:', pageId, '| senderPsid:', senderPsid, '| text:', JSON.stringify(messageText));
     // Meta's webhook delivery is "at-least-once" — it may redeliver the same event.
     // Bail out immediately if we've already recorded this exact message.
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
@@ -2087,5 +2090,9 @@ async function startServer() {
     warmUpOllama();
   });
 }
+
+// ── DIAGNOSTIC: confirm this version of server.ts is what's running ─────────
+console.log('[SERVER LOADED] server.ts loaded at', new Date().toISOString());
+// ─────────────────────────────────────────────────────────────────────────────
 
 startServer();

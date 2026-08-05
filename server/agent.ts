@@ -1,3 +1,5 @@
+import { Type } from '@google/genai';
+import { ai } from './gemini';
 import { ollamaChatJSON, ollamaEnabled } from './ollama';
 
 export interface AgentPersona {
@@ -126,6 +128,62 @@ ${orderStateText || 'No cart/address/confirmation in progress yet.'}
 
 Available Product Catalog:
 ${catalogText || 'No products registered in catalog.'}`;
+
+  // If Gemini is configured, it's the primary model — noticeably better multilingual
+  // (Bangla/Banglish) understanding than the self-hosted fallback model below.
+  if (ai) {
+    try {
+      const contentsPayload = [
+        ...history.map((h) => ({
+          role: h.sender === 'customer' ? 'user' : 'model',
+          parts: [{ text: h.text }],
+        })),
+        { role: 'user', parts: [{ text: message }] },
+      ];
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        contents: contentsPayload,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              replyText: { type: Type.STRING },
+              isComplaint: { type: Type.BOOLEAN },
+              cartAction: {
+                type: Type.OBJECT,
+                properties: {
+                  action: { type: Type.STRING },
+                  sku: { type: Type.STRING },
+                  quantity: { type: Type.INTEGER },
+                },
+                required: ['action', 'sku', 'quantity'],
+              },
+              suggestedProductsSKUs: { type: Type.ARRAY, items: { type: Type.STRING } },
+              extractedAddress: { type: Type.STRING },
+              askQuantityForSku: { type: Type.STRING },
+              orderConfirmationRequested: { type: Type.BOOLEAN },
+              orderConfirmed: { type: Type.BOOLEAN },
+            },
+            required: [
+              'replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs',
+              'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed',
+            ],
+          },
+        },
+      });
+
+      if (response.text) {
+        return JSON.parse(response.text.trim()) as AgentReply;
+      }
+    } catch (geminiError: any) {
+      console.error('Gemini call failed, falling back to Ollama:', geminiError.message);
+      // Fall through to Ollama
+    }
+  }
 
   // Assemble chat message history for Ollama's /api/chat
   const chatMessages = [

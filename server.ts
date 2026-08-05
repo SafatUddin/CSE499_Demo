@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
 import { ollamaEnabled, warmUpOllama } from './server/ollama';
+import { ai } from './server/gemini';
 import { generateAgentReply } from './server/agent';
 import {
   verifyMetaSignature,
@@ -1823,7 +1824,7 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', ollamaEnabled });
+    res.json({ status: 'ok', geminiActive: !!ai, ollamaEnabled });
   });
 
   // Static privacy policy page (required by Meta's App Basic Settings to enable

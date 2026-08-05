@@ -33,8 +33,9 @@ enum Sender {
 }
 
 enum OrderStatus {
-  PENDING
-  FULFILLED
+  PROCESSING
+  ON_THE_WAY
+  DELIVERED
   CANCELLED
 }
 
@@ -147,7 +148,7 @@ model Order {
   items          Json
   customerName   String
   address        String
-  status         OrderStatus @default(PENDING)
+  status         OrderStatus @default(PROCESSING)
   total          Decimal
   createdAt      DateTime    @default(now())
 }

@@ -16,7 +16,7 @@ import {
   Paperclip
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
-import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart } from '../lib/api';
+import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
@@ -38,12 +38,16 @@ export default function InboxConsole({
   const [isTyping, setIsTyping] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All conversations');
   const [orderAddress, setOrderAddress] = useState('');
+  const [orderPhone, setOrderPhone] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState('');
   const [orderSuccess, setOrderSuccess] = useState('');
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'info'>('list');
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [ongoingOrders, setOngoingOrders] = useState<ApiOrder[]>([]);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [orderCancelError, setOrderCancelError] = useState('');
 
   const getChatDisplayName = (chat: Conversation) => {
     if (!chat) return '';
@@ -101,6 +105,37 @@ export default function InboxConsole({
     scrollToBottom();
   }, [activeChat?.id]);
 
+  // Load ongoing orders (Processing / On the Way) for the active conversation
+  useEffect(() => {
+    listOrders()
+      .then((orders) => {
+        const active = orders.filter(
+          (o) =>
+            (o.status === 'Processing' || o.status === 'On the Way') &&
+            o.conversationId === activeChat?.id
+        );
+        setOngoingOrders(active);
+      })
+      .catch((err) => console.error('Failed to load ongoing orders:', err));
+  }, [activeChat?.id]);
+
+  const handleCancelOrder = async (orderId: string) => {
+    setCancellingOrderId(orderId);
+    setOrderCancelError('');
+    try {
+      const updated = await updateOrderStatus(orderId, 'Cancelled');
+      setOngoingOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? updated : o)).filter(
+          (o) => o.status === 'Processing' || o.status === 'On the Way'
+        )
+      );
+    } catch (err: any) {
+      setOrderCancelError(err.message || 'Failed to cancel order.');
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
   useEffect(() => {
     if (activeChat?.detectedAddress && !orderAddress.trim()) {
       setOrderAddress(activeChat.detectedAddress);
@@ -142,6 +177,17 @@ export default function InboxConsole({
         discardDraftId || undefined
       );
       onUpdateConversation(activeChat.id, updated);
+      // Refresh ongoing orders in case the AI just created one
+      listOrders()
+        .then((orders) => {
+          const active = orders.filter(
+            (o) =>
+              (o.status === 'Processing' || o.status === 'On the Way') &&
+              o.conversationId === activeChat.id
+          );
+          setOngoingOrders(active);
+        })
+        .catch(() => {});
     } catch (err) {
       console.error(err);
     } finally {
@@ -174,6 +220,20 @@ export default function InboxConsole({
     }
   };
 
+  const handleUpdateCartQty = async (sku: string, delta: number) => {
+    if (!activeChat || !activeChat.cart) return;
+    const updatedCart = activeChat.cart
+      .map((item) => item.sku === sku ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)
+      .filter((item) => item.quantity > 0);
+    onUpdateConversation(activeChat.id, { cart: updatedCart });
+    try {
+      const updated = await updateConversationCart(activeChat.id, updatedCart);
+      onUpdateConversation(activeChat.id, updated);
+    } catch (err) {
+      console.error('Failed to update cart quantity:', err);
+    }
+  };
+
   const handleGenerateOrder = async () => {
     if (!activeChat) return;
     if (!orderAddress.trim()) {
@@ -182,12 +242,25 @@ export default function InboxConsole({
     }
     setOrderError('');
     setIsCreatingOrder(true);
+    const combinedAddress = orderPhone.trim()
+      ? `Phone: ${orderPhone.trim()} | Address: ${orderAddress.trim()}`
+      : orderAddress.trim();
     try {
-      await createOrderFromConversation(activeChat.id, { address: orderAddress });
+      await createOrderFromConversation(activeChat.id, { address: combinedAddress });
       onUpdateConversation(activeChat.id, { cart: undefined });
       setOrderAddress('');
+      setOrderPhone('');
       setOrderSuccess('Order created successfully.');
       setTimeout(() => setOrderSuccess(''), 3000);
+      // Refresh ongoing orders
+      listOrders()
+        .then((orders) => {
+          const active = orders.filter(
+            (o) => (o.status === 'Processing' || o.status === 'On the Way') && o.conversationId === activeChat.id
+          );
+          setOngoingOrders(active);
+        })
+        .catch(() => {});
     } catch (err: any) {
       setOrderError(err.message || 'Failed to create order.');
     } finally {
@@ -630,12 +703,28 @@ export default function InboxConsole({
                   {activeChat.cart.map((item) => {
                     const product = products.find((p) => p.sku === item.sku);
                     return (
-                      <div key={item.sku} className="flex justify-between items-center text-[13px] font-sans border-b border-white/[0.05] pb-2.5 last:border-0 last:pb-0">
+                      <div key={item.sku} className="flex justify-between items-start text-[13px] font-sans border-b border-white/[0.05] pb-2.5 last:border-0 last:pb-0">
                         <div className="flex-grow min-w-0 pr-2">
                           <span className="text-white font-bold block truncate">{product?.name || item.sku}</span>
-                          <span className="text-white/50 text-[11.5px]">{item.quantity} × ${(product?.price || 0).toFixed(2)}</span>
+                          <span className="text-white/50 text-[11.5px]">${(product?.price || 0).toFixed(2)} each</span>
+                          {/* Quantity controls — Section 4: allow cart quantity updates */}
+                          <div className="flex items-center gap-1.5 mt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCartQty(item.sku, -1)}
+                              className="w-5 h-5 flex items-center justify-center rounded-md bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs font-bold transition-colors cursor-pointer"
+                              title="Decrease quantity"
+                            >−</button>
+                            <span className="text-white font-bold text-xs min-w-[20px] text-center">{item.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCartQty(item.sku, 1)}
+                              className="w-5 h-5 flex items-center justify-center rounded-md bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs font-bold transition-colors cursor-pointer"
+                              title="Increase quantity"
+                            >+</button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
                           <span className="text-white font-bold">${((product?.price || 0) * item.quantity).toFixed(2)}</span>
                           <button
                             type="button"
@@ -669,6 +758,14 @@ export default function InboxConsole({
                   )}
 
                   <input
+                    type="tel"
+                    value={orderPhone}
+                    onChange={(e) => setOrderPhone(e.target.value)}
+                    placeholder="Phone number…"
+                    className="w-full zone-b-input px-3 py-2.5 font-sans text-xs placeholder-white/38 outline-none"
+                  />
+
+                  <input
                     type="text"
                     value={orderAddress}
                     onChange={(e) => setOrderAddress(e.target.value)}
@@ -685,6 +782,76 @@ export default function InboxConsole({
                   </button>
                 </div>
               )}
+              {/* Ongoing Orders Section */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-sans text-[13px] font-bold text-white/80">
+                    Ongoing Orders
+                  </h4>
+                  {ongoingOrders.length > 0 && (
+                    <span className="status-info px-2.5 py-0.5 text-[10.5px] font-bold rounded-full">
+                      {ongoingOrders.length}
+                    </span>
+                  )}
+                </div>
+
+                {orderCancelError && (
+                  <div className="status-danger text-[11px] p-2.5 rounded-xl text-center font-sans mb-2">
+                    {orderCancelError}
+                  </div>
+                )}
+
+                {ongoingOrders.length === 0 ? (
+                  <div className="bg-[#15161a] p-6 rounded-2xl border border-dashed border-white/12 text-center">
+                    <p className="text-[12px] text-white/35 font-sans">No ongoing orders.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {ongoingOrders.map((order) => (
+                      <div key={order.id} className="zone-b-grey3 p-3.5 rounded-2xl space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-sans text-[10px] text-white/40 font-mono truncate max-w-[120px]" title={order.id}>
+                            #{order.id.slice(-8).toUpperCase()}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            order.status === 'On the Way' ? 'status-info' : 'status-warning'
+                          }`}>
+                            {order.status}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          {order.items.map((item, idx) => (
+                            <div key={idx} className="flex justify-between text-[11.5px] font-sans">
+                              <span className="text-white/70 truncate pr-2">{item.name}</span>
+                              <span className="text-white/50 shrink-0">×{item.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex justify-between items-center pt-1 border-t border-white/[0.07]">
+                          <span className="font-sans text-[11px] text-white/40">
+                            {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </span>
+                          <span className="font-sans text-[12px] font-bold text-white">
+                            ${order.total.toFixed(2)}
+                          </span>
+                        </div>
+
+                        {order.status !== 'Cancelled' && (
+                          <button
+                            onClick={() => handleCancelOrder(order.id)}
+                            disabled={cancellingOrderId === order.id}
+                            className="w-full px-3 py-1.5 text-[10.5px] font-bold rounded-full bg-red-500/10 text-red-400 border border-red-500/25 hover:bg-red-500/20 transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            {cancellingOrderId === order.id ? 'Cancelling…' : 'Cancel Order'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
 
           </aside>

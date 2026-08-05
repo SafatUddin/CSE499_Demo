@@ -40,11 +40,9 @@ export interface AgentOrderState {
   hasCartItems?: boolean;
   hasAddress?: boolean;
   cartItems?: { sku: string; name: string; quantity: number }[];
-  // Set when the customer gave a quantity and the AI asked them to confirm the order.
-  // The server decodes "CONFIRM:SKU:QTY" from awaitingQuantityFor and passes this.
   pendingItem?: { sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
-  // True after the customer confirmed the pending item; the AI must now collect phone+address.
   awaitingContactDetails?: boolean;
+  ongoingOrders?: { id: string; items: { name: string; quantity: number; price: number }[]; status: string; createdAt: string; total: number }[];
 }
 
 export async function generateAgentReply({
@@ -79,16 +77,25 @@ export async function generateAgentReply({
     ? orderState.cartItems.map((item) => `${item.quantity}x ${item.name} (SKU: ${item.sku})`).join(', ')
     : 'empty';
 
+  const ongoingOrdersText = orderState.ongoingOrders && orderState.ongoingOrders.length > 0
+    ? orderState.ongoingOrders
+        .map(
+          (o) =>
+            `- Order ID: ${o.id}, Status: ${o.status}, Placed: ${o.createdAt}, Total: $${o.total.toFixed(
+              2
+            )}, Items: ${o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}`
+        )
+        .join('\n')
+    : 'No active ongoing orders (Processing or On the Way).';
+
   const orderStateText = [
     `The customer's cart currently contains: ${cartText}. This already reflects everything added so far — do NOT set cartAction to 'add' again for an item already in this list unless the customer is explicitly asking for additional/more units beyond what's shown. Simply discussing, confirming, or asking about an item already in the cart is NOT a reason to add it again.`,
     orderState.awaitingQuantityFor
       ? `You just asked the customer how many units of SKU "${orderState.awaitingQuantityFor}" they want. If their message answers that (a number, or a spelled-out quantity like "two"), treat it as the quantity for that SKU rather than a new unrelated request.`
       : '',
-    // CONFIRM state: quantity was given, we need a yes/no before adding to cart
     orderState.pendingItem
       ? `The customer wants to buy ${orderState.pendingItem.quantity}x "${orderState.pendingItem.name}" at $${orderState.pendingItem.unitPrice.toFixed(2)} each (total $${orderState.pendingItem.lineTotal.toFixed(2)}). You just showed this and asked them to confirm. If their reply is affirmative (yes/confirm/ok/sure/proceed/go ahead), set orderConfirmed=true and cartAction=none. If they decline (no/cancel/never mind), set orderCancelled=true and cartAction=none.`
       : '',
-    // DETAILS state: customer confirmed, now collect phone+address
     orderState.awaitingContactDetails
       ? `The customer confirmed their order. You must now ask for (or extract from this message) their phone number and delivery address together. Combine them as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Set orderConfirmed=true once you have both. cartAction must be none.`
       : '',
@@ -106,13 +113,14 @@ Mandatory Interaction Rules:
 1. PRICE INQUIRY → ASK TO BUY: If customer asks price (e.g. "price of X?", "how much?"), reply with the price and ask "Would you like to buy this product?". cartAction = none.
 2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart.
 3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity.
-4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → ORDER PLACED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply confirming the order. Set orderConfirmed=true. cartAction = none.
-5. ORDER CANCELLED: When orderConfirmationRequested is already true and the customer cancels ("cancel", "never mind", "stop", "no", etc.), reply "No problem! Your order has been cancelled. Let me know if you'd like to order something else." Set orderCancelled=true.
+4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → ORDER PLACED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply confirming the order. Set orderConfirmed=true. cartAction = none. Always thank the customer.
+5. ORDER CANCELLED: When orderConfirmationRequested is already true or user asks to cancel an ongoing order, set orderCancelled=true and inform them that the order/cancellation was successful.
+6. ONGOING ORDERS INQUIRIES: Use the Ongoing Orders context to answer questions like "Where is my order?", "What did I order?", "How many items?", "What's the status?", "Can I cancel?", "When was it placed?". Order status must always be one of: Processing, On the Way, Delivered, Cancelled.
 
 FORBIDDEN:
 - Never set cartAction='add' unless the customer explicitly stated a number to buy in this exact message.
-- Never set orderCancelled=true unless orderConfirmationRequested is already true or pendingItem is in orderState.
 - Never set cartAction='add' on a price-inquiry turn, confirmation turn, or address-providing turn.
+- Never guess or default quantities.
 
 Core Directives:
 1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
@@ -133,6 +141,9 @@ ${customInst}
 Current Order State:
 ${orderStateText || 'No cart/address/confirmation in progress yet.'}
 
+Customer Ongoing Orders:
+${ongoingOrdersText}
+
 Available Product Catalog:
 ${catalogText || 'No products registered in catalog.'}`;
 
@@ -149,7 +160,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       ];
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-2.5-flash',
         contents: contentsPayload,
         config: {
           systemInstruction,
@@ -327,6 +338,63 @@ ${catalogText || 'No products registered in catalog.'}`;
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress: '',
+      askQuantityForSku: '',
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: false,
+    };
+  }
+
+  // Ongoing orders inquiry — customer asking about their active orders
+  const isOngoingOrderInquiry =
+    lowerMsg.includes('my order') ||
+    lowerMsg.includes('where is my') ||
+    lowerMsg.includes('order status') ||
+    lowerMsg.includes('order kothay') ||
+    lowerMsg.includes('what did i order') ||
+    lowerMsg.includes('order details') ||
+    lowerMsg.includes('track order') ||
+    lowerMsg.includes('cancel my order') ||
+    lowerMsg.includes('cancel order') ||
+    lowerMsg.includes('order cancel') ||
+    (lowerMsg.includes('when') && lowerMsg.includes('order')) ||
+    (lowerMsg.includes('how many') && lowerMsg.includes('order'));
+
+  if (isOngoingOrderInquiry && orderState.ongoingOrders && orderState.ongoingOrders.length > 0) {
+    const orders = orderState.ongoingOrders;
+    const isCancelRequest = lowerMsg.includes('cancel');
+
+    if (isCancelRequest) {
+      // Signal the server to cancel — but only the fallback engine cannot do it directly;
+      // return orderCancelled=true so the server handles it via the cancel order flow.
+      const o = orders[0];
+      replyText = `Your order (#${o.id.slice(-8).toUpperCase()}) is currently ${o.status}. I'm processing your cancellation request now. Your inventory will be restored shortly.`;
+      return {
+        replyText,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress,
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: true,
+      };
+    }
+
+    // General inquiry — describe all ongoing orders
+    const orderSummaries = orders.map((o) => {
+      const items = o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
+      return `• Order #${o.id.slice(-8).toUpperCase()} — ${o.status}\n  Items: ${items}\n  Total: $${o.total.toFixed(2)}\n  Placed: ${o.createdAt}`;
+    }).join('\n\n');
+
+    replyText = `Here are your ongoing orders:\n\n${orderSummaries}\n\nWould you like to cancel any of these orders or need more information?`;
+    return {
+      replyText,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress,
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
@@ -578,8 +646,8 @@ ${catalogText || 'No products registered in catalog.'}`;
   if (extractedAddress || lowerMsg.includes('confirm') || lowerMsg.includes('checkout')) {
     const addressToUse = extractedAddress || (orderState.hasAddress ? 'Address on file' : '');
     if (!addressToUse) {
-      // Rule 2: Ask address before confirming order
-      replyText = `Could you please provide your shipping address before we confirm your order?`;
+      // Rule 5: Ask for shipping address AND phone number before confirming order
+      replyText = `Before I confirm your order, I'll need your shipping address and phone number. Please provide both so we can complete your order.`;
       return {
         replyText,
         isComplaint: false,
@@ -592,7 +660,7 @@ ${catalogText || 'No products registered in catalog.'}`;
         orderCancelled: false,
       };
     } else if (orderState.hasCartItems) {
-      // Rule 5: Show clean order summary and ask to confirm or cancel
+      // Rule 6: Show complete order summary (per spec) and ask to confirm or cancel
       const lines = (orderState.cartItems || []).map((i) => {
         const p = catalog.find((prod) => prod.sku === i.sku);
         const pr = p ? p.price : 0;
@@ -603,7 +671,12 @@ ${catalogText || 'No products registered in catalog.'}`;
         return sum + (p ? p.price * i.quantity : 0);
       }, 0);
 
-      replyText = `Order Summary:\n${lines}\n\nSubtotal: $${subtotal.toFixed(2)}\nShipping Address: ${addressToUse}\n\nWould you like to confirm or cancel this order?`;
+      // Extract phone from address string if present
+      const phoneInAddr = addressToUse.match(/Phone:\s*[^|]+/);
+      const addrPart = addressToUse.replace(/Phone:[^|]+\|?/, '').trim();
+      const phoneLine = phoneInAddr ? `\nPhone: ${phoneInAddr[0].replace('Phone:', '').trim()}` : '';
+
+      replyText = `📋 Order Summary\n\n${lines}\n\nSubtotal: $${subtotal.toFixed(2)}\nShipping Address: ${addrPart}${phoneLine}\n\nWould you like to confirm or cancel this order?`;
       return {
         replyText,
         isComplaint: false,

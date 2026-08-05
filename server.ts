@@ -595,16 +595,22 @@ async function startServer() {
     }
   });
 
-  const toPublicOrder = (o: { id: string; conversationId: string | null; items: any; customerName: string; address: string; status: string; total: any; createdAt: Date }) => ({
-    id: o.id,
-    conversationId: o.conversationId,
-    items: o.items,
-    customerName: o.customerName,
-    address: o.address,
-    status: o.status === 'FULFILLED' ? 'Fulfilled' : o.status === 'CANCELLED' ? 'Cancelled' : 'Pending',
-    total: Number(o.total),
-    createdAt: o.createdAt,
-  });
+  const toPublicOrder = (o: { id: string; conversationId: string | null; items: any; customerName: string; address: string; status: string; total: any; createdAt: Date }) => {
+    let publicStatus: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled' = 'Processing';
+    if (o.status === 'ON_THE_WAY') publicStatus = 'On the Way';
+    else if (o.status === 'DELIVERED') publicStatus = 'Delivered';
+    else if (o.status === 'CANCELLED') publicStatus = 'Cancelled';
+    return {
+      id: o.id,
+      conversationId: o.conversationId,
+      items: o.items,
+      customerName: o.customerName,
+      address: o.address,
+      status: publicStatus,
+      total: Number(o.total),
+      createdAt: o.createdAt,
+    };
+  };
 
   // List this store's orders
   app.get('/api/orders', requireAuth, async (req: AuthedRequest, res) => {
@@ -620,18 +626,48 @@ async function startServer() {
     }
   });
 
-  // Update an order's fulfillment status
+  // Update an order's status
   app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
     try {
       const { status } = req.body;
-      const mapped = status === 'Fulfilled' ? 'FULFILLED' : status === 'Cancelled' ? 'CANCELLED' : status === 'Pending' ? 'PENDING' : null;
+      const statusMap: Record<string, 'PROCESSING' | 'ON_THE_WAY' | 'DELIVERED' | 'CANCELLED'> = {
+        'Processing': 'PROCESSING',
+        'On the Way': 'ON_THE_WAY',
+        'Delivered': 'DELIVERED',
+        'Cancelled': 'CANCELLED',
+      };
+      const mapped = statusMap[status];
       if (!mapped) return res.status(400).json({ error: 'Invalid status' });
 
       const order = await prisma.order.findUnique({ where: { id: req.params.id } });
       if (!order || order.storeId !== req.auth!.storeId) {
         return res.status(404).json({ error: 'Order not found' });
       }
-      const updated = await prisma.order.update({ where: { id: order.id }, data: { status: mapped as any } });
+
+      // Business Rule: Restrict cancelling delivered orders
+      if (order.status === 'DELIVERED' && mapped === 'CANCELLED') {
+        return res.status(400).json({ error: 'Delivered orders cannot be cancelled.' });
+      }
+
+      // If transitioning to CANCELLED from a non-cancelled state, restore inventory
+      if (mapped === 'CANCELLED' && order.status !== 'CANCELLED') {
+        await prisma.$transaction(async (tx) => {
+          const items = (order.items as any[]) || [];
+          for (const item of items) {
+            if (item.sku && item.quantity > 0) {
+              await tx.product.updateMany({
+                where: { storeId: order.storeId, sku: item.sku },
+                data: { inventory: { increment: item.quantity } },
+              });
+            }
+          }
+          await tx.order.update({ where: { id: order.id }, data: { status: 'CANCELLED' } });
+        });
+        const updatedOrder = await prisma.order.findUnique({ where: { id: order.id } });
+        return res.json(toPublicOrder(updatedOrder!));
+      }
+
+      const updated = await prisma.order.update({ where: { id: order.id }, data: { status: mapped } });
       res.json(toPublicOrder(updated));
     } catch (err: any) {
       console.error('Update order error:', err);
@@ -720,7 +756,7 @@ async function startServer() {
           items,
           customerName: customerNameOverride || conversation.customerName || 'Customer',
           address,
-          status: 'PENDING',
+          status: 'PROCESSING',
           total,
         },
       });
@@ -889,9 +925,9 @@ async function startServer() {
           if (entry) entry.conversations += 1;
         }
 
-        // Bucket converted sales — FULFILLED orders only.
+        // Bucket converted sales — DELIVERED orders only.
         for (const o of ordersInRange) {
-          if (o.status === 'FULFILLED') {
+          if (o.status === 'DELIVERED') {
             const key = dayKey(o.createdAt);
             const entry = dayMap.get(key);
             if (entry) entry.convertedSales += 1;
@@ -935,7 +971,7 @@ async function startServer() {
       // Map order status enum back to the display value already used across
       // the project (same logic as toPublicOrder above).
       const orderStatusLabel = (s: string) =>
-        s === 'FULFILLED' ? 'Fulfilled' : s === 'CANCELLED' ? 'Cancelled' : 'Pending';
+        s === 'DELIVERED' ? 'Delivered' : s === 'CANCELLED' ? 'Cancelled' : s === 'ON_THE_WAY' ? 'On the Way' : 'Processing';
 
       const activityItems: {
         id: string;
@@ -1142,11 +1178,19 @@ async function startServer() {
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
   async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
     console.log('[AGENT REPLY] generateAndStoreAgentReply ENTERED — conversationId:', conversation.id, '| text:', JSON.stringify(customerText));
-    const [store, products, recentMessages, currentConversation] = await Promise.all([
+    const [store, products, recentMessages, currentConversation, conversationOrders] = await Promise.all([
       prisma.store.findUnique({ where: { id: conversation.storeId } }),
       prisma.product.findMany({ where: { storeId: conversation.storeId } }),
       prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
       prisma.conversation.findUnique({ where: { id: conversation.id } }),
+      prisma.order.findMany({
+        where: {
+          storeId: conversation.storeId,
+          conversationId: conversation.id,
+          status: { in: ['PROCESSING', 'ON_THE_WAY'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
     if (!store || !currentConversation) return;
 
@@ -1206,6 +1250,13 @@ async function startServer() {
       } : undefined,
       // DETAILS state: signals to the model/fallback to extract phone+address
       awaitingContactDetails: isDetailsState,
+      ongoingOrders: conversationOrders.map((o) => ({
+        id: o.id,
+        items: ((o.items as any[]) || []).map((i) => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
+        status: o.status === 'ON_THE_WAY' ? 'On the Way' : 'Processing',
+        createdAt: o.createdAt.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+        total: Number(o.total),
+      })),
     };
 
     const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
@@ -1344,20 +1395,50 @@ async function startServer() {
     }
 
     // Only trust a customer's "yes" as a real confirmation if the AI actually asked for
-    // one in a previous turn — otherwise a stray "yes" to an unrelated question could
-    // trigger a real order.
-    const customerConfirmedForReal = result.orderConfirmed && currentConversation.orderConfirmationRequested;
+    // one in a previous turn or we are in the multi-step checkout state machine.
+    const customerConfirmedForReal =
+      result.orderConfirmed &&
+      (currentConversation.orderConfirmationRequested || isConfirmState || isDetailsState);
     if (customerConfirmedForReal) {
       conversationData.orderConfirmed = true;
     }
 
-    // When the customer explicitly cancels a pending confirmation, reset confirmation
-    // flags so the conversation returns to a normal shopping state. Cart and address are
-    // deliberately kept so the customer can modify items and re-confirm later if they wish.
+    // When the customer explicitly cancels a pending checkout confirmation, reset flags.
     const customerCancelledForReal = result.orderCancelled && currentConversation.orderConfirmationRequested;
     if (customerCancelledForReal) {
       conversationData.orderConfirmationRequested = false;
       conversationData.orderConfirmed = false;
+    }
+
+    // When the AI signals orderCancelled=true from an ONGOING ORDER INQUIRY (not a checkout
+    // cancellation), cancel the customer's most recent Processing/On the Way order and restore inventory.
+    const isOngoingOrderCancellation =
+      result.orderCancelled &&
+      !currentConversation.orderConfirmationRequested &&
+      !isConfirmState &&
+      conversationOrders.length > 0;
+
+    if (isOngoingOrderCancellation) {
+      const orderToCancel = conversationOrders[0]; // Most recent ongoing order
+      if (orderToCancel.status !== 'CANCELLED' && orderToCancel.status !== 'DELIVERED') {
+        try {
+          await prisma.$transaction(async (tx) => {
+            const items = (orderToCancel.items as any[]) || [];
+            for (const item of items) {
+              if (item.sku && item.quantity > 0) {
+                await tx.product.updateMany({
+                  where: { storeId: orderToCancel.storeId, sku: item.sku },
+                  data: { inventory: { increment: item.quantity } },
+                });
+              }
+            }
+            await tx.order.update({ where: { id: orderToCancel.id }, data: { status: 'CANCELLED' } });
+          });
+          console.log('[ORDER CANCEL] Cancelled ongoing order:', orderToCancel.id);
+        } catch (cancelErr: any) {
+          console.error('[ORDER CANCEL] Failed to cancel ongoing order:', cancelErr.message);
+        }
+      }
     }
 
     // === NEW CHECKOUT STATE MACHINE ===
@@ -1381,12 +1462,13 @@ async function startServer() {
         conversationData.awaitingQuantityFor = rawAWQ;
       }
     } else if (isDetailsState) {
-      // Use address from this turn, OR from a prior turn (Ollama sometimes stores address in
+      // Use address from this turn, OR from a prior turn (Ollama/Gemini sometimes stores address in
       // replyText / detectedAddress without re-emitting it in extractedAddress).
       const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
       if (detailsContactInfo && pendingEncodedSku && pendingEncodedQty > 0) {
-        // We have everything needed to create the order — clear DETAILS state.
+        // We have everything needed to create the order — clear DETAILS state and mark confirmed.
         conversationData.awaitingQuantityFor = null;
+        conversationData.orderConfirmed = true;
         if (result.extractedAddress) {
           conversationData.detectedAddress = result.extractedAddress;
         }

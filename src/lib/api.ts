@@ -253,7 +253,7 @@ export interface ApiOrder {
   items: ApiOrderItem[];
   customerName: string;
   address: string;
-  status: 'Pending' | 'Fulfilled' | 'Cancelled';
+  status: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled';
   total: number;
   createdAt: string;
 }
@@ -262,7 +262,7 @@ export function listOrders() {
   return request<ApiOrder[]>('/api/orders');
 }
 
-export function updateOrderStatus(id: string, status: 'Pending' | 'Fulfilled' | 'Cancelled') {
+export function updateOrderStatus(id: string, status: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled') {
   return request<ApiOrder>(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
 }
 

@@ -15,7 +15,7 @@ export default function OrdersPage() {
     loadOrders();
   }, []);
 
-  const handleStatusChange = async (id: string, status: 'Pending' | 'Fulfilled' | 'Cancelled') => {
+  const handleStatusChange = async (id: string, status: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled') => {
     setUpdatingId(id);
     try {
       const updated = await updateOrderStatus(id, status);
@@ -76,8 +76,9 @@ export default function OrdersPage() {
                   ) : (
                     filteredOrders.map((order) => {
                       const statusClass = 
-                        order.status === 'Fulfilled' ? 'status-success' :
-                        order.status === 'Cancelled' ? 'status-danger' : 'status-warning';
+                        order.status === 'Delivered' ? 'status-success' :
+                        order.status === 'Cancelled' ? 'status-danger' :
+                        order.status === 'On the Way' ? 'status-info' : 'status-warning';
 
                       return (
                         <tr key={order.id} className="hover:bg-white/[0.03] transition-colors">
@@ -91,11 +92,12 @@ export default function OrdersPage() {
                             <select
                               value={order.status}
                               disabled={updatingId === order.id}
-                              onChange={(e) => handleStatusChange(order.id, e.target.value as 'Pending' | 'Fulfilled' | 'Cancelled')}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value as 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled')}
                               className={`appearance-none rounded-full px-3 py-1.5 text-xs font-bold cursor-pointer outline-none transition-colors ${statusClass}`}
                             >
-                              <option className="bg-[#121215] text-white" value="Pending">Pending</option>
-                              <option className="bg-[#121215] text-white" value="Fulfilled">Fulfilled</option>
+                              <option className="bg-[#121215] text-white" value="Processing">Processing</option>
+                              <option className="bg-[#121215] text-white" value="On the Way">On the Way</option>
+                              <option className="bg-[#121215] text-white" value="Delivered">Delivered</option>
                               <option className="bg-[#121215] text-white" value="Cancelled">Cancelled</option>
                             </select>
                           </td>
@@ -103,7 +105,7 @@ export default function OrdersPage() {
                             {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                           </td>
                           <td className="p-4">
-                            {order.status !== 'Cancelled' && (
+                            {order.status !== 'Cancelled' && order.status !== 'Delivered' && (
                               <button
                                 onClick={() => handleStatusChange(order.id, 'Cancelled')}
                                 disabled={updatingId === order.id}

@@ -4,10 +4,6 @@ The deployed app is live on Railway: [shopmateai-production.up.railway.app](http
 
 Demo login: `merchant@shopmate.ai` / `password123`
 
-## App Demo
-
-View the original AI-Studio-generated frontend demo: [App Demo Link](https://ai.studio/apps/ca45ede0-e90d-492b-b5d5-453d8582c725)
-
 ## Run Locally
 
 **Prerequisites:**  Node.js

@@ -1683,7 +1683,7 @@ async function startServer() {
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
-      const { status, cart } = req.body;
+      const { status, cart, isComplaint } = req.body;
       const dataToUpdate: any = {};
 
       if (status) {
@@ -1696,6 +1696,10 @@ async function startServer() {
 
       if (cart !== undefined) {
         dataToUpdate.cart = cart;
+      }
+
+      if (isComplaint !== undefined) {
+        dataToUpdate.isComplaint = Boolean(isComplaint);
       }
 
       const updated = await prisma.conversation.update({

@@ -141,6 +141,10 @@ export function updateConversationCart(id: string, cart: { sku: string; quantity
   return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ cart }) });
 }
 
+export function updateConversationComplaint(id: string, isComplaint: boolean) {
+  return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ isComplaint }) });
+}
+
 export function sendConversationMessage(
   id: string,
   text: string,

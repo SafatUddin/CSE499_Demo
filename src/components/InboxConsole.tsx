@@ -13,10 +13,11 @@ import {
   Zap,
   ChevronLeft,
   Trash2,
-  Paperclip
+  Paperclip,
+  CheckCircle
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
-import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
+import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 interface InboxConsoleProps {
@@ -285,6 +286,18 @@ export default function InboxConsole({
     onUpdateConversationStatus(activeChat.id, newStatus);
   };
 
+  const handleResolveComplaint = async (targetId?: string) => {
+    const idToResolve = targetId || activeChat?.id;
+    if (!idToResolve) return;
+    onUpdateConversation(idToResolve, { isComplaint: false });
+    try {
+      const updated = await updateConversationComplaint(idToResolve, false);
+      onUpdateConversation(idToResolve, updated);
+    } catch (err) {
+      console.error('Failed to resolve complaint:', err);
+    }
+  };
+
   const filteredChats = conversations.filter(chat => {
     const displayName = getChatDisplayName(chat);
     const matchesSearch = displayName.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -443,8 +456,19 @@ export default function InboxConsole({
                           {chat.status === 'AI Managed' ? 'AI managed' : 'Manual'}
                         </span>
                         {chat.isComplaint && (
-                          <span className="inline-block font-sans text-[10.5px] px-2 py-0.5 rounded-full font-semibold status-danger">
+                          <span className="inline-flex items-center gap-1 font-sans text-[10.5px] px-2 py-0.5 rounded-full font-semibold status-danger">
                             Complaint
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleResolveComplaint(chat.id);
+                              }}
+                              className="ml-1 hover:text-white text-red-300 font-bold cursor-pointer"
+                              title="Resolve complaint"
+                            >
+                              ✕
+                            </button>
                           </span>
                         )}
                       </div>
@@ -482,6 +506,17 @@ export default function InboxConsole({
               </div>
 
               <div className="flex items-center gap-2">
+                {activeChat?.isComplaint && (
+                  <button
+                    type="button"
+                    onClick={() => handleResolveComplaint(activeChat.id)}
+                    className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl font-sans text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Mark complaint as resolved"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    Resolve Complaint
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setMobileView('info')}
@@ -495,12 +530,23 @@ export default function InboxConsole({
             {/* Message Thread Area */}
             <div ref={messagesContainerRef} onScroll={handleMessagesScroll} className="flex-grow min-h-0 overflow-y-auto p-5 space-y-4 no-scrollbar">
               {activeChat?.isComplaint && (
-                <div className="status-danger rounded-2xl p-3.5 flex gap-3 text-left">
-                  <ShieldAlert className="h-5 w-5 text-[#ff9d92] mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-sans text-xs font-bold uppercase tracking-wider">Complaint isolation override</p>
-                    <p className="text-[13px] text-white/80 leading-normal mt-0.5">Customer requested human support. Review conversation history below.</p>
+                <div className="status-danger rounded-2xl p-3.5 flex items-center justify-between gap-3 text-left">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <ShieldAlert className="h-5 w-5 text-[#ff9d92] mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-sans text-xs font-bold uppercase tracking-wider">Complaint isolation override</p>
+                      <p className="text-[13px] text-white/80 leading-normal mt-0.5">Customer requested human support. Review conversation history below.</p>
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => handleResolveComplaint(activeChat.id)}
+                    className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl font-sans text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Mark complaint as resolved"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    Mark Resolved
+                  </button>
                 </div>
               )}
 

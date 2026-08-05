@@ -402,14 +402,13 @@ ${catalogText || 'No products registered in catalog.'}`;
     };
   }
 
-  // Check if customer is complaining
+  // Check if customer is complaining (note: 'cancel' is handled separately for orders)
   if (
     lowerMsg.includes('broken') ||
     lowerMsg.includes('scam') ||
     lowerMsg.includes('worst') ||
     lowerMsg.includes('refund') ||
     lowerMsg.includes('fake') ||
-    lowerMsg.includes('cancel') ||
     lowerMsg.includes('bad') ||
     lowerMsg.includes('defect') ||
     lowerMsg.includes('late') ||

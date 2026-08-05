@@ -46,6 +46,7 @@ export default function InboxConsole({
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [ongoingOrders, setOngoingOrders] = useState<ApiOrder[]>([]);
+  const [recentOrders, setRecentOrders] = useState<ApiOrder[]>([]);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [orderCancelError, setOrderCancelError] = useState('');
 
@@ -105,18 +106,23 @@ export default function InboxConsole({
     scrollToBottom();
   }, [activeChat?.id]);
 
-  // Load ongoing orders (Processing / On the Way) for the active conversation
+  // Load ongoing & all recent orders for the active conversation
   useEffect(() => {
+    if (!activeChat?.id) {
+      setOngoingOrders([]);
+      setRecentOrders([]);
+      return;
+    }
     listOrders()
       .then((orders) => {
-        const active = orders.filter(
-          (o) =>
-            (o.status === 'Processing' || o.status === 'On the Way') &&
-            o.conversationId === activeChat?.id
+        const conversationOrders = orders.filter((o) => o.conversationId === activeChat.id);
+        const active = conversationOrders.filter(
+          (o) => o.status === 'Processing' || o.status === 'On the Way'
         );
         setOngoingOrders(active);
+        setRecentOrders(conversationOrders);
       })
-      .catch((err) => console.error('Failed to load ongoing orders:', err));
+      .catch((err) => console.error('Failed to load orders:', err));
   }, [activeChat?.id]);
 
   const handleCancelOrder = async (orderId: string) => {
@@ -128,6 +134,9 @@ export default function InboxConsole({
         prev.map((o) => (o.id === orderId ? updated : o)).filter(
           (o) => o.status === 'Processing' || o.status === 'On the Way'
         )
+      );
+      setRecentOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? updated : o))
       );
     } catch (err: any) {
       setOrderCancelError(err.message || 'Failed to cancel order.');
@@ -252,13 +261,15 @@ export default function InboxConsole({
       setOrderPhone('');
       setOrderSuccess('Order created successfully.');
       setTimeout(() => setOrderSuccess(''), 3000);
-      // Refresh ongoing orders
+      // Refresh ongoing & recent orders
       listOrders()
         .then((orders) => {
-          const active = orders.filter(
-            (o) => (o.status === 'Processing' || o.status === 'On the Way') && o.conversationId === activeChat.id
+          const conversationOrders = orders.filter((o) => o.conversationId === activeChat.id);
+          const active = conversationOrders.filter(
+            (o) => o.status === 'Processing' || o.status === 'On the Way'
           );
           setOngoingOrders(active);
+          setRecentOrders(conversationOrders);
         })
         .catch(() => {});
     } catch (err: any) {
@@ -849,6 +860,70 @@ export default function InboxConsole({
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent Orders Section — shows all orders regardless of status */}
+              <div className="pt-4 border-t border-white/[0.08]">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-sans text-[13px] font-bold text-white/80">
+                    Recent Orders
+                  </h4>
+                  {recentOrders.length > 0 && (
+                    <span className="status-neutral px-2.5 py-0.5 text-[10.5px] font-bold rounded-full">
+                      {recentOrders.length}
+                    </span>
+                  )}
+                </div>
+
+                {recentOrders.length === 0 ? (
+                  <div className="bg-[#15161a] p-6 rounded-2xl border border-dashed border-white/12 text-center">
+                    <p className="text-[12px] text-white/35 font-sans">No order history.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {recentOrders.map((order) => {
+                      const statusClass =
+                        order.status === 'Delivered'
+                          ? 'status-success'
+                          : order.status === 'Cancelled'
+                          ? 'status-danger'
+                          : order.status === 'On the Way'
+                          ? 'status-info'
+                          : 'status-warning';
+
+                      return (
+                        <div key={order.id} className="zone-b-grey3 p-3.5 rounded-2xl space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-sans text-[10px] text-white/40 font-mono truncate max-w-[120px]" title={order.id}>
+                              #{order.id.slice(-8).toUpperCase()}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusClass}`}>
+                              {order.status}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            {order.items.map((item, idx) => (
+                              <div key={idx} className="flex justify-between text-[11.5px] font-sans">
+                                <span className="text-white/70 truncate pr-2">{item.name}</span>
+                                <span className="text-white/50 shrink-0">×{item.quantity}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-between items-center pt-1 border-t border-white/[0.07]">
+                            <span className="font-sans text-[11px] text-white/40">
+                              {new Date(order.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                            </span>
+                            <span className="font-sans text-[12px] font-bold text-white">
+                              ${order.total.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

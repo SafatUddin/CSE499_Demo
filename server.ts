@@ -2073,8 +2073,11 @@ async function startServer() {
           for (const change of entry.changes || []) {
             if (change.field === 'feed' && change.value) {
               const val = change.value;
-              if (val.item === 'comment' && val.verb === 'add' && val.comment_id) {
-                const commentId = val.comment_id;
+              console.log('[WEBHOOK] Received FB feed change event:', JSON.stringify(val));
+              const isComment = val.item === 'comment' || !!val.comment_id || (val.verb === 'add' && val.parent_id && val.parent_id !== val.post_id);
+              const commentId = val.comment_id || val.id;
+
+              if (isComment && val.verb === 'add' && commentId) {
                 const messageText = val.message || '';
                 const fromPsid = val.from?.id;
                 const fromName = val.from?.name || 'Customer';

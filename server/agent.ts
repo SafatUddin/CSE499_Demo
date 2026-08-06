@@ -160,7 +160,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       ];
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: contentsPayload,
         config: {
           systemInstruction,
@@ -764,7 +764,7 @@ export async function isQuestionOrPriceInquiry(text: string): Promise<boolean> {
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-lite',
+        model: 'gemini-3.5-flash-lite',
         contents: [
           {
             role: 'user',

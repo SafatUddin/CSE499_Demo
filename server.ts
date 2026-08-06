@@ -2074,16 +2074,16 @@ async function startServer() {
             if (change.field === 'feed' && change.value) {
               const val = change.value;
               console.log('[WEBHOOK] Received FB feed change event:', JSON.stringify(val));
-              const isComment = val.item === 'comment' || !!val.comment_id || (val.verb === 'add' && val.parent_id && val.parent_id !== val.post_id);
-              const commentId = val.comment_id || val.id;
+              const commentId = val.comment_id || val.id || val.post_id;
+              const verb = val.verb || 'add';
 
-              if (isComment && val.verb === 'add' && commentId) {
+              if (verb === 'add' && commentId) {
                 const messageText = val.message || '';
                 const fromPsid = val.from?.id;
                 const fromName = val.from?.name || 'Customer';
 
                 if (messageText && (await isQuestionOrPriceInquiry(messageText))) {
-                  console.log(`[COMMENT BOT] Triggered for FB comment ${commentId} by ${fromName}: "${messageText}"`);
+                  console.log(`[COMMENT BOT] Triggered for FB feed event ${commentId} by ${fromName}: "${messageText}"`);
 
                   const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
                   if (channel) {
@@ -2109,6 +2109,8 @@ async function startServer() {
                       }
                     }
                   }
+                } else {
+                  console.log(`[COMMENT BOT] Ignored message (not a question/price inquiry): "${messageText}"`);
                 }
               }
             }

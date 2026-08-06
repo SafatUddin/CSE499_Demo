@@ -200,9 +200,60 @@ export async function listWhatsAppPhoneNumbers(userAccessToken: string): Promise
   }
 }
 
+export async function replyToFacebookComment(commentId: string, pageAccessToken: string, text: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(commentId)}/comments?access_token=${encodeURIComponent(pageAccessToken)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Facebook comment reply failed: ${res.status} ${body}`);
+  }
+}
+
+export async function sendFacebookPrivateReply(commentId: string, pageAccessToken: string, text: string): Promise<void> {
+  // First try Meta's official Private Reply endpoint for Page post comments
+  const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { comment_id: commentId },
+      message: { text },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.warn(`Facebook private reply by comment_id failed (${res.status} ${body}), trying direct message fallback...`);
+  }
+}
+
+export async function replyToInstagramComment(commentId: string, accessToken: string, text: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(commentId)}/replies`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: text }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Instagram comment reply failed: ${res.status} ${body}`);
+  }
+}
+
+export async function sendInstagramPrivateReply(igAccountId: string, accessToken: string, recipientIgUserId: string, text: string): Promise<void> {
+  // IG Private Reply using igAccountId endpoint or fallback
+  await sendInstagramMessage(igAccountId, accessToken, recipientIgUserId, text);
+}
+
 export async function subscribePageWebhook(pageId: string, pageAccessToken: string): Promise<void> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(pageAccessToken)}`,
+    `https://graph.facebook.com/v21.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,feed&access_token=${encodeURIComponent(pageAccessToken)}`,
     { method: 'POST' }
   );
   if (!res.ok) {
@@ -210,3 +261,4 @@ export async function subscribePageWebhook(pageId: string, pageAccessToken: stri
     throw new Error(`Failed to subscribe Page webhook: ${res.status} ${body}`);
   }
 }
+

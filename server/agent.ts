@@ -714,3 +714,88 @@ ${catalogText || 'No products registered in catalog.'}`;
     orderCancelled: false,
   };
 }
+
+export async function isQuestionOrPriceInquiry(text: string): Promise<boolean> {
+  if (!text || typeof text !== 'string') return false;
+
+  const lower = text.toLowerCase().trim();
+
+  // 1. Direct "price" word check (case insensitive) or price-synonym check in English/Bangla/Banglish
+  if (
+    /\bprice\b/i.test(lower) ||
+    lower.includes('dam') ||
+    lower.includes('daam') ||
+    lower.includes('taka') ||
+    lower.includes('rate') ||
+    lower.includes('cost') ||
+    lower.includes('কত') ||
+    lower.includes('দাম') ||
+    lower.includes('টাকা')
+  ) {
+    return true;
+  }
+
+  // 2. Direct question punctuation or common interrogative markers
+  if (
+    lower.includes('?') ||
+    lower.startsWith('is ') ||
+    lower.startsWith('are ') ||
+    lower.startsWith('can ') ||
+    lower.startsWith('do ') ||
+    lower.startsWith('does ') ||
+    lower.startsWith('what') ||
+    lower.startsWith('how') ||
+    lower.startsWith('where') ||
+    lower.startsWith('when') ||
+    lower.includes('koto') ||
+    lower.includes('koyta') ||
+    lower.includes('kene') ||
+    lower.includes('keno') ||
+    lower.includes('ki ') ||
+    lower.includes(' ache') ||
+    lower.includes(' hobe') ||
+    lower.includes(' naki') ||
+    lower.includes(' hobe ki')
+  ) {
+    return true;
+  }
+
+  // 3. If Gemini AI is available, use Gemini to evaluate multilingual questions (English, Bangla, Banglish)
+  if (ai) {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `Analyze the following social media post comment. Determine if the user is asking a question OR inquiring about price/details, regardless of whether the language is English, Bangla, or Banglish (romanized Bangla).\n\nComment: "${text}"\n\nReturn JSON: {"isQuestionOrPrice": true} or {"isQuestionOrPrice": false}`,
+              },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isQuestionOrPrice: { type: Type.BOOLEAN },
+            },
+            required: ['isQuestionOrPrice'],
+          },
+        },
+      });
+
+      if (response.text) {
+        const parsed = JSON.parse(response.text.trim());
+        return !!parsed.isQuestionOrPrice;
+      }
+    } catch (err: any) {
+      console.error('Error classifying comment question/price intent via Gemini:', err.message);
+    }
+  }
+
+  return false;
+}
+

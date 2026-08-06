@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
 import { ai } from './server/gemini';
-import { generateAgentReply } from './server/agent';
+import { generateAgentReply, isQuestionOrPriceInquiry } from './server/agent';
 import {
   verifyMetaSignature,
   sendMessengerMessage,
@@ -14,6 +14,10 @@ import {
   sendInstagramMessage,
   fetchMessengerProfileName,
   fetchInstagramProfileName,
+  replyToFacebookComment,
+  sendFacebookPrivateReply,
+  replyToInstagramComment,
+  sendInstagramPrivateReply,
   getFacebookOAuthUrl,
   exchangeCodeForUserToken,
   listManagedPages,
@@ -2064,6 +2068,48 @@ async function startServer() {
 
             await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
           }
+
+          // Handle Facebook Post Comment webhooks (feed field)
+          for (const change of entry.changes || []) {
+            if (change.field === 'feed' && change.value) {
+              const val = change.value;
+              if (val.item === 'comment' && val.verb === 'add' && val.comment_id) {
+                const commentId = val.comment_id;
+                const messageText = val.message || '';
+                const fromPsid = val.from?.id;
+                const fromName = val.from?.name || 'Customer';
+
+                if (messageText && (await isQuestionOrPriceInquiry(messageText))) {
+                  console.log(`[COMMENT BOT] Triggered for FB comment ${commentId} by ${fromName}: "${messageText}"`);
+
+                  const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
+                  if (channel) {
+                    const pageAccessToken = await getPageAccessTokenForStore(channel.storeId);
+                    if (pageAccessToken) {
+                      // 1. Reply to comment in public comment section: "Check Inbox"
+                      try {
+                        await replyToFacebookComment(commentId, pageAccessToken, 'Check Inbox');
+                      } catch (err: any) {
+                        console.error(`Failed to reply to Facebook comment ${commentId}:`, err.message);
+                      }
+
+                      // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
+                      const dmText = `Hello ${fromName} Please tell us about any inquiry you have`;
+                      try {
+                        if (fromPsid) {
+                          await sendMessengerMessage(pageAccessToken, fromPsid, dmText);
+                        } else {
+                          await sendFacebookPrivateReply(commentId, pageAccessToken, dmText);
+                        }
+                      } catch (err: any) {
+                        console.error(`Failed to send Facebook inbox message to ${fromName}:`, err.message);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       } else if (body.object === 'instagram') {
         for (const entry of body.entry || []) {
@@ -2075,6 +2121,50 @@ async function startServer() {
             if (!senderIgUserId || !messageText || !messageId || event.message?.is_echo) continue;
 
             await handleIncomingInstagramMessage(igAccountId, senderIgUserId, messageText, messageId);
+          }
+
+          // Handle Instagram Post Comment webhooks (comments field)
+          for (const change of entry.changes || []) {
+            if (change.field === 'comments' && change.value) {
+              const val = change.value;
+              const commentId = val.id;
+              const messageText = val.text || '';
+              const fromUser = val.from || {};
+              const senderIgUserId = fromUser.id;
+              let customerName = fromUser.username || fromUser.name || 'Customer';
+
+              if (commentId && messageText && (await isQuestionOrPriceInquiry(messageText))) {
+                console.log(`[COMMENT BOT] Triggered for IG comment ${commentId} by ${customerName}: "${messageText}"`);
+
+                const channel = await prisma.channel.findFirst({ where: { type: 'INSTAGRAM', connected: true, externalId: igAccountId } });
+                if (channel) {
+                  const igCreds = await getInstagramCredentialsForStore(channel.storeId);
+                  if (igCreds) {
+                    if (senderIgUserId && customerName === 'Customer') {
+                      const fetchedName = await fetchInstagramProfileName(igCreds.accessToken, senderIgUserId);
+                      if (fetchedName) customerName = fetchedName;
+                    }
+
+                    // 1. Reply to comment in public comment section: "Check Inbox"
+                    try {
+                      await replyToInstagramComment(commentId, igCreds.accessToken, 'Check Inbox');
+                    } catch (err: any) {
+                      console.error(`Failed to reply to IG comment ${commentId}:`, err.message);
+                    }
+
+                    // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
+                    const dmText = `Hello ${customerName} Please tell us about any inquiry you have`;
+                    try {
+                      if (senderIgUserId) {
+                        await sendInstagramPrivateReply(igCreds.igAccountId, igCreds.accessToken, senderIgUserId, dmText);
+                      }
+                    } catch (err: any) {
+                      console.error(`Failed to send IG inbox message to ${customerName}:`, err.message);
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       } else if (body.object === 'whatsapp_business_account') {

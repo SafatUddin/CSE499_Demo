@@ -104,11 +104,14 @@ export async function fetchShopifyProducts(domain: string, accessToken: string):
 
     for (const p of data.products || []) {
       const variant = p.variants?.[0];
-      if (!variant || !variant.sku) continue; // skip products with no SKU — nothing to match on
+      if (!variant) continue;
+      // Many Shopify products (gift cards, sample data) ship with no SKU set. Fall back
+      // to a stable ID-derived SKU instead of dropping them, so nothing silently skips.
+      const sku = variant.sku && variant.sku.trim() ? variant.sku.trim() : `SHOPIFY-${variant.id}`;
       products.push({
         externalId: String(variant.id),
         name: p.title,
-        sku: variant.sku,
+        sku,
         price: parseFloat(variant.price) || 0,
         inventory: variant.inventory_quantity ?? 0,
       });

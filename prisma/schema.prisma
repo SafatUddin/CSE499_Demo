@@ -119,6 +119,9 @@ model Conversation {
   orderConfirmed             Boolean @default(false)
   orderSummaryShown          Boolean @default(false)
   awaitingQuantityFor        String?
+  // Added directly against the shared DB from another machine — Archive/Spam Inbox filters.
+  isArchived     Boolean            @default(false)
+  isSpam         Boolean            @default(false)
   messages       Message[]
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())

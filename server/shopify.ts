@@ -1,11 +1,65 @@
-// Shopify Admin API helpers. Uses a merchant-supplied custom-app Admin API access
-// token (not a public OAuth app) — simpler to set up for a single store, no Shopify
-// App Store review needed. See ShopifySetup.md for how a merchant gets this token.
+// Shopify Admin API helpers. Supports two connection paths: the original manual
+// custom-app Admin API access token (still useful for quick testing, no OAuth setup
+// needed), and a real self-serve OAuth flow via a custom-distributed Partners app
+// (no Shopify App Store review needed — see ShopifySetup.md).
+
+import crypto from 'crypto';
 
 const API_VERSION = '2024-01';
+const OAUTH_SCOPES = 'read_products';
 
 function normalizeDomain(domain: string): string {
   return domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+// Builds the URL to redirect a merchant to for Shopify's OAuth consent screen.
+// Unlike Facebook, Shopify's authorize URL is per-store, so the shop domain must
+// already be known before this redirect happens.
+export function getShopifyOAuthUrl(domain: string, redirectUri: string, state: string): string {
+  const host = normalizeDomain(domain);
+  const params = new URLSearchParams({
+    client_id: process.env.SHOPIFY_API_KEY || '',
+    scope: OAUTH_SCOPES,
+    redirect_uri: redirectUri,
+    state,
+  });
+  return `https://${host}/admin/oauth/authorize?${params.toString()}`;
+}
+
+// Verifies Shopify's HMAC on the OAuth callback query params, proving the request
+// really came from Shopify and wasn't forged. Same idea as verifyMetaSignature.
+export function verifyShopifyCallbackHmac(query: Record<string, string>): boolean {
+  const { hmac, ...rest } = query;
+  if (!hmac) return false;
+  const message = Object.keys(rest)
+    .sort()
+    .map((key) => `${key}=${rest[key]}`)
+    .join('&');
+  const computed = crypto
+    .createHmac('sha256', process.env.SHOPIFY_API_SECRET || '')
+    .update(message)
+    .digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hmac));
+}
+
+// Exchanges the OAuth callback's temporary code for a permanent Admin API access
+// token — the OAuth equivalent of the manual token a merchant would otherwise paste.
+export async function exchangeShopifyCodeForToken(domain: string, code: string): Promise<string> {
+  const host = normalizeDomain(domain);
+  const res = await fetch(`https://${host}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: process.env.SHOPIFY_API_KEY,
+      client_secret: process.env.SHOPIFY_API_SECRET,
+      code,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Shopify token exchange failed (${res.status})`);
+  }
+  const data = await res.json();
+  return data.access_token;
 }
 
 // Confirms the domain + token actually work by hitting a cheap, always-available

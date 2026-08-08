@@ -29,6 +29,7 @@ import {
   connectWhatsAppChannel,
   connectShopifyChannel,
   syncShopifyChannel,
+  getShopifyConnectUrl,
 } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
@@ -76,6 +77,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [isConnectingShopify, setIsConnectingShopify] = useState(false);
   const [isSyncingShopify, setIsSyncingShopify] = useState(false);
   const [shopifySyncResult, setShopifySyncResult] = useState<{ created: number; updated: number; total: number } | null>(null);
+  const [showShopifyManual, setShowShopifyManual] = useState(false);
 
   const refreshChannelsStatus = () => {
     listChannels()
@@ -107,8 +109,24 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     if (queryIndex === -1) return;
     const params = new URLSearchParams(hash.slice(queryIndex + 1));
 
-    if (params.get('waConnected') || params.get('fbConnected')) {
+    if (params.get('shopifyConnected')) {
       refreshChannelsStatus();
+      setActiveWizardId('int-shopify');
+      setWizardStep(2);
+      window.history.replaceState(null, '', '#integrations');
+    } else if (params.get('waConnected') || params.get('fbConnected')) {
+      refreshChannelsStatus();
+      window.history.replaceState(null, '', '#integrations');
+    } else if (params.get('shopifyError')) {
+      const code = params.get('shopifyError');
+      setShopifyError(
+        code === 'denied'
+          ? 'Permissions were not granted. Please try again.'
+          : code === 'invalid_signature'
+            ? 'Could not verify that request came from Shopify. Please try again.'
+            : 'Failed to connect. Please try again.'
+      );
+      setActiveWizardId('int-shopify');
       window.history.replaceState(null, '', '#integrations');
     } else if (params.get('waPending')) {
       const token = params.get('waPending')!;
@@ -707,7 +725,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               <ShoppingBag className="h-10 w-10 text-[#96BF48] mx-auto" />
                               <h5 className="text-base font-bold text-white font-sans">Shopify store catalog pairing</h5>
                               <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto font-sans">
-                                Enter your Shopify store domain and a custom-app Admin API access token (see ShopifySetup.md for how to create one).
+                                Enter your Shopify store domain, then connect with Shopify — you'll approve access on your own store, no tokens to copy.
                               </p>
                             </div>
 
@@ -727,23 +745,45 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                                 className="w-full zone-b-input p-3 text-xs outline-none"
                               />
                             </div>
-                            <div className="space-y-1.5">
-                              <label className="font-sans text-xs text-white/60 font-semibold block">Admin API access token</label>
-                              <input
-                                type="password"
-                                placeholder="shpat_..."
-                                value={shopifyAccessToken}
-                                onChange={(e) => setShopifyAccessToken(e.target.value)}
-                                className="w-full zone-b-input p-3 text-xs outline-none"
-                              />
-                            </div>
                             <button
-                              onClick={handleShopifyConnect}
-                              disabled={isConnectingShopify || !shopifyDomain.trim() || !shopifyAccessToken.trim()}
+                              onClick={() => { window.location.href = getShopifyConnectUrl(shopifyDomain.trim()); }}
+                              disabled={!shopifyDomain.trim()}
                               className="w-full btn-accent py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
                             >
-                              {isConnectingShopify ? 'Connecting…' : 'Connect store'}
+                              Connect with Shopify
                             </button>
+
+                            <button
+                              onClick={() => setShowShopifyManual(!showShopifyManual)}
+                              className="w-full text-xs text-white/40 hover:text-white/70 transition-colors cursor-pointer font-sans"
+                            >
+                              {showShopifyManual ? 'Hide manual token option' : 'Or connect manually with an API token'}
+                            </button>
+
+                            {showShopifyManual && (
+                              <div className="space-y-3 pt-1 border-t border-white/[0.07]">
+                                <p className="text-[11px] text-white/50 leading-relaxed font-sans pt-3">
+                                  For testing without OAuth — see ShopifySetup.md for how to create a custom-app Admin API access token.
+                                </p>
+                                <div className="space-y-1.5">
+                                  <label className="font-sans text-xs text-white/60 font-semibold block">Admin API access token</label>
+                                  <input
+                                    type="password"
+                                    placeholder="shpat_..."
+                                    value={shopifyAccessToken}
+                                    onChange={(e) => setShopifyAccessToken(e.target.value)}
+                                    className="w-full zone-b-input p-3 text-xs outline-none"
+                                  />
+                                </div>
+                                <button
+                                  onClick={handleShopifyConnect}
+                                  disabled={isConnectingShopify || !shopifyDomain.trim() || !shopifyAccessToken.trim()}
+                                  className="w-full btn-glass py-2.5 text-xs font-bold cursor-pointer disabled:opacity-40"
+                                >
+                                  {isConnectingShopify ? 'Connecting…' : 'Connect via API token'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
 

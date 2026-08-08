@@ -214,6 +214,15 @@ export function syncShopifyChannel() {
   });
 }
 
+// Full-page redirect (not a fetch) since it hands off to Shopify's OAuth dialog.
+// Unlike Facebook, Shopify's authorize URL is per-store, so the domain is required
+// upfront. The token travels as a query param since a browser navigation can't carry
+// an Authorization header.
+export function getShopifyConnectUrl(domain: string): string {
+  const token = getToken() || '';
+  return `/api/channels/shopify/connect?token=${encodeURIComponent(token)}&domain=${encodeURIComponent(domain)}`;
+}
+
 // Full-page redirect (not a fetch) since it hands off to Facebook's OAuth dialog.
 // The token travels as a query param because a browser navigation can't carry an
 // Authorization header.

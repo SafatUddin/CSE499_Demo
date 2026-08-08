@@ -27,7 +27,7 @@ import {
 } from './server/meta';
 import { encryptSecret, decryptSecret } from './server/crypto';
 import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
-import { verifyShopifyStore, fetchShopifyProducts } from './server/shopify';
+import { verifyShopifyStore, fetchShopifyProducts, getShopifyOAuthUrl, verifyShopifyCallbackHmac, exchangeShopifyCodeForToken } from './server/shopify';
 
 dotenv.config();
 
@@ -292,6 +292,10 @@ async function startServer() {
     return `${process.env.APP_URL}/api/channels/facebook/callback`;
   }
 
+  function getShopifyRedirectUri(): string {
+    return `${process.env.APP_URL}/api/channels/shopify/callback`;
+  }
+
   async function finalizeFacebookConnection(storeId: string, page: ManagedPage) {
     const credentials = { token: encryptSecret(page.access_token), name: page.name };
     await prisma.channel.upsert({
@@ -466,6 +470,63 @@ async function startServer() {
     } catch (err: any) {
       console.error('Shopify sync error:', err);
       res.status(500).json({ error: err.message || 'Failed to sync Shopify products' });
+    }
+  });
+
+  // Start the Shopify OAuth flow (self-serve "Connect with Shopify"). Unlike Facebook,
+  // Shopify's authorize URL is per-store, so the merchant's shop domain must already be
+  // known before this redirect — the frontend collects it first. Browser navigation
+  // can't carry an Authorization header, so the JWT travels as a query param instead.
+  app.get('/api/channels/shopify/connect', (req, res) => {
+    try {
+      const token = req.query.token as string;
+      const domain = req.query.domain as string;
+      if (!token) return res.status(401).send('Missing token');
+      if (!domain) return res.status(400).send('Missing store domain');
+      const auth = verifyState<{ merchantId: string; storeId: string }>(token);
+
+      const state = signState({ storeId: auth.storeId }, '10m');
+      const url = getShopifyOAuthUrl(domain, getShopifyRedirectUri(), state);
+      res.redirect(url);
+    } catch (err) {
+      console.error('Shopify connect error:', err);
+      res.status(401).send('Invalid or expired session. Please log in again and retry.');
+    }
+  });
+
+  // Shopify redirects here after the merchant approves (or denies) access.
+  app.get('/api/channels/shopify/callback', async (req, res) => {
+    const frontendBase = process.env.APP_URL || '';
+    try {
+      const { code, state, shop, error: oauthError } = req.query as {
+        code?: string; state?: string; shop?: string; error?: string;
+      };
+      if (oauthError || !code || !state || !shop) {
+        return res.redirect(`${frontendBase}/#integrations?shopifyError=denied`);
+      }
+      if (!verifyShopifyCallbackHmac(req.query as Record<string, string>)) {
+        return res.redirect(`${frontendBase}/#integrations?shopifyError=invalid_signature`);
+      }
+
+      const { storeId } = verifyState<{ storeId: string }>(state);
+      const accessToken = await exchangeShopifyCodeForToken(shop, code);
+      const shopInfo = await verifyShopifyStore(shop, accessToken);
+
+      const credentials = {
+        token: encryptSecret(accessToken),
+        domain: shop.trim().toLowerCase(),
+        name: shopInfo.name,
+      };
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId, type: 'SHOPIFY' } },
+        update: { connected: true, credentials },
+        create: { storeId, type: 'SHOPIFY', connected: true, credentials },
+      });
+
+      return res.redirect(`${frontendBase}/#integrations?shopifyConnected=1`);
+    } catch (err) {
+      console.error('Shopify OAuth callback error:', err);
+      res.redirect(`${frontendBase}/#integrations?shopifyError=server_error`);
     }
   });
 

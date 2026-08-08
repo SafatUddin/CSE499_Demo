@@ -181,7 +181,7 @@ export function listNotifications() {
 }
 
 export interface ApiChannel {
-  type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
+  type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket' | 'shopify';
   connected: boolean;
   name: string | null;
 }
@@ -198,6 +198,19 @@ export function connectWhatsAppChannel(input: { phoneNumberId: string; accessTok
   return request<{ success: boolean }>('/api/channels/whatsapp/connect', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function connectShopifyChannel(input: { domain: string; accessToken: string }) {
+  return request<{ success: boolean; name: string }>('/api/channels/shopify/connect', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function syncShopifyChannel() {
+  return request<{ success: boolean; created: number; updated: number; total: number }>('/api/channels/shopify/sync', {
+    method: 'POST',
   });
 }
 

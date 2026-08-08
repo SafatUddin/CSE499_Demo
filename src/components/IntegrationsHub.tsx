@@ -27,6 +27,8 @@ import {
   selectWhatsAppNumber,
   WhatsAppPendingNumber,
   connectWhatsAppChannel,
+  connectShopifyChannel,
+  syncShopifyChannel,
 } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
@@ -66,6 +68,15 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [waPendingNumbers, setWaPendingNumbers] = useState<WhatsAppPendingNumber[]>([]);
   const [isSelectingWa, setIsSelectingWa] = useState(false);
 
+  // Real Shopify connection state
+  const [shopifyConnected, setShopifyConnected] = useState(false);
+  const [shopifyStoreName, setShopifyStoreName] = useState<string | null>(null);
+  const [shopifyAccessToken, setShopifyAccessToken] = useState('');
+  const [shopifyError, setShopifyError] = useState('');
+  const [isConnectingShopify, setIsConnectingShopify] = useState(false);
+  const [isSyncingShopify, setIsSyncingShopify] = useState(false);
+  const [shopifySyncResult, setShopifySyncResult] = useState<{ created: number; updated: number; total: number } | null>(null);
+
   const refreshChannelsStatus = () => {
     listChannels()
       .then((channels) => {
@@ -80,6 +91,10 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         const whatsapp = channels.find((c) => c.type === 'whatsapp');
         setWaConnected(!!whatsapp?.connected);
         setWaPhoneName(whatsapp?.name || null);
+
+        const shopify = channels.find((c) => c.type === 'shopify');
+        setShopifyConnected(!!shopify?.connected);
+        setShopifyStoreName(shopify?.name || null);
       })
       .catch((err) => console.error('Failed to load channel status:', err));
   };
@@ -201,6 +216,54 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  const handleShopifyConnect = async () => {
+    if (!shopifyDomain.trim() || !shopifyAccessToken.trim()) {
+      setShopifyError('Store domain and Admin API access token are required');
+      return;
+    }
+    setShopifyError('');
+    setIsConnectingShopify(true);
+    try {
+      const res = await connectShopifyChannel({
+        domain: shopifyDomain.trim(),
+        accessToken: shopifyAccessToken.trim(),
+      });
+      setShopifyConnected(true);
+      setShopifyStoreName(res.name);
+      setWizardStep(2);
+      refreshChannelsStatus();
+    } catch (err: any) {
+      setShopifyError(err.message || 'Failed to connect Shopify store');
+    } finally {
+      setIsConnectingShopify(false);
+    }
+  };
+
+  const handleShopifySync = async () => {
+    setShopifyError('');
+    setIsSyncingShopify(true);
+    try {
+      const res = await syncShopifyChannel();
+      setShopifySyncResult(res);
+    } catch (err: any) {
+      setShopifyError(err.message || 'Failed to sync products');
+    } finally {
+      setIsSyncingShopify(false);
+    }
+  };
+
+  const handleShopifyDisconnect = async () => {
+    try {
+      await disconnectChannel('shopify');
+      setShopifyConnected(false);
+      setShopifyStoreName(null);
+      setShopifySyncResult(null);
+      refreshChannelsStatus();
+    } catch (err) {
+      console.error('Failed to disconnect Shopify:', err);
+    }
+  };
+
   const handleInstagramCardClick = async () => {
     if (igConnected) {
       try {
@@ -224,9 +287,11 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   const handleConnectClick = (item: Integration) => {
     setActiveWizardId(item.id);
-    setWizardStep(1);
+    setWizardStep(item.id === 'int-shopify' && shopifyConnected ? 2 : 1);
     setIsSimulatingSync(false);
     setWaError('');
+    setShopifyError('');
+    setShopifySyncResult(null);
   };
 
   const handleCompleteWizard = (id: string) => {
@@ -275,6 +340,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         ...item,
         connected: waConnected,
         statusText: waConnected ? (waPhoneName ? `Connected: ${waPhoneName}` : 'Active sync') : 'Token expired',
+      };
+    }
+    if (item.id === 'int-shopify') {
+      return {
+        ...item,
+        connected: shopifyConnected,
+        statusText: shopifyConnected ? (shopifyStoreName ? `Connected: ${shopifyStoreName}` : 'Active sync') : 'Not connected',
       };
     }
     return item;
@@ -404,7 +476,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                         : 'btn-accent'
                   }`}
                 >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : 'Manage'}
                 </button>
               </div>
             </div>
@@ -635,9 +707,16 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               <ShoppingBag className="h-10 w-10 text-[#96BF48] mx-auto" />
                               <h5 className="text-base font-bold text-white font-sans">Shopify store catalog pairing</h5>
                               <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto font-sans">
-                                Enter your Shopify domain to link catalog inventory with ShopMate AI.
+                                Enter your Shopify store domain and a custom-app Admin API access token (see ShopifySetup.md for how to create one).
                               </p>
                             </div>
+
+                            {shopifyError && (
+                              <div className="status-danger text-xs p-3 rounded-xl text-center font-sans">
+                                {shopifyError}
+                              </div>
+                            )}
+
                             <div className="space-y-1.5">
                               <label className="font-sans text-xs text-white/60 font-semibold block">Shopify domain</label>
                               <input
@@ -648,54 +727,69 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                                 className="w-full zone-b-input p-3 text-xs outline-none"
                               />
                             </div>
-                            <button 
-                              onClick={() => { if (shopifyDomain.trim()) setWizardStep(2); }}
-                              disabled={!shopifyDomain.trim()}
+                            <div className="space-y-1.5">
+                              <label className="font-sans text-xs text-white/60 font-semibold block">Admin API access token</label>
+                              <input
+                                type="password"
+                                placeholder="shpat_..."
+                                value={shopifyAccessToken}
+                                onChange={(e) => setShopifyAccessToken(e.target.value)}
+                                className="w-full zone-b-input p-3 text-xs outline-none"
+                              />
+                            </div>
+                            <button
+                              onClick={handleShopifyConnect}
+                              disabled={isConnectingShopify || !shopifyDomain.trim() || !shopifyAccessToken.trim()}
                               className="w-full btn-accent py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
                             >
-                              Authorize with Shopify
+                              {isConnectingShopify ? 'Connecting…' : 'Connect store'}
                             </button>
                           </div>
                         )}
 
                         {wizardStep === 2 && (
-                          <div className="space-y-4">
-                            <h5 className="text-xs font-bold text-white font-sans">Confirm security permissions</h5>
-                            <div className="space-y-2 zone-b-grey2 p-3.5 rounded-xl">
-                              {[
-                                'read_products / sync SKUs and pricing',
-                                'read_inventory / verify stock levels',
-                                'write_orders / post checkout conversions'
-                              ].map((scope, idx) => (
-                                <div key={idx} className="flex items-center gap-2 text-xs text-white/70 font-sans">
-                                  <ShieldCheck className="h-4 w-4 text-[#7aa8ff] flex-shrink-0" />
-                                  <span>{scope}</span>
-                                </div>
-                              ))}
-                            </div>
-                            <button 
-                              onClick={() => setWizardStep(3)}
-                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer"
-                            >
-                              Install Shopify adapter
-                            </button>
-                          </div>
-                        )}
-
-                        {wizardStep === 3 && (
                           <div className="space-y-4 text-center py-4">
                             <CheckCircle2 className="h-12 w-12 text-[#96BF48] mx-auto" />
                             <div className="space-y-1.5">
-                              <h5 className="text-base font-bold text-white font-sans">Installation complete</h5>
+                              <h5 className="text-base font-bold text-white font-sans">
+                                {shopifyStoreName ? `Connected: ${shopifyStoreName}` : 'Shopify connected'}
+                              </h5>
                               <p className="text-xs text-white/60 max-w-sm mx-auto leading-relaxed font-sans">
-                                Connection verified. Ready to index store catalog items.
+                                Pull the latest products, prices, and stock levels from this store into your ShopMate catalog.
                               </p>
                             </div>
-                            <button 
-                              onClick={() => handleCompleteWizard(activeWizardId)}
-                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer"
+
+                            {shopifyError && (
+                              <div className="status-danger text-xs p-3 rounded-xl text-center font-sans">
+                                {shopifyError}
+                              </div>
+                            )}
+
+                            {shopifySyncResult && (
+                              <div className="zone-b-grey2 p-3.5 rounded-xl text-xs text-white/70 font-sans space-y-1">
+                                <div>{shopifySyncResult.total} product(s) found on Shopify</div>
+                                <div>{shopifySyncResult.created} added, {shopifySyncResult.updated} updated in your catalog</div>
+                              </div>
+                            )}
+
+                            <button
+                              onClick={handleShopifySync}
+                              disabled={isSyncingShopify}
+                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
                             >
-                              Index catalog & deploy
+                              {isSyncingShopify ? 'Syncing…' : 'Sync products now'}
+                            </button>
+                            <button
+                              onClick={async () => { await handleShopifyDisconnect(); setActiveWizardId(null); }}
+                              className="w-full btn-glass py-2.5 text-xs font-bold cursor-pointer"
+                            >
+                              Disconnect store
+                            </button>
+                            <button
+                              onClick={() => setActiveWizardId(null)}
+                              className="w-full text-xs text-white/50 hover:text-white transition-colors cursor-pointer font-sans"
+                            >
+                              Return to integrations
                             </button>
                           </div>
                         )}

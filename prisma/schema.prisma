@@ -18,6 +18,7 @@ enum ChannelType {
   INSTAGRAM
   WHATSAPP
   WIDGET
+  SHOPIFY
 }
 
 enum ConversationStatus {
@@ -83,6 +84,9 @@ model Product {
   imageUrl    String?
   status      ProductStatus @default(PENDING)
   createdAt   DateTime      @default(now())
+  // Shopify's variant ID, when this product was synced from a connected Shopify store.
+  // Null for manually-entered products. Lets a re-sync detect renames without duplicating.
+  externalId  String?
 
   @@unique([storeId, sku])
 }

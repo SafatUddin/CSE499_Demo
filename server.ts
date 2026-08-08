@@ -27,6 +27,7 @@ import {
 } from './server/meta';
 import { encryptSecret, decryptSecret } from './server/crypto';
 import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
+import { verifyShopifyStore, fetchShopifyProducts } from './server/shopify';
 
 dotenv.config();
 
@@ -284,6 +285,7 @@ async function startServer() {
     INSTAGRAM: 'instagram',
     WHATSAPP: 'whatsapp',
     WIDGET: 'websocket',
+    SHOPIFY: 'shopify',
   };
 
   function getFacebookRedirectUri(): string {
@@ -382,6 +384,88 @@ async function startServer() {
     } catch (err: any) {
       console.error('Connect WhatsApp channel error:', err);
       res.status(500).json({ error: 'Failed to connect WhatsApp channel' });
+    }
+  });
+
+  // Connect a Shopify store via a merchant-supplied custom-app Admin API access
+  // token (not a public OAuth app — see ShopifySetup.md). Verifies the credentials
+  // actually work against the real store before saving anything.
+  app.post('/api/channels/shopify/connect', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const { domain, accessToken } = req.body;
+      if (!domain || !accessToken) {
+        return res.status(400).json({ error: 'Store domain and Admin API access token are required' });
+      }
+
+      const shop = await verifyShopifyStore(domain, accessToken);
+
+      const credentials = {
+        token: encryptSecret(accessToken),
+        domain: domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, ''),
+        name: shop.name,
+      };
+
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'SHOPIFY' } },
+        update: { connected: true, credentials },
+        create: { storeId: req.auth!.storeId, type: 'SHOPIFY', connected: true, credentials },
+      });
+
+      res.json({ success: true, name: shop.name });
+    } catch (err: any) {
+      console.error('Connect Shopify channel error:', err);
+      res.status(400).json({ error: err.message || 'Failed to connect Shopify store' });
+    }
+  });
+
+  // Pulls the latest products from the connected Shopify store and upserts them into
+  // this store's catalog, matching on SKU. A manual action (button click), not a
+  // background job — simplest thing that works for a beta-scale catalog.
+  app.post('/api/channels/shopify/sync', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const channel = await prisma.channel.findUnique({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'SHOPIFY' } },
+      });
+      if (!channel?.connected || !channel.credentials) {
+        return res.status(400).json({ error: 'Shopify is not connected' });
+      }
+
+      const { token, domain } = channel.credentials as { token: string; domain: string };
+      const accessToken = decryptSecret(token);
+      const shopifyProducts = await fetchShopifyProducts(domain, accessToken);
+
+      let created = 0;
+      let updated = 0;
+      for (const p of shopifyProducts) {
+        const existing = await prisma.product.findUnique({
+          where: { storeId_sku: { storeId: req.auth!.storeId, sku: p.sku } },
+        });
+        if (existing) {
+          await prisma.product.update({
+            where: { id: existing.id },
+            data: { name: p.name, price: p.price, inventory: p.inventory, externalId: p.externalId },
+          });
+          updated++;
+        } else {
+          await prisma.product.create({
+            data: {
+              storeId: req.auth!.storeId,
+              name: p.name,
+              sku: p.sku,
+              price: p.price,
+              inventory: p.inventory,
+              externalId: p.externalId,
+              status: 'TRAINED',
+            },
+          });
+          created++;
+        }
+      }
+
+      res.json({ success: true, created, updated, total: shopifyProducts.length });
+    } catch (err: any) {
+      console.error('Shopify sync error:', err);
+      res.status(500).json({ error: err.message || 'Failed to sync Shopify products' });
     }
   });
 

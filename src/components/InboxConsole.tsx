@@ -14,7 +14,10 @@ import {
   ChevronLeft,
   Trash2,
   Paperclip,
-  CheckCircle
+  CheckCircle,
+  MoreHorizontal,
+  Archive,
+  AlertOctagon
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
 import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
@@ -25,13 +28,15 @@ interface InboxConsoleProps {
   products: Product[];
   onUpdateConversation: (chatId: string, updates: Partial<Conversation>) => void;
   onUpdateConversationStatus: (chatId: string, status: 'Active' | 'AI Managed' | 'Closed') => Promise<void>;
+  onDeleteConversation?: (chatId: string) => Promise<void>;
 }
 
 export default function InboxConsole({
   conversations,
   products,
   onUpdateConversation,
-  onUpdateConversationStatus
+  onUpdateConversationStatus,
+  onDeleteConversation
 }: InboxConsoleProps) {
   const [selectedChatId, setSelectedChatId] = useState(conversations[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,6 +55,24 @@ export default function InboxConsole({
   const [recentOrders, setRecentOrders] = useState<ApiOrder[]>([]);
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [orderCancelError, setOrderCancelError] = useState('');
+  
+  // Local state to track archived, spam, or locally deleted chat IDs
+  const [archivedChatIds, setArchivedChatIds] = useState<string[]>([]);
+  const [spamChatIds, setSpamChatIds] = useState<string[]>([]);
+  const [deletedChatIds, setDeletedChatIds] = useState<string[]>([]);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const getChatDisplayName = (chat: Conversation) => {
     if (!chat) return '';
@@ -298,13 +321,45 @@ export default function InboxConsole({
     }
   };
 
+  const handleDeleteChat = async (chatId: string) => {
+    setIsMenuOpen(false);
+    setDeletedChatIds((prev) => [...prev, chatId]);
+    if (onDeleteConversation) {
+      await onDeleteConversation(chatId);
+    }
+  };
+
+  const handleArchiveChat = (chatId: string) => {
+    setIsMenuOpen(false);
+    setArchivedChatIds((prev) => 
+      prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId]
+    );
+  };
+
+  const handleSpamChat = (chatId: string) => {
+    setIsMenuOpen(false);
+    setSpamChatIds((prev) => 
+      prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId]
+    );
+  };
+
   const filteredChats = conversations.filter(chat => {
+    if (deletedChatIds.includes(chat.id)) return false;
     const displayName = getChatDisplayName(chat);
     const matchesSearch = displayName.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
     
     if (!matchesSearch) return false;
     const f = activeFilter.toLowerCase();
+    const isArchived = archivedChatIds.includes(chat.id);
+    const isSpam = spamChatIds.includes(chat.id);
+
+    if (f === 'archived') return isArchived;
+    if (f === 'spam') return isSpam;
+
+    // For all other filters, hide archived or spam chats by default
+    if (isArchived || isSpam) return false;
+
     if (f === 'all conversations') return true;
     if (f === 'unread') return chat.unread;
     if (f === 'complaints') return chat.isComplaint;
@@ -320,6 +375,15 @@ export default function InboxConsole({
   const getFilterCount = (filterName: string) => {
     const f = filterName.toLowerCase();
     return conversations.filter(chat => {
+      if (deletedChatIds.includes(chat.id)) return false;
+      const isArchived = archivedChatIds.includes(chat.id);
+      const isSpam = spamChatIds.includes(chat.id);
+
+      if (f === 'archived') return isArchived;
+      if (f === 'spam') return isSpam;
+
+      if (isArchived || isSpam) return false;
+
       if (f === 'all conversations') return true;
       if (f === 'unread') return chat.unread;
       if (f === 'complaints') return chat.isComplaint;
@@ -524,6 +588,61 @@ export default function InboxConsole({
                 >
                   <FileText className="h-5 w-5" />
                 </button>
+
+                {/* 3-dot (horizontal) options menu button */}
+                {activeChat && (
+                  <div className="relative" ref={menuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsMenuOpen((prev) => !prev)}
+                      className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer flex items-center justify-center border border-white/10 bg-white/[0.04]"
+                      title="More options"
+                    >
+                      <MoreHorizontal className="h-5 w-5" />
+                    </button>
+
+                    <AnimatePresence>
+                      {isMenuOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: -8 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: -8 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute right-0 mt-2 w-48 bg-[#181a20] border border-white/15 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.6)] py-1.5 z-50 overflow-hidden font-sans text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveChat(activeChat.id)}
+                            className="w-full text-left px-4 py-2.5 hover:bg-white/10 text-white/90 hover:text-white flex items-center gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <Archive className="h-4 w-4 text-blue-400" />
+                            <span>{archivedChatIds.includes(activeChat.id) ? 'Unarchive chat' : 'Archive chat'}</span>
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={() => handleSpamChat(activeChat.id)}
+                            className="w-full text-left px-4 py-2.5 hover:bg-white/10 text-white/90 hover:text-white flex items-center gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <AlertOctagon className="h-4 w-4 text-amber-400" />
+                            <span>{spamChatIds.includes(activeChat.id) ? 'Unmark as spam' : 'Mark as spam'}</span>
+                          </button>
+
+                          <div className="my-1 border-t border-white/10" />
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteChat(activeChat.id)}
+                            className="w-full text-left px-4 py-2.5 hover:bg-red-500/20 text-red-400 hover:text-red-300 flex items-center gap-2.5 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-400" />
+                            <span className="font-semibold">Delete chat</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
               </div>
             </header>
 

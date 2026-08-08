@@ -145,6 +145,10 @@ export function updateConversationComplaint(id: string, isComplaint: boolean) {
   return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ isComplaint }) });
 }
 
+export function deleteConversation(id: string) {
+  return request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' });
+}
+
 export function sendConversationMessage(
   id: string,
   text: string,

@@ -18,6 +18,7 @@ import {
   updatePersona,
   listConversations,
   updateConversationStatus,
+  deleteConversation,
   listChannels,
   AuthResponse,
   PublicMerchant,
@@ -303,6 +304,15 @@ export default function App() {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...updated } : chat)));
   };
 
+  const handleDeleteConversation = async (chatId: string) => {
+    setConversations((prev) => prev.filter((chat) => chat.id !== chatId));
+    try {
+      await deleteConversation(chatId);
+    } catch (err) {
+      console.error('Failed to delete conversation on server:', err);
+    }
+  };
+
   // Shared by the 'inbox' tab and the authenticated default fallback below.
   const renderInbox = () => {
     if (connectedPlatforms.size === 0) {
@@ -327,6 +337,7 @@ export default function App() {
         products={products}
         onUpdateConversation={handleUpdateConversation}
         onUpdateConversationStatus={handleUpdateConversationStatus}
+        onDeleteConversation={handleDeleteConversation}
       />
     );
   };

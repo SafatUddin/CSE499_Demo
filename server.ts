@@ -1718,6 +1718,25 @@ async function startServer() {
     }
   });
 
+  // Delete a conversation
+  app.delete('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+      if (!conversation || conversation.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      // Delete associated messages first then conversation
+      await prisma.message.deleteMany({ where: { conversationId: conversation.id } });
+      await prisma.conversation.delete({ where: { id: conversation.id } });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Delete conversation error:', err);
+      res.status(500).json({ error: 'Failed to delete conversation' });
+    }
+  });
+
   // Sends a message into a conversation. `sender: 'merchant'` posts the merchant's own
   // reply (delivered to the real customer via the channel adapter when applicable, e.g.
   // Facebook Messenger); omitting it (or 'customer') simulates an incoming customer

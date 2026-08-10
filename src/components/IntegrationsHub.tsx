@@ -124,7 +124,9 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
           ? 'Permissions were not granted. Please try again.'
           : code === 'invalid_signature'
             ? 'Could not verify that request came from Shopify. Please try again.'
-            : 'Failed to connect. Please try again.'
+            : code === 'already_connected'
+              ? 'That channel is already connected to another account.'
+              : 'Failed to connect. Please try again.'
       );
       setActiveWizardId('int-shopify');
       window.history.replaceState(null, '', '#integrations');
@@ -149,7 +151,9 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
           ? "We didn't find any Facebook Pages or WhatsApp Business accounts. Make sure your business is verified and try again."
           : code === 'denied'
             ? 'Permissions were not granted. Please try again.'
-            : 'Failed to connect. Please try again.'
+            : code === 'already_connected'
+              ? 'That channel is already connected to another account.'
+              : 'Failed to connect. Please try again.'
       );
       window.history.replaceState(null, '', '#integrations');
     }

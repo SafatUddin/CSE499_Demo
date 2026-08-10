@@ -47,6 +47,8 @@ model Merchant {
   googleId     String?  @unique
   name         String
   avatarUrl    String?
+  // Incremented on logout so previously issued session JWTs fail requireAuth.
+  tokenVersion Int      @default(0)
   store        Store?
   createdAt    DateTime @default(now())
 }

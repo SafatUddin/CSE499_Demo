@@ -9,6 +9,7 @@ import {
   getToken,
   setToken,
   clearToken,
+  logout,
   fetchMe,
   updateProfile,
   listProducts,
@@ -80,6 +81,7 @@ export default function App() {
   const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
   const [store, setStore] = useState<PublicStore | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [authFlashError, setAuthFlashError] = useState('');
   const isAuthenticated = !!merchant;
 
   // DashboardHeader reads this shape straight out of localStorage; keep it in sync
@@ -128,6 +130,7 @@ export default function App() {
     window.history.replaceState(null, '', '#login');
 
     if (googleError) {
+      setAuthFlashError(googleError);
       setActiveTab('login');
       setIsCheckingAuth(false);
       return;
@@ -136,7 +139,10 @@ export default function App() {
     setIsCheckingAuth(true);
     exchangeGoogleCode(googleCode!)
       .then((auth) => handleAuthSuccess(auth))
-      .catch(() => setActiveTab('login'))
+      .catch(() => {
+        setAuthFlashError('Google sign-in failed');
+        setActiveTab('login');
+      })
       .finally(() => setIsCheckingAuth(false));
   }, []);
 
@@ -167,6 +173,7 @@ export default function App() {
     setToken(auth.token);
     setMerchant(auth.merchant);
     setStore(auth.store);
+    setAuthFlashError('');
     syncProfileToLocalStorage(auth.merchant);
     navigateTo('inbox');
     setIsSidebarOpen(false);
@@ -228,8 +235,8 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleLogout = () => {
-    clearToken();
+  const handleLogout = async () => {
+    await logout();
     setMerchant(null);
     setStore(null);
     navigateTo('landing');
@@ -353,6 +360,7 @@ export default function App() {
             <LoginPage
               onNavigate={handleNavigate}
               onLoginSuccess={handleAuthSuccess}
+              initialError={authFlashError}
             />
           );
         case 'signup':

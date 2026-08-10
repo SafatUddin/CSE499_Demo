@@ -6,7 +6,14 @@ import bcrypt from 'bcryptjs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { prisma } from './server/db';
-import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
+import {
+  signToken,
+  requireAuth,
+  AuthedRequest,
+  signState,
+  verifyState,
+  isPasswordStrongEnough,
+} from './server/auth';
 import { ai } from './server/gemini';
 import { generateAgentReply, isQuestionOrPriceInquiry } from './server/agent';
 import {
@@ -132,8 +139,8 @@ async function startServer() {
       if (!fullName || !businessName || !email || !password) {
         return res.status(400).json({ error: 'All fields are required' });
       }
-      if (password.length < 6) {
-        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      if (!isPasswordStrongEnough(password)) {
+        return res.status(400).json({ error: 'Password does not meet requirements' });
       }
 
       const existing = await prisma.merchant.findUnique({ where: { email } });
@@ -149,14 +156,18 @@ async function startServer() {
         data: { merchantId: merchant.id, name: businessName },
       });
 
-      const token = signToken({ merchantId: merchant.id, storeId: store.id });
+      const token = signToken({
+        merchantId: merchant.id,
+        storeId: store.id,
+        tv: merchant.tokenVersion,
+      });
       res.json({
         token,
         merchant: toPublicMerchant(merchant),
         store: { id: store.id, name: store.name },
       });
     } catch (err: any) {
-      console.error('Signup error:', err);
+      console.error('Signup error');
       res.status(500).json({ error: 'Failed to create account' });
     }
   });
@@ -184,15 +195,33 @@ async function startServer() {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
 
-      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
+      const token = signToken({
+        merchantId: merchant.id,
+        storeId: merchant.store.id,
+        tv: merchant.tokenVersion,
+      });
       res.json({
         token,
         merchant: toPublicMerchant(merchant),
         store: { id: merchant.store.id, name: merchant.store.name },
       });
     } catch (err: any) {
-      console.error('Login error:', err);
+      console.error('Login error');
       res.status(500).json({ error: 'Failed to log in' });
+    }
+  });
+
+  // Invalidate the current session JWT by bumping Merchant.tokenVersion.
+  app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      await prisma.merchant.update({
+        where: { id: req.auth!.merchantId },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      res.json({ success: true });
+    } catch {
+      console.error('Logout error');
+      res.status(500).json({ error: 'Failed to log out' });
     }
   });
 
@@ -230,7 +259,8 @@ async function startServer() {
 
       const profile = await exchangeCodeForProfile(code);
 
-      // Upsert: find by googleId first, then by email, else create new
+      // Find by googleId first (already linked). Do NOT auto-link by email alone
+      // when an existing password-based merchant owns that email.
       let merchant = await prisma.merchant.findUnique({
         where: { googleId: profile.googleId },
         include: { store: true },
@@ -243,35 +273,29 @@ async function startServer() {
         });
 
         if (byEmail) {
-          if (byEmail.googleId && byEmail.googleId !== profile.googleId) {
-            return errorRedirect('This email is already linked to a different Google account');
-          }
-          merchant = await prisma.merchant.update({
-            where: { id: byEmail.id },
-            data: {
-              googleId: profile.googleId,
-              ...(!byEmail.avatarUrl && profile.picture ? { avatarUrl: profile.picture } : {}),
-            },
-            include: { store: true },
-          });
-        } else {
-          const newMerchant = await prisma.merchant.create({
-            data: {
-              email: profile.email,
-              passwordHash: null,
-              googleId: profile.googleId,
-              name: profile.name,
-              avatarUrl: profile.picture,
-            },
-          });
-          const store = await prisma.store.create({
-            data: {
-              merchantId: newMerchant.id,
-              name: `${profile.name}'s Store`,
-            },
-          });
-          merchant = { ...newMerchant, store };
+          // Password account (or any account) without this googleId — refuse silent link.
+          // Generic message: do not reveal whether the email exists.
+          return errorRedirect(
+            'This Google account cannot be linked automatically. Sign in to your existing account first.',
+          );
         }
+
+        const newMerchant = await prisma.merchant.create({
+          data: {
+            email: profile.email,
+            passwordHash: null,
+            googleId: profile.googleId,
+            name: profile.name,
+            avatarUrl: profile.picture,
+          },
+        });
+        const store = await prisma.store.create({
+          data: {
+            merchantId: newMerchant.id,
+            name: `${profile.name}'s Store`,
+          },
+        });
+        merchant = { ...newMerchant, store };
       }
 
       if (!merchant.store) {
@@ -316,7 +340,11 @@ async function startServer() {
         return res.status(400).json({ error: 'Authentication failed' });
       }
 
-      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
+      const token = signToken({
+        merchantId: merchant.id,
+        storeId: merchant.store.id,
+        tv: merchant.tokenVersion,
+      });
       res.json({
         token,
         merchant: toPublicMerchant(merchant),
@@ -382,8 +410,8 @@ async function startServer() {
         if (!valid) {
           return res.status(401).json({ error: 'Current password is incorrect' });
         }
-        if (password.length < 6) {
-          return res.status(400).json({ error: 'New password must be at least 6 characters' });
+        if (!isPasswordStrongEnough(password)) {
+          return res.status(400).json({ error: 'Password does not meet requirements' });
         }
         data.passwordHash = await bcrypt.hash(password, 12);
       }
@@ -391,7 +419,7 @@ async function startServer() {
       const updated = await prisma.merchant.update({ where: { id: merchant.id }, data });
       res.json({ merchant: toPublicMerchant(updated) });
     } catch (err: any) {
-      console.error('Update profile error:', err);
+      console.error('Update profile error');
       res.status(500).json({ error: 'Failed to update profile' });
     }
   });

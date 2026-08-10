@@ -1,5 +1,9 @@
 const TOKEN_KEY = 'shopmate_token';
 
+// Phase 3: session JWT remains in localStorage for compatibility with existing
+// Authorization: Bearer requests. Full HttpOnly cookie migration is deferred to
+// a later auth-architecture phase. Logout MUST revoke server-side before clearToken().
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -53,6 +57,25 @@ export function signup(input: { fullName: string; businessName: string; email: s
 
 export function login(input: { email: string; password: string }) {
   return request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** Revoke the current session on the server, then drop the local JWT. */
+export async function logout(): Promise<void> {
+  const token = getToken();
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } catch {
+      // Best-effort revocation; always clear local token below.
+    }
+  }
+  clearToken();
 }
 
 export function fetchMe() {

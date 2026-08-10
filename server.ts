@@ -38,6 +38,19 @@ import { encryptSecret, decryptSecret } from './server/crypto';
 import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
 import { verifyShopifyStore, fetchShopifyProducts, getShopifyOAuthUrl, verifyShopifyCallbackHmac, exchangeShopifyCodeForToken } from './server/shopify';
 import {
+  parseAwaitingQuantityFor,
+  sanitizeAskQuantityForSku,
+  validateSkuAndQuantity,
+  encodeConfirm,
+  encodeDetails,
+  encodeCancelPending,
+  isAffirmativeMessage,
+  isCancelDeclineMessage,
+  isOngoingOrderCancelIntent,
+  normalizeCheckoutQuantity,
+  MAX_CHECKOUT_QUANTITY,
+} from './server/checkoutSecurity';
+import {
   createOAuthHandoff,
   consumeOAuthHandoff,
   peekOAuthHandoff,
@@ -1069,7 +1082,7 @@ async function startServer() {
       // M1: every cart line must resolve to a real product with enough stock.
       for (const cartItem of cart) {
         const quantity = Math.floor(Number(cartItem.quantity));
-        if (!Number.isFinite(quantity) || quantity < 1) {
+        if (!Number.isFinite(quantity) || quantity < 1 || quantity > MAX_CHECKOUT_QUANTITY) {
           throw insufficientStock(`Invalid quantity for SKU ${cartItem.sku}`);
         }
         const product = products.find((p) => p.sku === cartItem.sku);
@@ -1577,30 +1590,44 @@ async function startServer() {
 
     const existingCart: { sku: string; quantity: number }[] = (currentConversation.cart as any) || [];
 
-    // Decode the prefix-encoded state stored in awaitingQuantityFor:
-    //   "CONFIRM:SKU:QTY"  → customer gave quantity; AI asked to confirm; waiting for yes/no
-    //   "DETAILS:SKU:QTY"  → customer confirmed; AI asked for phone+address; waiting for contact info
-    //   "SKU"              → existing two-step: AI asked how many for this SKU
-    //   null               → idle
+    // Decode + validate the prefix-encoded state stored in awaitingQuantityFor.
+    // LLM never authoritatively sets business state — invalid encodings are cleared.
     const rawAWQ = currentConversation.awaitingQuantityFor;
-    const isConfirmState = rawAWQ?.startsWith('CONFIRM:') ?? false;
-    const isDetailsState = rawAWQ?.startsWith('DETAILS:') ?? false;
+    const parsedAWQ = parseAwaitingQuantityFor(rawAWQ);
+    const isConfirmState = parsedAWQ.kind === 'confirm';
+    const isDetailsState = parsedAWQ.kind === 'details';
+    const isCancelPendingState = parsedAWQ.kind === 'cancel_pending';
 
     let pendingEncodedSku: string | null = null;
     let pendingEncodedQty = 0;
-    if ((isConfirmState || isDetailsState) && rawAWQ) {
-      const parts = rawAWQ.split(':');
-      if (parts.length >= 3) {
-        pendingEncodedSku = parts[1];
-        pendingEncodedQty = parseInt(parts[2], 10) || 0;
+    let pendingCancelOrderId: string | null = null;
+
+    if (parsedAWQ.kind === 'confirm' || parsedAWQ.kind === 'details') {
+      const validated = validateSkuAndQuantity(products, parsedAWQ.sku, parsedAWQ.qty);
+      if (validated.ok) {
+        pendingEncodedSku = validated.sku;
+        pendingEncodedQty = validated.qty;
       }
+    } else if (parsedAWQ.kind === 'cancel_pending') {
+      const owned = conversationOrders.find((o) => o.id === parsedAWQ.orderId);
+      if (owned) pendingCancelOrderId = owned.id;
     }
+
+    // Drop corrupt / cross-SKU / over-inventory encodings so they cannot drive checkout.
     const pendingProduct = pendingEncodedSku ? products.find((p) => p.sku === pendingEncodedSku) : null;
+    const confirmDetailsValid =
+      (isConfirmState || isDetailsState) && !!pendingProduct && pendingEncodedQty > 0;
+    const cancelPendingValid = isCancelPendingState && !!pendingCancelOrderId;
 
     const orderState = {
-      // Pass null to the model when in CONFIRM/DETAILS states so it doesn't think we're
-      // still waiting for a plain quantity answer.
-      awaitingQuantityFor: isConfirmState || isDetailsState ? null : rawAWQ,
+      // Pass null to the model when in CONFIRM/DETAILS/CANCEL_PENDING so it doesn't think
+      // we're still waiting for a plain quantity answer.
+      awaitingQuantityFor:
+        isConfirmState || isDetailsState || isCancelPendingState
+          ? null
+          : parsedAWQ.kind === 'ask_qty'
+            ? parsedAWQ.sku
+            : null,
       orderConfirmationRequested: currentConversation.orderConfirmationRequested,
       hasCartItems: existingCart.length > 0,
       hasAddress: !!currentConversation.detectedAddress,
@@ -1609,16 +1636,28 @@ async function startServer() {
         name: products.find((p) => p.sku === item.sku)?.name || item.sku,
         quantity: item.quantity,
       })),
-      // CONFIRM state: decoded pending item so the model/fallback can show it and ask yes/no
-      pendingItem: isConfirmState && pendingProduct && pendingEncodedQty > 0 ? {
-        sku: pendingEncodedSku!,
-        name: pendingProduct.name,
-        quantity: pendingEncodedQty,
-        unitPrice: Number(pendingProduct.price),
-        lineTotal: Number(pendingProduct.price) * pendingEncodedQty,
-      } : undefined,
-      // DETAILS state: signals to the model/fallback to extract phone+address
-      awaitingContactDetails: isDetailsState,
+      pendingItem:
+        isConfirmState && confirmDetailsValid && pendingProduct
+          ? {
+              sku: pendingEncodedSku!,
+              name: pendingProduct.name,
+              quantity: pendingEncodedQty,
+              unitPrice: Number(pendingProduct.price),
+              lineTotal: Number(pendingProduct.price) * pendingEncodedQty,
+            }
+          : undefined,
+      awaitingContactDetails: isDetailsState && confirmDetailsValid,
+      pendingCancelOrder:
+        cancelPendingValid
+          ? (() => {
+              const o = conversationOrders.find((ord) => ord.id === pendingCancelOrderId)!;
+              return {
+                id: o.id,
+                status: o.status === 'ON_THE_WAY' ? 'On the Way' : 'Processing',
+                total: Number(o.total),
+              };
+            })()
+          : null,
       ongoingOrders: conversationOrders.map((o) => ({
         id: o.id,
         items: ((o.items as any[]) || []).map((i) => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
@@ -1630,31 +1669,46 @@ async function startServer() {
 
     const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
     const isAutopilot = conversation.status === 'AI_MANAGED';
+    const autoFinalizeEligible = isAutopilot || !!store.autoFinalizeOrdersAlways;
+    let orderCreatedThisTurn = false;
 
-    // CART-ADD INTERCEPTION: If the agent (Ollama or fallback) returned cartAction='add',
-    // redirect through the confirmation-first flow rather than writing to cart immediately.
-    // This fires when Ollama ignores our "NEVER cartAction='add'" instruction (quantized models
-    // frequently do) and is a no-op when the fallback is used (fallback already produces the
-    // CONFIRM: prefix natively and never sets action='add').
+    // CART-ADD INTERCEPTION: If the agent returned cartAction='add', redirect through the
+    // confirmation-first flow after validating SKU/qty against this store's catalog.
     if (
       result.cartAction?.action === 'add' &&
       result.cartAction.sku &&
-      result.cartAction.quantity > 0 &&
       !isConfirmState &&
       !isDetailsState &&
+      !isCancelPendingState &&
       !currentConversation.orderConfirmationRequested
     ) {
-      const interceptProduct = products.find((p) => p.sku === result.cartAction.sku);
-      if (interceptProduct && interceptProduct.inventory > 0) {
-        const qty = Math.max(1, Math.floor(result.cartAction.quantity));
-        const price = Number(interceptProduct.price);
-        const total = price * qty;
-        result.replyText = `You'd like ${qty}x ${interceptProduct.name} at $${price.toFixed(2)} each — total $${total.toFixed(2)}. Would you like to confirm this order?`;
+      const requestedSku = result.cartAction.sku;
+      const validated = validateSkuAndQuantity(products, requestedSku, result.cartAction.quantity);
+      if (validated.ok) {
+        const price = Number(validated.product.price);
+        const total = price * validated.qty;
+        result.replyText = `You'd like ${validated.qty}x ${validated.product.name} at $${price.toFixed(2)} each — total $${total.toFixed(2)}. Would you like to confirm this order?`;
         result.cartAction = { action: 'none', sku: '', quantity: 0 };
-        result.askQuantityForSku = `CONFIRM:${interceptProduct.sku}:${qty}`;
+        result.askQuantityForSku = encodeConfirm(validated.sku, validated.qty);
         result.orderConfirmationRequested = false;
         result.orderConfirmed = false;
         result.orderCancelled = false;
+      } else {
+        // Reject invalid LLM cartAction — never write cross-store or overselling qty.
+        const failReason = (validated as { ok: false; reason: 'invalid_sku' | 'invalid_qty' | 'insufficient_inventory' }).reason;
+        result.cartAction = { action: 'none', sku: '', quantity: 0 };
+        if (failReason === 'insufficient_inventory') {
+          const p = products.find((x) => x.sku === requestedSku);
+          result.replyText = p
+            ? `Sorry, we only have ${p.inventory} unit(s) of ${p.name} available. How many would you like (up to ${Math.min(p.inventory, MAX_CHECKOUT_QUANTITY)})?`
+            : `Sorry, that quantity isn't available. Please choose another amount.`;
+          if (p && p.inventory > 0) result.askQuantityForSku = p.sku;
+        } else if (failReason === 'invalid_qty') {
+          result.replyText = `Please choose a quantity between 1 and ${MAX_CHECKOUT_QUANTITY}.`;
+        } else {
+          result.replyText = `Sorry, I couldn't find that product in our catalog. Which item would you like?`;
+          result.askQuantityForSku = '';
+        }
       }
     }
 
@@ -1693,51 +1747,43 @@ async function startServer() {
       conversationData.orderConfirmationRequested = false;
       conversationData.orderConfirmed = false;
       conversationData.orderSummaryShown = false;
-      // Still save the AI's reply (which will say "Done! I've cleared your cart...")
-      await prisma.message.create({
-        data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any, pending: !isAutopilot },
-      });
       await prisma.conversation.update({ where: { id: conversation.id }, data: conversationData });
       return;
     }
 
     let updatedCart = existingCart;
 
-    // SERVER-SIDE CART GUARD: Allow a cart write in two cases:
-    //   (a) Two-step flow: the AI was explicitly waiting for a quantity for this exact SKU
-    //       (awaitingQuantityFor === cartAction.sku).
-    //   (b) One-step flow: the customer stated a product name and quantity in one message
-    //       (e.g. "I want 2 Coca Cola") and awaitingQuantityFor is null — no prior
-    //       quantity-request turn is required when the quantity is already explicit.
-    // Both cases still require the SKU to resolve to a real, in-stock product (checked
-    // in the block below). Confirmation turns, price-inquiry turns, and address turns are
-    // all rejected because the AI returns action='none' on those turns.
-    // The new flow never uses cartAction='add' — cart writes happen server-side in the
-    // DETAILS state transition. This guard now only applies to legacy direct-cart-add paths.
+    // SERVER-SIDE CART GUARD: legacy direct-cart-add paths only; CONFIRM/DETAILS write cart server-side.
+    const cartAddQty = normalizeCheckoutQuantity(result.cartAction?.quantity);
     const cartAddAllowed =
       result.cartAction?.action === 'add' &&
-      result.cartAction.sku &&
-      result.cartAction.quantity > 0 &&
+      !!result.cartAction.sku &&
+      cartAddQty !== null &&
       !isConfirmState &&
       !isDetailsState &&
+      !isCancelPendingState &&
       (currentConversation.awaitingQuantityFor === result.cartAction.sku ||
-       (currentConversation.awaitingQuantityFor === null && !currentConversation.orderConfirmationRequested));
+        (currentConversation.awaitingQuantityFor === null && !currentConversation.orderConfirmationRequested));
 
     if (cartAddAllowed) {
-      const product = products.find((p) => p.sku === result.cartAction.sku);
-      if (product && product.inventory > 0) {
-        const quantity = result.cartAction.quantity && result.cartAction.quantity > 0 ? Math.floor(result.cartAction.quantity) : 1;
-        const existingItem = existingCart.find((item) => item.sku === product.sku);
+      const validated = validateSkuAndQuantity(products, result.cartAction.sku, cartAddQty);
+      if (validated.ok) {
+        const existingItem = existingCart.find((item) => item.sku === validated.sku);
         updatedCart = existingItem
-          ? existingCart.map((item) => (item.sku === product.sku ? { ...item, quantity } : item))
-          : [...existingCart, { sku: product.sku, quantity }];
+          ? existingCart.map((item) => (item.sku === validated.sku ? { ...item, quantity: validated.qty } : item))
+          : [...existingCart, { sku: validated.sku, quantity: validated.qty }];
         conversationData.cart = updatedCart;
         conversationData.awaitingQuantityFor = null;
       }
     }
 
-    if (result.askQuantityForSku) {
-      conversationData.awaitingQuantityFor = result.askQuantityForSku;
+    // Never trust raw LLM askQuantityForSku — sanitize to catalog SKU or CONFIRM:SKU:QTY.
+    const sanitizedAsk = sanitizeAskQuantityForSku(result.askQuantityForSku, products);
+    if (sanitizedAsk) {
+      conversationData.awaitingQuantityFor = sanitizedAsk;
+    } else if (result.askQuantityForSku) {
+      // Invalid LLM encoding — ignore transition.
+      conversationData.awaitingQuantityFor = currentConversation.awaitingQuantityFor;
     }
 
     let updatedAddress = currentConversation.detectedAddress;
@@ -1755,7 +1801,7 @@ async function startServer() {
     // one in a previous turn or we are in the multi-step checkout state machine.
     const customerConfirmedForReal =
       result.orderConfirmed &&
-      (currentConversation.orderConfirmationRequested || isConfirmState || isDetailsState);
+      (currentConversation.orderConfirmationRequested || (isConfirmState && confirmDetailsValid) || (isDetailsState && confirmDetailsValid));
     if (customerConfirmedForReal) {
       conversationData.orderConfirmed = true;
     }
@@ -1767,72 +1813,139 @@ async function startServer() {
       conversationData.orderConfirmed = false;
     }
 
-    // When the AI signals orderCancelled=true from an ONGOING ORDER INQUIRY (not a checkout
-    // cancellation), cancel the customer's most recent Processing/On the Way order and restore inventory.
-    const isOngoingOrderCancellation =
-      result.orderCancelled &&
-      !currentConversation.orderConfirmationRequested &&
-      !isConfirmState &&
-      conversationOrders.length > 0;
-
-    if (isOngoingOrderCancellation) {
-      const orderToCancel = conversationOrders[0]; // Most recent ongoing order
-      if (orderToCancel.status !== 'CANCELLED' && orderToCancel.status !== 'DELIVERED') {
-        try {
-          await prisma.$transaction(async (tx) => {
-            const items = (orderToCancel.items as any[]) || [];
-            for (const item of items) {
-              if (item.sku && item.quantity > 0) {
-                await tx.product.updateMany({
-                  where: { storeId: orderToCancel.storeId, sku: item.sku },
-                  data: { inventory: { increment: item.quantity } },
-                });
+    // === H3: Ongoing order cancellation requires explicit confirmation ===
+    // Never cancel from a single ambiguous keyword or raw LLM orderCancelled alone.
+    if (cancelPendingValid && pendingCancelOrderId) {
+      if (isAffirmativeMessage(customerText)) {
+        const orderToCancel = conversationOrders.find((o) => o.id === pendingCancelOrderId);
+        if (
+          orderToCancel &&
+          orderToCancel.storeId === conversation.storeId &&
+          orderToCancel.conversationId === conversation.id &&
+          orderToCancel.status !== 'CANCELLED' &&
+          orderToCancel.status !== 'DELIVERED'
+        ) {
+          try {
+            await prisma.$transaction(async (tx) => {
+              const items = (orderToCancel.items as any[]) || [];
+              for (const item of items) {
+                const qty = Math.floor(Number(item.quantity));
+                if (item.sku && Number.isFinite(qty) && qty > 0) {
+                  await tx.product.updateMany({
+                    where: { storeId: orderToCancel.storeId, sku: item.sku },
+                    data: { inventory: { increment: qty } },
+                  });
+                }
               }
-            }
-            await tx.order.update({ where: { id: orderToCancel.id }, data: { status: 'CANCELLED' } });
+              await tx.order.update({
+                where: { id: orderToCancel.id },
+                data: { status: 'CANCELLED' },
+              });
+            });
+            conversationData.awaitingQuantityFor = null;
+            const cancelOkText = `Your order (#${orderToCancel.id.slice(-8).toUpperCase()}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`;
+            await prisma.message.updateMany({
+              where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+              data: { text: cancelOkText },
+            });
+            result.replyText = cancelOkText;
+          } catch {
+            console.error('[ORDER CANCEL] Failed to cancel confirmed order');
+            conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
+          }
+        } else {
+          conversationData.awaitingQuantityFor = null;
+          const cancelFailText = `I couldn't safely cancel that order. Please contact the store for help.`;
+          await prisma.message.updateMany({
+            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+            data: { text: cancelFailText },
           });
-          console.log('[ORDER CANCEL] Cancelled ongoing order:', orderToCancel.id);
-        } catch (cancelErr: any) {
-          console.error('[ORDER CANCEL] Failed to cancel ongoing order');
+          result.replyText = cancelFailText;
         }
+      } else if (isCancelDeclineMessage(customerText)) {
+        conversationData.awaitingQuantityFor = null;
+      } else {
+        // Stay in pending-cancel until a clear yes/no.
+        conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
       }
+    } else if (
+      !isConfirmState &&
+      !isDetailsState &&
+      !currentConversation.orderConfirmationRequested &&
+      isOngoingOrderCancelIntent(customerText)
+    ) {
+      // First-turn cancel intent (server-detected): ask for confirmation; do not cancel yet.
+      // Do not trust raw LLM orderCancelled alone.
+      const orderToAsk = conversationOrders[0];
+      if (orderToAsk && orderToAsk.storeId === conversation.storeId) {
+        conversationData.awaitingQuantityFor = encodeCancelPending(orderToAsk.id);
+        const items = ((orderToAsk.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
+        const askText = `I found your active order #${orderToAsk.id.slice(-8).toUpperCase()} — ${items || 'items'}, total $${Number(orderToAsk.total).toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`;
+        await prisma.message.updateMany({
+          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+          data: { text: askText },
+        });
+        result.replyText = askText;
+        result.orderCancelled = false;
+      } else {
+        const noneText = `I couldn't find an active order to cancel in this conversation. Please share more details if you still need help.`;
+        await prisma.message.updateMany({
+          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+          data: { text: noneText },
+        });
+        result.replyText = noneText;
+        result.orderCancelled = false;
+      }
+    } else if (isCancelPendingState && !cancelPendingValid) {
+      // Spoofed / foreign / unknown CANCEL_PENDING encoding — drop it.
+      conversationData.awaitingQuantityFor = null;
     }
 
-    // === NEW CHECKOUT STATE MACHINE ===
-    // After all standard state writes above, explicitly manage the CONFIRM/DETAILS states.
-    // These assignments override whatever result.askQuantityForSku wrote into conversationData.
-
-    if (isConfirmState) {
+    // === CHECKOUT STATE MACHINE (CONFIRM → DETAILS) — server-validated only ===
+    if (isConfirmState && confirmDetailsValid) {
       if (result.orderConfirmed && pendingEncodedSku && pendingEncodedQty > 0) {
-        // Customer confirmed the pre-add summary → move to DETAILS state.
-        // Write the pending item to cart NOW so the merchant's cart panel shows what
-        // is being ordered while phone+address are being collected. createOrderForConversation
-        // will clear this cart (cart: null) once the order row is created.
-        conversationData.awaitingQuantityFor = `DETAILS:${pendingEncodedSku}:${pendingEncodedQty}`;
-        conversationData.cart = [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }];
+        // Re-validate inventory at transition time.
+        const recheck = validateSkuAndQuantity(products, pendingEncodedSku, pendingEncodedQty);
+        if (recheck.ok) {
+          conversationData.awaitingQuantityFor = encodeDetails(recheck.sku, recheck.qty);
+          conversationData.cart = [{ sku: recheck.sku, quantity: recheck.qty }];
+          updatedCart = conversationData.cart;
+        } else {
+          const failReason = (recheck as { ok: false; reason: 'invalid_sku' | 'invalid_qty' | 'insufficient_inventory' }).reason;
+          conversationData.awaitingQuantityFor = null;
+          conversationData.cart = [];
+          const failText =
+            failReason === 'insufficient_inventory'
+              ? `Sorry, that quantity is no longer available. Please choose a different quantity.`
+              : `Sorry, we couldn't continue checkout for that item. Please try again.`;
+          await prisma.message.updateMany({
+            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+            data: { text: failText },
+          });
+          result.replyText = failText;
+        }
       } else if (result.orderCancelled) {
-        // Customer declined → clear all pending state
         conversationData.awaitingQuantityFor = null;
         conversationData.cart = [];
       } else {
-        // No clear answer yet (unclear message / re-ask) → stay in CONFIRM state
-        conversationData.awaitingQuantityFor = rawAWQ;
+        conversationData.awaitingQuantityFor = encodeConfirm(pendingEncodedSku!, pendingEncodedQty);
       }
-    } else if (isDetailsState) {
-      // Use address from this turn, OR from a prior turn (Ollama/Gemini sometimes stores address in
-      // replyText / detectedAddress without re-emitting it in extractedAddress).
+    } else if (isDetailsState && confirmDetailsValid) {
       const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
       if (detailsContactInfo && pendingEncodedSku && pendingEncodedQty > 0) {
-        // We have everything needed to create the order — clear DETAILS state and mark confirmed.
         conversationData.awaitingQuantityFor = null;
         conversationData.orderConfirmed = true;
+        conversationData.cart = [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }];
+        updatedCart = conversationData.cart;
         if (result.extractedAddress) {
           conversationData.detectedAddress = result.extractedAddress;
         }
       } else {
-        // Still waiting for contact info — stay in DETAILS state.
-        conversationData.awaitingQuantityFor = rawAWQ;
+        conversationData.awaitingQuantityFor = encodeDetails(pendingEncodedSku!, pendingEncodedQty);
       }
+    } else if ((isConfirmState || isDetailsState) && !confirmDetailsValid) {
+      // Corrupt encoded state — clear rather than acting on it.
+      conversationData.awaitingQuantityFor = null;
     }
 
     await prisma.conversation.update({
@@ -1840,81 +1953,86 @@ async function startServer() {
       data: conversationData,
     });
 
-    // DETAILS state: customer provided phone+address (or already had address on file and
-    // confirmed) → add the pending item to cart and create the order atomically.
-    // Use extractedAddress from this turn OR the previously stored detectedAddress so that
-    // an Ollama model that notes the address in replyText but forgets to fill extractedAddress
-    // still triggers order creation on a subsequent "Yes" / affirmative turn.
-    if (isDetailsState && pendingEncodedSku && pendingEncodedQty > 0) {
-      const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
-      if (detailsContactInfo) {
-        const detailsProduct = products.find((p) => p.sku === pendingEncodedSku);
-        if (detailsProduct && detailsProduct.inventory >= pendingEncodedQty) {
-          try {
-            await createOrderForConversation(
-              { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
-              [{ sku: pendingEncodedSku!, quantity: pendingEncodedQty }],
-              detailsContactInfo,
-            );
-          } catch (err: any) {
-            console.error('New-flow order creation failed for conversation:', conversation.id);
-          }
-        } else {
-          // Product not found or out of stock — surface a clear error to the customer
-          // instead of silently doing nothing (Ollama already said "order placed" in
-          // its replyText, so we must correct that message in the DB).
-          const errorText = !detailsProduct
-            ? `Sorry, we couldn't find that product in our catalog. Please contact us for assistance.`
-            : `Sorry, we only have ${detailsProduct.inventory} unit(s) of ${detailsProduct.name} in stock, but you requested ${pendingEncodedQty}. Please adjust your quantity and try again.`;
+    // Auto-finalize (H1): DETAILS / confirmation paths create a real Order only when the
+    // merchant is eligible (AI Managed, or autoFinalizeOrdersAlways). Otherwise preserve
+    // cart + address for the merchant "Generate Order" workflow and correct the customer reply.
+    const detailsContactInfo =
+      (isDetailsState && confirmDetailsValid
+        ? result.extractedAddress || currentConversation.detectedAddress || ''
+        : '') || '';
+    const shouldAttemptFinalize =
+      !orderCreatedThisTurn &&
+      ((isDetailsState && confirmDetailsValid && !!detailsContactInfo) ||
+        (customerConfirmedForReal && !!updatedAddress));
+
+    if (shouldAttemptFinalize) {
+      const finalizeAddress = (detailsContactInfo || updatedAddress || '').trim();
+      const finalizeCart: { sku: string; quantity: number }[] =
+        updatedCart.length > 0
+          ? updatedCart
+          : pendingEncodedSku && pendingEncodedQty > 0
+            ? [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }]
+            : [];
+
+      // Validate every cart line against this store before ordering.
+      const cartValid =
+        finalizeCart.length > 0 &&
+        finalizeCart.every((line) => validateSkuAndQuantity(products, line.sku, line.quantity).ok);
+
+      if (!finalizeAddress || !cartValid) {
+        if (isDetailsState && detailsContactInfo && !cartValid) {
+          const errText = `Sorry, we couldn't place that order with the requested items/quantity. Please adjust and try again.`;
           await prisma.message.updateMany({
             where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
-            data: { text: errorText },
+            data: { text: errText },
           });
-          // Reset state so the customer can start a new order attempt
           await prisma.conversation.update({
             where: { id: conversation.id },
-            data: { awaitingQuantityFor: null, cart: [] },
+            data: { awaitingQuantityFor: null },
           });
         }
-      }
-    }
-
-    // Auto-finalize: only when the customer's confirmation is genuine, there's actually
-    // something to order, and the store has opted into AI-driven finalization for this
-    // conversation's Copilot mode (autopilot always qualifies; manual mode only if the
-    // merchant has separately turned on "always auto-finalize" for the store).
-    //
-    // The new confirmation-first flow clears the cart before order creation, so also
-    // handle the case where the cart is empty but a pending item is available from the
-    // CONFIRM/DETAILS encoded state (Ollama may drive `orderConfirmationRequested` outside
-    // our prefix system; the pending item gives us the SKU+qty to order in that case).
-    if (customerConfirmedForReal && updatedAddress) {
-      const eligible = isAutopilot || store.autoFinalizeOrdersAlways;
-      if (eligible) {
-        if (updatedCart.length > 0) {
-          // Standard path: cart has items (old flow or fallback with items already added)
-          try {
-            await createOrderForConversation(
-              { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
-              updatedCart,
-              updatedAddress
-            );
-          } catch (err) {
-            console.error('Auto-finalize order failed:', err);
-          }
-        } else if (pendingEncodedSku && pendingEncodedQty > 0) {
-          // New-flow path: cart empty but we have the pending item from CONFIRM/DETAILS state
-          const pendingCartProduct = products.find((p) => p.sku === pendingEncodedSku);
-          if (pendingCartProduct && pendingCartProduct.inventory >= pendingEncodedQty) {
-            try {
-              await createOrderForConversation(
-                { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
-                [{ sku: pendingEncodedSku!, quantity: pendingEncodedQty }],
-                updatedAddress,
-              );
-            } catch (err) {
-              console.error('Auto-finalize new-flow order failed:', err);
-            }
+      } else if (!autoFinalizeEligible) {
+        // H1: not eligible — keep cart/address for merchant review; do not create Order / decrement stock.
+        const pendingText = `Thank you! I've saved your order details and notified the store. A team member will finalize your order shortly. Delivery info on file: ${finalizeAddress}`;
+        await prisma.message.updateMany({
+          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+          data: { text: pendingText },
+        });
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            cart: finalizeCart,
+            detectedAddress: finalizeAddress,
+            awaitingQuantityFor: null,
+            orderConfirmed: true,
+            orderConfirmationRequested: false,
+          },
+        });
+      } else {
+        try {
+          await createOrderForConversation(
+            { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
+            finalizeCart,
+            finalizeAddress,
+          );
+          orderCreatedThisTurn = true;
+          const placedText = `Thank you! Your order has been placed. We'll deliver to: ${finalizeAddress}. Thank you for shopping with us!`;
+          await prisma.message.updateMany({
+            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+            data: { text: placedText },
+          });
+        } catch (err: any) {
+          console.error('Auto-finalize order failed for conversation:', conversation.id);
+          if (err?.code === 'INSUFFICIENT_STOCK') {
+            const errText = `Sorry, we don't have enough stock to complete that order right now. Please adjust your quantity and try again.`;
+            await prisma.message.updateMany({
+              where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+              data: { text: errText },
+            });
+            await prisma.conversation.update({
+              where: { id: conversation.id },
+              data: { awaitingQuantityFor: null },
+            });
           }
         }
       }

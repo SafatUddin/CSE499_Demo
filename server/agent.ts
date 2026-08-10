@@ -42,6 +42,8 @@ export interface AgentOrderState {
   cartItems?: { sku: string; name: string; quantity: number }[];
   pendingItem?: { sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
   awaitingContactDetails?: boolean;
+  /** Server is waiting for the customer to confirm cancelling this specific order. */
+  pendingCancelOrder?: { id: string; status: string; total: number } | null;
   ongoingOrders?: { id: string; items: { name: string; quantity: number; price: number }[]; status: string; createdAt: string; total: number }[];
 }
 
@@ -97,7 +99,10 @@ export async function generateAgentReply({
       ? `The customer wants to buy ${orderState.pendingItem.quantity}x "${orderState.pendingItem.name}" at $${orderState.pendingItem.unitPrice.toFixed(2)} each (total $${orderState.pendingItem.lineTotal.toFixed(2)}). You just showed this and asked them to confirm. If their reply is affirmative (yes/confirm/ok/sure/proceed/go ahead), set orderConfirmed=true and cartAction=none. If they decline (no/cancel/never mind), set orderCancelled=true and cartAction=none.`
       : '',
     orderState.awaitingContactDetails
-      ? `The customer confirmed their order. You must now ask for (or extract from this message) their phone number and delivery address together. Combine them as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Set orderConfirmed=true once you have both. cartAction must be none.`
+      ? `The customer confirmed their order. You must now ask for (or extract from this message) their phone number and delivery address together. Combine them as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Set orderConfirmed=true once you have both. cartAction must be none. Do NOT claim the order is finalized — the server decides whether it can be placed.`
+      : '',
+    orderState.pendingCancelOrder
+      ? `You already asked the customer to confirm cancelling order #${orderState.pendingCancelOrder.id.slice(-8).toUpperCase()}. If they clearly confirm (yes / yes cancel it / confirm), set orderCancelled=true and cartAction=none. If they decline, set orderCancelled=false and acknowledge you will keep the order. Do not invent a different order id.`
       : '',
     orderState.orderConfirmationRequested
       ? `You already showed the customer an order summary and asked them to confirm or cancel it. If their message is affirmative ("yes", "confirm", "go ahead", "place it", etc.), set orderConfirmed to true and cartAction to 'none' — do not re-add items on a confirmation turn. If their message is a cancellation ("cancel", "never mind", "stop", "don't order", etc.), set orderCancelled to true and cartAction to 'none'. If they're asking to change something, set neither.`
@@ -112,12 +117,16 @@ Your goal is to answer customer questions with precision, guide customers throug
 Mandatory Interaction Rules:
 1. PRICE INQUIRY → ASK TO BUY: If customer asks price (e.g. "price of X?", "how much?"), reply with the price and ask "Would you like to buy this product?". cartAction = none.
 2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart.
-3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity.
-4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → ORDER PLACED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply confirming the order. Set orderConfirmed=true. cartAction = none. Always thank the customer.
-5. ORDER CANCELLED: When orderConfirmationRequested is already true or user asks to cancel an ongoing order, set orderCancelled=true and inform them that the order/cancellation was successful.
+3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity. Quantity must be a positive integer and must not exceed that product's Inventory from the catalog.
+4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → DETAILS CAPTURED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply that their details were received and their order request is being processed. Set orderConfirmed=true. cartAction = none. Do NOT invent order IDs. Do NOT claim payment was taken.
+5. CANCEL AN EXISTING ORDER: If the customer asks to cancel an already-placed ongoing order, DO NOT cancel it in one step. Ask them to confirm which order / that they want to cancel. Only set orderCancelled=true when they clearly confirm after you asked. Never cancel from a single ambiguous "cancel". Never invent cancellations.
 6. ONGOING ORDERS INQUIRIES: Use the Ongoing Orders context to answer questions like "Where is my order?", "What did I order?", "How many items?", "What's the status?", "Can I cancel?", "When was it placed?". Order status must always be one of: Processing, On the Way, Delivered, Cancelled.
 
 FORBIDDEN:
+- Do not invent products, SKUs, prices, or inventory that are not in the catalog.
+- Do not set askQuantityForSku to values other than a real catalog SKU (the server encodes CONFIRM/DETAILS itself).
+- Do not claim an order was cancelled or finalized unless the current orderState supports that step.
+- Never set cartAction SKU to anything outside the catalog.
 - Never set cartAction='add' unless the customer explicitly stated a number to buy in this exact message.
 - Never set cartAction='add' on a price-inquiry turn, confirmation turn, or address-providing turn.
 - Never guess or default quantities.
@@ -320,7 +329,7 @@ ${catalogText || 'No products registered in catalog.'}`;
       ].filter(Boolean).join(' | ');
 
       return {
-        replyText: `Thank you! Your order is being confirmed. We'll deliver to: ${combined}. Thank you for shopping with us!`,
+        replyText: `Thank you! I've received your details (${combined}). Your order request is being processed — we'll follow up shortly. Thank you for shopping with us!`,
         isComplaint: false,
         cartAction: { action: 'none', sku: '', quantity: 0 },
         suggestedProductsSKUs: [],
@@ -338,6 +347,68 @@ ${catalogText || 'No products registered in catalog.'}`;
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress: '',
+      askQuantityForSku: '',
+      orderConfirmationRequested: false,
+      orderConfirmed: false,
+      orderCancelled: false,
+    };
+  }
+
+  // Pending cancel confirmation (server already asked the customer to confirm).
+  if (orderState.pendingCancelOrder) {
+    const o = orderState.pendingCancelOrder;
+    const shortId = o.id.slice(-8).toUpperCase();
+    const affirms =
+      lowerMsg === 'yes' ||
+      lowerMsg === 'ha' ||
+      lowerMsg === 'haa' ||
+      lowerMsg === 'ok' ||
+      lowerMsg.includes('confirm') ||
+      lowerMsg.includes('go ahead') ||
+      (lowerMsg.includes('yes') && lowerMsg.includes('cancel')) ||
+      lowerMsg.includes('cancel it') ||
+      lowerMsg.includes('please cancel');
+    const declines =
+      lowerMsg === 'no' ||
+      lowerMsg === 'na' ||
+      lowerMsg.includes('keep') ||
+      lowerMsg.includes("don't cancel") ||
+      lowerMsg.includes('dont cancel') ||
+      lowerMsg.includes('never mind') ||
+      lowerMsg.includes('nevermind');
+
+    if (affirms) {
+      return {
+        replyText: `Understood — confirming cancellation of order #${shortId} now.`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress,
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: true,
+      };
+    }
+    if (declines) {
+      return {
+        replyText: `No problem — I'll keep order #${shortId} active. Let me know if you need anything else.`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress,
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: false,
+      };
+    }
+    return {
+      replyText: `Just to confirm: do you want me to cancel order #${shortId}? Please reply "yes, cancel it" or "no, keep it".`,
+      isComplaint: false,
+      cartAction: { action: 'none', sku: '', quantity: 0 },
+      suggestedProductsSKUs: [],
+      extractedAddress,
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
@@ -368,14 +439,23 @@ ${catalogText || 'No products registered in catalog.'}`;
     const orders = orderState.ongoingOrders || [];
 
     if (isCancelRequest) {
-      if (orders.length > 0) {
-        const o = orders[0];
-        replyText = `Your order (#${o.id.slice(-8).toUpperCase()}) has been cancelled successfully. The inventory for your items has been restored. Thank you!`;
-      } else {
-        replyText = `Your cancellation request has been processed. If you had an active order, it has been cancelled.`;
+      if (orders.length === 0) {
+        return {
+          replyText: `I couldn't find an active order to cancel in this conversation. If you placed an order elsewhere, please share more details.`,
+          isComplaint: false,
+          cartAction: { action: 'none', sku: '', quantity: 0 },
+          suggestedProductsSKUs: [],
+          extractedAddress,
+          askQuantityForSku: '',
+          orderConfirmationRequested: false,
+          orderConfirmed: false,
+          orderCancelled: false,
+        };
       }
+      const o = orders[0];
+      const items = o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
       return {
-        replyText,
+        replyText: `I found your active order #${o.id.slice(-8).toUpperCase()} (${o.status}) — ${items}, total $${o.total.toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`,
         isComplaint: false,
         cartAction: { action: 'none', sku: '', quantity: 0 },
         suggestedProductsSKUs: [],
@@ -383,7 +463,8 @@ ${catalogText || 'No products registered in catalog.'}`;
         askQuantityForSku: '',
         orderConfirmationRequested: false,
         orderConfirmed: false,
-        orderCancelled: true,
+        // Server requires a second confirmation before actually cancelling.
+        orderCancelled: false,
       };
     }
     // General inquiry — describe all ongoing orders
@@ -545,17 +626,46 @@ ${catalogText || 'No products registered in catalog.'}`;
   if (orderState.awaitingQuantityFor && statedQuantity && statedQuantity > 0) {
     const targetSku = orderState.awaitingQuantityFor;
     const product = catalog.find((p) => p.sku === targetSku);
-    const productName = product ? product.name : targetSku;
-    const pricePer = product ? product.price : 0;
+    if (!product) {
+      return {
+        replyText: `Sorry, I couldn't match that product in our catalog. Which item would you like to buy?`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress,
+        askQuantityForSku: '',
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: false,
+      };
+    }
+    if (statedQuantity > 99 || statedQuantity > product.inventory) {
+      const available = product.inventory;
+      return {
+        replyText:
+          available < 1
+            ? `Sorry, ${product.name} is currently out of stock. Would you like something else?`
+            : `Sorry, we only have ${available} unit(s) of ${product.name} available. How many would you like (1–${Math.min(available, 99)})?`,
+        isComplaint: false,
+        cartAction: { action: 'none', sku: '', quantity: 0 },
+        suggestedProductsSKUs: [],
+        extractedAddress,
+        askQuantityForSku: product.sku,
+        orderConfirmationRequested: false,
+        orderConfirmed: false,
+        orderCancelled: false,
+      };
+    }
+    const pricePer = product.price;
     const lineTotal = pricePer * statedQuantity;
 
     return {
-      replyText: `You'd like ${statedQuantity}x ${productName} at $${pricePer.toFixed(2)} each — total $${lineTotal.toFixed(2)}. Would you like to confirm this order?`,
+      replyText: `You'd like ${statedQuantity}x ${product.name} at $${pricePer.toFixed(2)} each — total $${lineTotal.toFixed(2)}. Would you like to confirm this order?`,
       isComplaint: false,
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress,
-      askQuantityForSku: `CONFIRM:${targetSku}:${statedQuantity}`,
+      askQuantityForSku: `CONFIRM:${product.sku}:${statedQuantity}`,
       orderConfirmationRequested: false,
       orderConfirmed: false,
       orderCancelled: false,
@@ -584,6 +694,23 @@ ${catalogText || 'No products registered in catalog.'}`;
 
     if (found) {
       if (statedQuantity && statedQuantity > 0) {
+        if (statedQuantity > 99 || statedQuantity > found.inventory) {
+          const available = found.inventory;
+          return {
+            replyText:
+              available < 1
+                ? `Sorry, ${found.name} is currently out of stock. Would you like something else?`
+                : `Sorry, we only have ${available} unit(s) of ${found.name} available. How many would you like (1–${Math.min(available, 99)})?`,
+            isComplaint: false,
+            cartAction: { action: 'none', sku: '', quantity: 0 },
+            suggestedProductsSKUs: [],
+            extractedAddress,
+            askQuantityForSku: found.sku,
+            orderConfirmationRequested: false,
+            orderConfirmed: false,
+            orderCancelled: false,
+          };
+        }
         // One-step: customer gave product + quantity together (e.g. "I want 2 Coca Cola").
         // Ask to confirm BEFORE adding to cart.
         const pricePer = found.price;

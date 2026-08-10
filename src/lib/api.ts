@@ -1,19 +1,16 @@
-const TOKEN_KEY = 'shopmate_token';
+// Phase 6: merchant session is stored in an HttpOnly cookie (shopmate_session).
+// The browser sends it automatically via credentials: 'include' — never localStorage.
 
-// Phase 3: session JWT remains in localStorage for compatibility with existing
-// Authorization: Bearer requests. Full HttpOnly cookie migration is deferred to
-// a later auth-architecture phase. Logout MUST revoke server-side before clearToken().
+const LEGACY_TOKEN_KEY = 'shopmate_token';
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
+/** Remove any legacy JWT left in browser-accessible storage from pre-Phase-6 sessions. */
+export function clearLegacyTokenStorage() {
+  try {
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_TOKEN_KEY);
+  } catch {
+    // ignore storage access errors
+  }
 }
 
 export interface PublicMerchant {
@@ -29,18 +26,16 @@ export interface PublicStore {
 }
 
 export interface AuthResponse {
-  token: string;
   merchant: PublicMerchant;
   store: PublicStore;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
   const res = await fetch(path, {
     ...options,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -59,23 +54,18 @@ export function login(input: { email: string; password: string }) {
   return request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** Revoke the current session on the server, then drop the local JWT. */
+/** Revoke the current session on the server (clears HttpOnly cookie). */
 export async function logout(): Promise<void> {
-  const token = getToken();
-  if (token) {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-    } catch {
-      // Best-effort revocation; always clear local token below.
-    }
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    // Best-effort revocation; caller clears local auth state regardless.
   }
-  clearToken();
+  clearLegacyTokenStorage();
 }
 
 export function fetchMe() {

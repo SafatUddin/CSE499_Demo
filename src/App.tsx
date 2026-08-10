@@ -6,9 +6,7 @@ import {
   DEFAULT_AI_PERSONA,
 } from './data/mockData';
 import {
-  getToken,
-  setToken,
-  clearToken,
+  clearLegacyTokenStorage,
   logout,
   fetchMe,
   updateProfile,
@@ -96,13 +94,9 @@ export default function App() {
     window.dispatchEvent(new Event('shopmate_profile_updated'));
   };
 
-  // On load, if a token exists, verify it against the backend instead of trusting it blindly
+  // On load, verify session via HttpOnly cookie (/api/me) instead of localStorage.
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      setIsCheckingAuth(false);
-      return;
-    }
+    clearLegacyTokenStorage();
     fetchMe()
       .then((res) => {
         setMerchant(res.merchant);
@@ -110,12 +104,14 @@ export default function App() {
         syncProfileToLocalStorage(res.merchant);
         navigateTo('inbox', true);
       })
-      .catch(() => clearToken())
+      .catch(() => {
+        // Not authenticated — expected on first visit or after logout.
+      })
       .finally(() => setIsCheckingAuth(false));
   }, []);
 
   // Detect a successful Google OAuth callback — backend redirects to
-  // /#login?googleCode=<opaque> ; we exchange it for the session JWT (never in the URL).
+  // /#login?googleCode=<opaque> ; exchange establishes HttpOnly session (never in URL).
   useEffect(() => {
     const hash = window.location.hash;
     const queryIndex = hash.indexOf('?');
@@ -170,7 +166,7 @@ export default function App() {
   }, []);
 
   const handleAuthSuccess = (auth: AuthResponse) => {
-    setToken(auth.token);
+    clearLegacyTokenStorage();
     setMerchant(auth.merchant);
     setStore(auth.store);
     setAuthFlashError('');

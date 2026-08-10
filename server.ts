@@ -7,12 +7,14 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { prisma } from './server/db';
 import {
-  signToken,
   requireAuth,
   AuthedRequest,
   signState,
   verifyState,
   isPasswordStrongEnough,
+  establishMerchantSession,
+  clearSessionCookie,
+  requireTrustedOrigin,
 } from './server/auth';
 import { ai } from './server/gemini';
 import { generateAgentReply, isQuestionOrPriceInquiry } from './server/agent';
@@ -144,6 +146,10 @@ async function startServer() {
       req.rawBody = buf;
     },
   }));
+
+  // Cookie session CSRF: validate Origin/Referer on state-changing merchant API requests.
+  app.use(requireTrustedOrigin);
+
   const PORT = Number(process.env.PORT) || 3000;
 
   const toPublicMerchant = (merchant: { id: string; name: string; email: string; avatarUrl: string | null }) => ({
@@ -153,7 +159,23 @@ async function startServer() {
     avatarUrl: merchant.avatarUrl,
   });
 
-  // Signup: creates a Merchant + their Store, returns a JWT
+  function sendAuthSuccess(
+    res: express.Response,
+    merchant: { id: string; name: string; email: string; avatarUrl: string | null; tokenVersion: number },
+    store: { id: string; name: string },
+  ) {
+    establishMerchantSession(res, {
+      merchantId: merchant.id,
+      storeId: store.id,
+      tv: merchant.tokenVersion,
+    });
+    res.json({
+      merchant: toPublicMerchant(merchant),
+      store: { id: store.id, name: store.name },
+    });
+  }
+
+  // Signup: creates a Merchant + their Store, establishes HttpOnly session cookie.
   app.post('/api/auth/signup', authLimiter, async (req, res) => {
     try {
       const { fullName, businessName, email, password } = req.body;
@@ -178,23 +200,14 @@ async function startServer() {
         data: { merchantId: merchant.id, name: businessName },
       });
 
-      const token = signToken({
-        merchantId: merchant.id,
-        storeId: store.id,
-        tv: merchant.tokenVersion,
-      });
-      res.json({
-        token,
-        merchant: toPublicMerchant(merchant),
-        store: { id: store.id, name: store.name },
-      });
+      sendAuthSuccess(res, merchant, store);
     } catch (err: any) {
       console.error('Signup error');
       res.status(500).json({ error: 'Failed to create account' });
     }
   });
 
-  // Login: verifies credentials, returns a JWT
+  // Login: verifies credentials, establishes HttpOnly session cookie.
   app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -217,29 +230,21 @@ async function startServer() {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
 
-      const token = signToken({
-        merchantId: merchant.id,
-        storeId: merchant.store.id,
-        tv: merchant.tokenVersion,
-      });
-      res.json({
-        token,
-        merchant: toPublicMerchant(merchant),
-        store: { id: merchant.store.id, name: merchant.store.name },
-      });
+      sendAuthSuccess(res, merchant, merchant.store);
     } catch (err: any) {
       console.error('Login error');
       res.status(500).json({ error: 'Failed to log in' });
     }
   });
 
-  // Invalidate the current session JWT by bumping Merchant.tokenVersion.
+  // Invalidate the current session by bumping Merchant.tokenVersion and clearing the cookie.
   app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res) => {
     try {
       await prisma.merchant.update({
         where: { id: req.auth!.merchantId },
         data: { tokenVersion: { increment: 1 } },
       });
+      clearSessionCookie(res);
       res.json({ success: true });
     } catch {
       console.error('Logout error');
@@ -339,7 +344,7 @@ async function startServer() {
     }
   });
 
-  // Exchange a one-time Google login code for the normal session JWT + public profile.
+  // Exchange a one-time Google login code for an HttpOnly session cookie + public profile.
   app.post('/api/auth/google/exchange', async (req, res) => {
     try {
       const { code } = req.body;
@@ -362,16 +367,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Authentication failed' });
       }
 
-      const token = signToken({
-        merchantId: merchant.id,
-        storeId: merchant.store.id,
-        tv: merchant.tokenVersion,
-      });
-      res.json({
-        token,
-        merchant: toPublicMerchant(merchant),
-        store: { id: merchant.store.id, name: merchant.store.name },
-      });
+      sendAuthSuccess(res, merchant, merchant.store);
     } catch (err: any) {
       if (err instanceof OAuthHandoffError) {
         return res.status(400).json({ error: 'Authentication failed' });

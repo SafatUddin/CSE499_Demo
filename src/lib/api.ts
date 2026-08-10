@@ -214,21 +214,21 @@ export function syncShopifyChannel() {
   });
 }
 
-// Full-page redirect (not a fetch) since it hands off to Shopify's OAuth dialog.
-// Unlike Facebook, Shopify's authorize URL is per-store, so the domain is required
-// upfront. The token travels as a query param since a browser navigation can't carry
-// an Authorization header.
-export function getShopifyConnectUrl(domain: string): string {
-  const token = getToken() || '';
-  return `/api/channels/shopify/connect?token=${encodeURIComponent(token)}&domain=${encodeURIComponent(domain)}`;
+// Mint a one-time opaque connect code, then navigate to the OAuth start URL.
+// Session JWTs are never placed in query strings.
+export async function getShopifyConnectUrl(domain: string): Promise<string> {
+  const { code } = await request<{ code: string }>('/api/channels/shopify/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ domain }),
+  });
+  return `/api/channels/shopify/connect?code=${encodeURIComponent(code)}`;
 }
 
-// Full-page redirect (not a fetch) since it hands off to Facebook's OAuth dialog.
-// The token travels as a query param because a browser navigation can't carry an
-// Authorization header.
-export function getFacebookConnectUrl(): string {
-  const token = getToken() || '';
-  return `/api/channels/facebook/connect?token=${encodeURIComponent(token)}`;
+export async function getFacebookConnectUrl(): Promise<string> {
+  const { code } = await request<{ code: string }>('/api/channels/facebook/prepare', {
+    method: 'POST',
+  });
+  return `/api/channels/facebook/connect?code=${encodeURIComponent(code)}`;
 }
 
 // Full-page redirect to the Google OAuth consent screen (no auth token required —
@@ -237,19 +237,26 @@ export function getGoogleConnectUrl(): string {
   return '/api/auth/google/connect';
 }
 
+export function exchangeGoogleCode(code: string) {
+  return request<AuthResponse>('/api/auth/google/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
 export interface FacebookPendingPage {
   id: string;
   name: string;
 }
 
-export function getFacebookPendingPages(pendingToken: string) {
-  return request<{ pages: FacebookPendingPage[] }>(`/api/channels/facebook/pending?token=${encodeURIComponent(pendingToken)}`);
+export function getFacebookPendingPages(pendingCode: string) {
+  return request<{ pages: FacebookPendingPage[] }>(`/api/channels/facebook/pending?code=${encodeURIComponent(pendingCode)}`);
 }
 
-export function selectFacebookPage(pendingToken: string, pageId: string) {
+export function selectFacebookPage(pendingCode: string, pageId: string) {
   return request<{ success: boolean }>('/api/channels/facebook/select', {
     method: 'POST',
-    body: JSON.stringify({ pendingToken, pageId }),
+    body: JSON.stringify({ pendingCode, pageId }),
   });
 }
 
@@ -259,14 +266,14 @@ export interface WhatsAppPendingNumber {
   name?: string;
 }
 
-export function getWhatsAppPendingNumbers(pendingToken: string) {
-  return request<{ numbers: WhatsAppPendingNumber[] }>(`/api/channels/whatsapp/pending?token=${encodeURIComponent(pendingToken)}`);
+export function getWhatsAppPendingNumbers(pendingCode: string) {
+  return request<{ numbers: WhatsAppPendingNumber[] }>(`/api/channels/whatsapp/pending?code=${encodeURIComponent(pendingCode)}`);
 }
 
-export function selectWhatsAppNumber(pendingToken: string, phoneNumberId: string) {
+export function selectWhatsAppNumber(pendingCode: string, phoneNumberId: string) {
   return request<{ success: boolean }>('/api/channels/whatsapp/select', {
     method: 'POST',
-    body: JSON.stringify({ pendingToken, phoneNumberId }),
+    body: JSON.stringify({ pendingCode, phoneNumberId }),
   });
 }
 

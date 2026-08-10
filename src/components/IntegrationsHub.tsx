@@ -129,16 +129,16 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
       setActiveWizardId('int-shopify');
       window.history.replaceState(null, '', '#integrations');
     } else if (params.get('waPending')) {
-      const token = params.get('waPending')!;
-      setWaPendingToken(token);
-      getWhatsAppPendingNumbers(token)
+      const code = params.get('waPending')!;
+      setWaPendingToken(code);
+      getWhatsAppPendingNumbers(code)
         .then((res) => setWaPendingNumbers(res.numbers))
         .catch(() => setWaError('That connection attempt expired. Please try connecting again.'));
       window.history.replaceState(null, '', '#integrations');
     } else if (params.get('fbPending')) {
-      const token = params.get('fbPending')!;
-      setFbPendingToken(token);
-      getFacebookPendingPages(token)
+      const code = params.get('fbPending')!;
+      setFbPendingToken(code);
+      getFacebookPendingPages(code)
         .then((res) => setFbPendingPages(res.pages))
         .catch(() => setFbError('That connection attempt expired. Please try connecting again.'));
       window.history.replaceState(null, '', '#integrations');
@@ -167,7 +167,11 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
       }
       return;
     }
-    window.location.href = getFacebookConnectUrl();
+    try {
+      window.location.href = await getFacebookConnectUrl();
+    } catch {
+      setFbError('Failed to start Facebook connection. Please try again.');
+    }
   };
 
   const handleSelectFacebookPage = async (pageId: string) => {
@@ -294,7 +298,19 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
       }
       return;
     }
-    window.location.href = getFacebookConnectUrl();
+    try {
+      window.location.href = await getFacebookConnectUrl();
+    } catch {
+      setFbError('Failed to start Facebook connection. Please try again.');
+    }
+  };
+
+  const startFacebookOAuth = async () => {
+    try {
+      window.location.href = await getFacebookConnectUrl();
+    } catch {
+      setFbError('Failed to start Facebook connection. Please try again.');
+    }
   };
 
   const [shopifyDomain, setShopifyDomain] = useState('');
@@ -302,6 +318,16 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [selectedFbPage, setSelectedFbPage] = useState('Aether Tech Labs');
   const [wooUrl, setWooUrl] = useState('https://mystore.wpcomstaging.com');
   const [wooConsumerKey, setWooConsumerKey] = useState('ck_91802b...');
+
+  const startShopifyOAuth = async () => {
+    const domain = shopifyDomain.trim();
+    if (!domain) return;
+    try {
+      window.location.href = await getShopifyConnectUrl(domain);
+    } catch {
+      setShopifyError('Failed to start Shopify connection. Please try again.');
+    }
+  };
 
   const handleConnectClick = (item: Integration) => {
     setActiveWizardId(item.id);
@@ -602,7 +628,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                           </p>
                         </div>
                         <button 
-                          onClick={() => { window.location.href = getFacebookConnectUrl(); }}
+                          onClick={() => { void startFacebookOAuth(); }}
                           className="btn-accent px-6 py-3 text-xs font-bold flex items-center gap-2 mx-auto cursor-pointer"
                         >
                           Connect via Meta OAuth
@@ -645,7 +671,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               </div>
 
                               <button
-                                onClick={() => { window.location.href = getFacebookConnectUrl(); }}
+                                onClick={() => { void startFacebookOAuth(); }}
                                 className="w-full flex items-center justify-center gap-2.5 bg-[#1877f2] hover:bg-[#1565d8] text-white font-sans text-xs font-bold py-3 rounded-xl cursor-pointer transition-colors shadow-md"
                               >
                                 <Facebook className="h-4 w-4" />
@@ -746,7 +772,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               />
                             </div>
                             <button
-                              onClick={() => { window.location.href = getShopifyConnectUrl(shopifyDomain.trim()); }}
+                              onClick={() => { void startShopifyOAuth(); }}
                               disabled={!shopifyDomain.trim()}
                               className="w-full btn-accent py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
                             >

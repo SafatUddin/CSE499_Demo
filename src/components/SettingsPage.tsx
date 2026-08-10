@@ -1,16 +1,16 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   User, 
   Lock, 
   Mail, 
-  Upload, 
   CheckCircle, 
   Image as ImageIcon, 
   Eye, 
   EyeOff, 
   Save, 
-  AlertCircle 
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import DashboardHeader from './DashboardHeader';
 
@@ -23,6 +23,22 @@ const PRESET_AVATARS = [
   "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=100&q=80",
   "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=100&q=80"
 ];
+
+const DANGEROUS_URL_SCHEMES = /^(javascript|data|vbscript|file|blob):/i;
+
+function isAllowedNewAvatarUrl(url: string): boolean {
+  if (!url || DANGEROUS_URL_SCHEMES.test(url.trim())) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isLegacyStoredAvatar(url: string): boolean {
+  return /^(data|blob):/i.test(url.trim());
+}
 
 interface UserProfile {
   name: string;
@@ -54,58 +70,6 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  
-  // File upload state
-  const [dragActive, setDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Drag and drop handlers
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
-
-  const processFile = (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrorMessage('Please upload an image file.');
-      return;
-    }
-    
-    // Read image as base64 to store in profile
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      if (event.target?.result) {
-        setAvatarUrl(event.target.result as string);
-        setErrorMessage('');
-      }
-    };
-    reader.onerror = () => {
-      setErrorMessage('Failed to read image file.');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
-    }
-  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,6 +83,12 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
 
     if (!email.trim()) {
       setErrorMessage('Email cannot be empty.');
+      return;
+    }
+
+    const avatarChanged = avatarUrl !== userProfile.avatarUrl;
+    if (avatarChanged && !isAllowedNewAvatarUrl(avatarUrl)) {
+      setErrorMessage('Avatar must be a valid HTTPS or HTTP image URL. File uploads are not supported.');
       return;
     }
 
@@ -146,7 +116,7 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
       await onUpdateProfile({
         name,
         email,
-        avatarUrl,
+        ...(avatarChanged ? { avatarUrl } : {}),
         ...(passwordUpdate ? { currentPassword, password: passwordUpdate } : {})
       });
 
@@ -188,22 +158,14 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
               Profile Picture
             </h3>
 
-            {/* Current Avatar preview & upload area */}
+            {/* Current Avatar preview */}
             <div className="flex flex-col items-center py-4 space-y-4">
-              <div className="relative group">
-                <div className="w-24 h-24 rounded-full border-2 border-white/20 overflow-hidden bg-[#18181b] flex items-center justify-center">
-                  <img 
-                    src={avatarUrl} 
-                    alt="Current Avatar" 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute inset-0 bg-black/60 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
-                >
-                  <Upload className="h-5 w-5 text-white" />
-                </button>
+              <div className="w-24 h-24 rounded-full border-2 border-white/20 overflow-hidden bg-[#18181b] flex items-center justify-center">
+                <img 
+                  src={avatarUrl} 
+                  alt="Current Avatar" 
+                  className="w-full h-full object-cover"
+                />
               </div>
               <div className="text-center">
                 <h4 className="font-sans font-bold text-xs text-white">{name || "Merchant User"}</h4>
@@ -211,30 +173,18 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
               </div>
             </div>
 
-            {/* Drag and Drop box */}
-            <div 
-              onDragEnter={handleDrag}
-              onDragOver={handleDrag}
-              onDragLeave={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border border-dashed rounded-lg p-5 text-center cursor-pointer transition-all ${
-                dragActive 
-                  ? 'border-white bg-white/5' 
-                  : 'border-white/10 hover:border-white/20 bg-[#121215]/30'
-              }`}
-            >
-              <input 
-                ref={fileInputRef}
-                type="file" 
-                className="hidden" 
-                accept="image/*"
-                onChange={handleFileChange}
-              />
-              <Upload className="h-5 w-5 text-white/40 mx-auto mb-2" />
-              <p className="font-sans font-bold text-[10px] text-white/80 uppercase tracking-wider">Drag & Drop Image</p>
-              <p className="text-[9px] text-white/40 mt-0.5">or click to browse local files</p>
+            <div className="flex items-start gap-2 rounded-lg border border-white/[0.06] bg-[#121215]/50 p-3">
+              <Info className="h-3.5 w-3.5 text-white/40 shrink-0 mt-0.5" />
+              <p className="text-[10px] text-white/50 leading-relaxed">
+                Use a direct HTTPS image URL or choose a preset below. Local file uploads are not supported.
+              </p>
             </div>
+
+            {isLegacyStoredAvatar(userProfile.avatarUrl) && avatarUrl === userProfile.avatarUrl && (
+              <p className="text-[10px] text-amber-400/80">
+                Your current avatar uses a legacy stored image. Paste an HTTPS URL or pick a preset to replace it.
+              </p>
+            )}
 
             {/* Direct Avatar Image URL input */}
             <div className="space-y-1.5">
@@ -246,14 +196,10 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
                   <ImageIcon className="h-3.5 w-3.5 text-white/30" />
                 </span>
                 <input
-                  type="text"
-                  placeholder="Paste direct image URL"
-                  value={avatarUrl.startsWith('data:') ? 'Custom Base64 Image' : avatarUrl}
-                  onChange={(e) => {
-                    if (!e.target.value.startsWith('Custom Base64')) {
-                      setAvatarUrl(e.target.value);
-                    }
-                  }}
+                  type="url"
+                  placeholder="https://example.com/avatar.jpg"
+                  value={isLegacyStoredAvatar(avatarUrl) ? '' : avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
                   className="w-full bg-[#121215] border border-white/[0.06] rounded-lg pl-9 pr-3 py-2 font-sans text-xs text-white placeholder-white/20 outline-none focus:border-white/20 transition-all"
                 />
               </div>

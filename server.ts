@@ -237,7 +237,7 @@ async function startServer() {
       const url = buildGoogleAuthUrl(state);
       res.redirect(url);
     } catch (err: any) {
-      console.error('Google connect error:', err);
+      console.error('Google connect error');
       res.status(500).json({ error: 'Failed to start Google sign-in' });
     }
   });
@@ -370,7 +370,7 @@ async function startServer() {
         store: { id: merchant.store.id, name: merchant.store.name },
       });
     } catch (err: any) {
-      console.error('Fetch profile error:', err);
+      console.error('Fetch profile error');
       res.status(500).json({ error: 'Failed to load profile' });
     }
   });
@@ -519,7 +519,7 @@ async function startServer() {
         name: (c.credentials as any)?.name || (c.credentials as any)?.phoneNumber || (c.credentials as any)?.phoneNumberId || null,
       })));
     } catch (err: any) {
-      console.error('List channels error:', err);
+      console.error('List channels error');
       res.status(500).json({ error: 'Failed to load channels' });
     }
   });
@@ -534,7 +534,7 @@ async function startServer() {
       });
       res.json({ success: true });
     } catch (err: any) {
-      console.error('Disconnect channel error:', err);
+      console.error('Disconnect channel error');
       res.status(500).json({ error: 'Failed to disconnect channel' });
     }
   });
@@ -653,7 +653,7 @@ async function startServer() {
 
       res.json({ success: true, created, updated, total: shopifyProducts.length });
     } catch (err: any) {
-      console.error('Shopify sync error:', err);
+      console.error('Shopify sync error');
       res.status(500).json({ error: 'Unable to connect integration' });
     }
   });
@@ -964,7 +964,7 @@ async function startServer() {
       });
       res.json(products.map(toPublicProduct));
     } catch (err: any) {
-      console.error('List products error:', err);
+      console.error('List products error');
       res.status(500).json({ error: 'Failed to load products' });
     }
   });
@@ -997,7 +997,7 @@ async function startServer() {
       });
       res.status(201).json(toPublicProduct(product));
     } catch (err: any) {
-      console.error('Create product error:', err);
+      console.error('Create product error');
       res.status(500).json({ error: 'Unable to process request' });
     }
   });
@@ -1012,7 +1012,7 @@ async function startServer() {
       await prisma.product.delete({ where: { id: product.id } });
       res.status(204).end();
     } catch (err: any) {
-      console.error('Delete product error:', err);
+      console.error('Delete product error');
       res.status(500).json({ error: 'Failed to delete product' });
     }
   });
@@ -1043,7 +1043,7 @@ async function startServer() {
       });
       res.json(orders.map(toPublicOrder));
     } catch (err: any) {
-      console.error('List orders error:', err);
+      console.error('List orders error');
       res.status(500).json({ error: 'Failed to load orders' });
     }
   });
@@ -1092,7 +1092,7 @@ async function startServer() {
       const updated = await prisma.order.update({ where: { id: order.id }, data: { status: mapped } });
       res.json(toPublicOrder(updated));
     } catch (err: any) {
-      console.error('Update order error:', err);
+      console.error('Update order error');
       res.status(500).json({ error: 'Failed to update order' });
     }
   });
@@ -1223,7 +1223,7 @@ async function startServer() {
       if (err?.code === 'INSUFFICIENT_STOCK') {
         return res.status(409).json({ error: 'Insufficient stock to create this order' });
       }
-      console.error('Create order error:', err);
+      console.error('Create order error');
       res.status(500).json({ error: 'Unable to process request' });
     }
   });
@@ -1453,7 +1453,7 @@ async function startServer() {
         recentActivity,
       });
     } catch (err: any) {
-      console.error('Analytics error:', err);
+      console.error('Analytics error');
       res.status(500).json({ error: 'Failed to load analytics' });
     }
   });
@@ -1472,7 +1472,7 @@ async function startServer() {
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
       });
     } catch (err: any) {
-      console.error('Fetch persona error:', err);
+      console.error('Fetch persona error');
       res.status(500).json({ error: 'Failed to load persona' });
     }
   });
@@ -1500,7 +1500,7 @@ async function startServer() {
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
       });
     } catch (err: any) {
-      console.error('Update persona error:', err);
+      console.error('Update persona error');
       res.status(500).json({ error: 'Failed to update persona' });
     }
   });
@@ -1563,7 +1563,7 @@ async function startServer() {
         const { token } = channel.credentials as { token: string };
         return decryptSecret(token);
       } catch (err) {
-        console.error('Failed to decrypt stored Facebook token:', err);
+        console.error('Failed to decrypt stored Facebook token');
       }
     }
     return null;
@@ -1576,7 +1576,7 @@ async function startServer() {
         const { token, phoneNumberId } = channel.credentials as { token: string; phoneNumberId: string };
         return { phoneNumberId, accessToken: decryptSecret(token) };
       } catch (err) {
-        console.error('Failed to decrypt stored WhatsApp credentials:', err);
+        console.error('Failed to decrypt stored WhatsApp credentials');
       }
     }
     return null;
@@ -1589,7 +1589,7 @@ async function startServer() {
         const { token } = channel.credentials as { token: string };
         return { igAccountId: channel.externalId, accessToken: decryptSecret(token) };
       } catch (err) {
-        console.error('Failed to decrypt stored Instagram credentials:', err);
+        console.error('Failed to decrypt stored Instagram credentials');
       }
     }
     return null;
@@ -2086,7 +2086,7 @@ async function startServer() {
         try {
           await sendMessengerMessage(pageAccessToken, conversation.externalUserId, result.replyText);
         } catch (err) {
-          console.error('Failed to deliver AI reply to Messenger:', err);
+          console.error('Failed to deliver AI reply to Messenger');
         }
       }
     }
@@ -2097,7 +2097,7 @@ async function startServer() {
         try {
           await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, result.replyText);
         } catch (err) {
-          console.error('Failed to deliver AI reply to WhatsApp:', err);
+          console.error('Failed to deliver AI reply to WhatsApp');
         }
       }
     }
@@ -2108,7 +2108,7 @@ async function startServer() {
         try {
           await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, result.replyText);
         } catch (err) {
-          console.error('Failed to deliver AI reply to Instagram:', err);
+          console.error('Failed to deliver AI reply to Instagram');
         }
       }
     }
@@ -2165,7 +2165,7 @@ async function startServer() {
 
       res.json(notifications.slice(0, 15));
     } catch (err: any) {
-      console.error('Fetch notifications error:', err);
+      console.error('Fetch notifications error');
       res.status(500).json({ error: 'Failed to load notifications' });
     }
   });
@@ -2180,7 +2180,7 @@ async function startServer() {
       });
       res.json(conversations.map(toPublicConversation));
     } catch (err: any) {
-      console.error('List conversations error:', err);
+      console.error('List conversations error');
       res.status(500).json({ error: 'Failed to load conversations' });
     }
   });
@@ -2245,7 +2245,7 @@ async function startServer() {
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
-      console.error('Update conversation error:', err);
+      console.error('Update conversation error');
       res.status(500).json({ error: 'Failed to update conversation' });
     }
   });
@@ -2264,7 +2264,7 @@ async function startServer() {
 
       res.json({ success: true });
     } catch (err: any) {
-      console.error('Delete conversation error:', err);
+      console.error('Delete conversation error');
       res.status(500).json({ error: 'Failed to delete conversation' });
     }
   });
@@ -2305,7 +2305,7 @@ async function startServer() {
             try {
               await sendMessengerMessage(pageAccessToken, conversation.externalUserId, text);
             } catch (err) {
-              console.error('Failed to deliver merchant reply to Messenger:', err);
+              console.error('Failed to deliver merchant reply to Messenger');
             }
           }
         }
@@ -2316,7 +2316,7 @@ async function startServer() {
             try {
               await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, text);
             } catch (err) {
-              console.error('Failed to deliver merchant reply to WhatsApp:', err);
+              console.error('Failed to deliver merchant reply to WhatsApp');
             }
           }
         }
@@ -2327,7 +2327,7 @@ async function startServer() {
             try {
               await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, text);
             } catch (err) {
-              console.error('Failed to deliver merchant reply to Instagram:', err);
+              console.error('Failed to deliver merchant reply to Instagram');
             }
           }
         }
@@ -2349,7 +2349,7 @@ async function startServer() {
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
-      console.error('Send message error:', err);
+      console.error('Send message error');
       res.status(500).json({ error: 'Unable to process request' });
     }
   });
@@ -2373,7 +2373,7 @@ async function startServer() {
           try {
             await sendMessengerMessage(pageAccessToken, conversation.externalUserId, message.text);
           } catch (err) {
-            console.error('Failed to deliver approved draft to Messenger:', err);
+            console.error('Failed to deliver approved draft to Messenger');
           }
         }
       }
@@ -2384,7 +2384,7 @@ async function startServer() {
           try {
             await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, message.text);
           } catch (err) {
-            console.error('Failed to deliver approved draft to WhatsApp:', err);
+            console.error('Failed to deliver approved draft to WhatsApp');
           }
         }
       }
@@ -2395,7 +2395,7 @@ async function startServer() {
           try {
             await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, message.text);
           } catch (err) {
-            console.error('Failed to deliver approved draft to Instagram:', err);
+            console.error('Failed to deliver approved draft to Instagram');
           }
         }
       }
@@ -2409,7 +2409,7 @@ async function startServer() {
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
-      console.error('Approve draft error:', err);
+      console.error('Approve draft error');
       res.status(500).json({ error: 'Failed to approve draft' });
     }
   });
@@ -2815,13 +2815,13 @@ async function startServer() {
         }
       }
     } catch (err) {
-      console.error('Meta webhook processing error:', err);
+      console.error('Meta webhook processing error');
     }
   });
 
   // Health check
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', geminiActive: !!ai });
+  app.get('/api/health', (_req, res) => {
+    res.json({ ok: true });
   });
 
   // Static privacy policy page (required by Meta's App Basic Settings to enable

@@ -22,8 +22,8 @@ export async function sendMessengerMessage(pageAccessToken: string, recipientPsi
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Messenger send failed: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Messenger send failed (${res.status})`);
   }
 }
 
@@ -47,8 +47,8 @@ export async function sendWhatsAppMessage(phoneNumberId: string, accessToken: st
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`WhatsApp send failed: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`WhatsApp send failed (${res.status})`);
   }
 }
 
@@ -61,8 +61,8 @@ export async function fetchMessengerProfileName(pageAccessToken: string, psid: s
     const data = await res.json();
     const name = [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
     return name || null;
-  } catch (err) {
-    console.error('Failed to fetch Messenger profile name:', err);
+  } catch {
+    console.error('Failed to fetch Messenger profile name');
     return null;
   }
 }
@@ -95,10 +95,10 @@ export async function sendInstagramMessage(igAccountId: string, accessToken: str
         }),
       });
       if (fallbackRes.ok) return;
-      const fallbackBody = await fallbackRes.text();
-      throw new Error(`Instagram send failed (fallback): ${fallbackRes.status} ${fallbackBody}`);
+      await fallbackRes.text();
+      throw new Error(`Instagram send failed (fallback) (${fallbackRes.status})`);
     }
-    throw new Error(`Instagram send failed: ${res.status} ${body}`);
+    throw new Error(`Instagram send failed (${res.status})`);
   }
 }
 
@@ -110,8 +110,8 @@ export async function fetchInstagramProfileName(accessToken: string, igUserId: s
     if (!res.ok) return null;
     const data = await res.json();
     return data.username || data.name || null;
-  } catch (err) {
-    console.error('Failed to fetch Instagram profile name:', err);
+  } catch {
+    console.error('Failed to fetch Instagram profile name');
     return null;
   }
 }
@@ -148,8 +148,8 @@ export async function exchangeCodeForUserToken(code: string, redirectUri: string
   });
   const res = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?${params.toString()}`);
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Facebook code exchange failed: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Facebook code exchange failed (${res.status})`);
   }
   const data = await res.json();
   return data.access_token;
@@ -167,8 +167,8 @@ export async function listManagedPages(userAccessToken: string): Promise<Managed
     `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=${encodeURIComponent(userAccessToken)}`
   );
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to list managed Pages: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Failed to list managed Pages (${res.status})`);
   }
   const data = await res.json();
   return data.data || [];
@@ -194,8 +194,8 @@ export async function listWhatsAppPhoneNumbers(userAccessToken: string): Promise
       wabaName: acc.name || 'WhatsApp Business Account',
       phoneNumbers: acc.phone_numbers?.data || [],
     }));
-  } catch (err) {
-    console.error('Failed to list WhatsApp accounts:', err);
+  } catch {
+    console.error('Failed to list WhatsApp accounts');
     return [];
   }
 }
@@ -208,8 +208,8 @@ export async function replyToFacebookComment(commentId: string, pageAccessToken:
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Facebook comment reply failed: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Facebook comment reply failed (${res.status})`);
   }
 }
 
@@ -240,8 +240,8 @@ export async function replyToInstagramComment(commentId: string, accessToken: st
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Instagram comment reply failed: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Instagram comment reply failed (${res.status})`);
   }
 }
 
@@ -256,8 +256,8 @@ export async function subscribePageWebhook(pageId: string, pageAccessToken: stri
     { method: 'POST' }
   );
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to subscribe Page webhook: ${res.status} ${body}`);
+    await res.text();
+    throw new Error(`Failed to subscribe Page webhook (${res.status})`);
   }
 }
 

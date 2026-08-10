@@ -100,9 +100,29 @@ model Channel {
   type        ChannelType
   connected   Boolean     @default(false)
   credentials Json?
+  // Provider-scoped identity (Facebook Page ID, IG business account ID,
+  // WhatsApp phone-number ID, Shopify shop domain). NULL when disconnected.
+  // Uniqueness is per ChannelType so IDs from different providers never collide.
   externalId  String?
 
   @@unique([storeId, type])
+  // One connected provider identity may belong to at most one store.
+  // PostgreSQL treats NULLs as distinct, so disconnected rows (externalId null) are fine.
+  @@unique([type, externalId])
+}
+
+// Idempotency ledger for webhook/events that do not create a Message row
+// (e.g. Meta comment bots). Message.externalId covers Messenger/WA/IG DMs.
+// Stores only provider + event id — never full payloads or customer PII.
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  eventType   String?
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([processedAt])
 }
 
 model Conversation {

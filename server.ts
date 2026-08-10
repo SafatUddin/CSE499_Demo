@@ -57,6 +57,15 @@ import {
   OAuthHandoffError,
   purgeExpiredOAuthHandoffs,
 } from './server/oauthHandoff';
+import {
+  assertChannelExternalIdAvailable,
+  resolveConnectedChannelByExternalId,
+  ChannelOwnershipError,
+  isChannelOwnershipError,
+  isUniqueConstraintError,
+  CHANNEL_ALREADY_CONNECTED_MESSAGE,
+} from './server/channelSecurity';
+import { claimWebhookEvent } from './server/webhookIdempotency';
 
 dotenv.config();
 
@@ -454,41 +463,66 @@ async function startServer() {
   }
 
   async function finalizeFacebookConnection(storeId: string, page: ManagedPage) {
-    const credentials = { token: encryptSecret(page.access_token), name: page.name };
-    await prisma.channel.upsert({
-      where: { storeId_type: { storeId, type: 'FACEBOOK' } },
-      update: { connected: true, externalId: page.id, credentials },
-      create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials },
-    });
-
+    await assertChannelExternalIdAvailable('FACEBOOK', page.id, storeId);
     if (page.instagram_business_account?.id) {
-      const igId = page.instagram_business_account.id;
-      const igCredentials = { token: encryptSecret(page.access_token), name: `@${page.name}` };
+      await assertChannelExternalIdAvailable('INSTAGRAM', page.instagram_business_account.id, storeId);
+    }
+
+    const credentials = { token: encryptSecret(page.access_token), name: page.name };
+    try {
       await prisma.channel.upsert({
-        where: { storeId_type: { storeId, type: 'INSTAGRAM' } },
-        update: { connected: true, externalId: igId, credentials: igCredentials },
-        create: { storeId, type: 'INSTAGRAM', connected: true, externalId: igId, credentials: igCredentials },
+        where: { storeId_type: { storeId, type: 'FACEBOOK' } },
+        update: { connected: true, externalId: page.id, credentials },
+        create: { storeId, type: 'FACEBOOK', connected: true, externalId: page.id, credentials },
       });
+
+      if (page.instagram_business_account?.id) {
+        const igId = page.instagram_business_account.id;
+        const igCredentials = { token: encryptSecret(page.access_token), name: `@${page.name}` };
+        await prisma.channel.upsert({
+          where: { storeId_type: { storeId, type: 'INSTAGRAM' } },
+          update: { connected: true, externalId: igId, credentials: igCredentials },
+          create: { storeId, type: 'INSTAGRAM', connected: true, externalId: igId, credentials: igCredentials },
+        });
+      }
+    } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        throw new ChannelOwnershipError();
+      }
+      throw err;
     }
 
     try {
       await subscribePageWebhook(page.id, page.access_token);
     } catch (err) {
-      console.error('Failed to auto-subscribe Facebook Page webhook:', err);
+      console.error('Failed to auto-subscribe Facebook Page webhook');
     }
   }
 
   async function finalizeWhatsAppConnection(storeId: string, numberObj: { id: string; display_phone_number: string; token: string }) {
+    await assertChannelExternalIdAvailable('WHATSAPP', numberObj.id, storeId);
+
     const credentials = {
       token: encryptSecret(numberObj.token),
       phoneNumberId: numberObj.id,
       phoneNumber: numberObj.display_phone_number,
     };
-    await prisma.channel.upsert({
-      where: { storeId_type: { storeId, type: 'WHATSAPP' } },
-      update: { connected: true, externalId: numberObj.id, credentials },
-      create: { storeId, type: 'WHATSAPP', connected: true, externalId: numberObj.id, credentials },
-    });
+    try {
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId, type: 'WHATSAPP' } },
+        update: { connected: true, externalId: numberObj.id, credentials },
+        create: { storeId, type: 'WHATSAPP', connected: true, externalId: numberObj.id, credentials },
+      });
+    } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        throw new ChannelOwnershipError();
+      }
+      throw err;
+    }
+  }
+
+  function normalizeShopifyDomain(domain: string): string {
+    return domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
   }
 
   // List this store's real channel connections (Facebook & WhatsApp)
@@ -529,6 +563,8 @@ async function startServer() {
         return res.status(400).json({ error: 'Phone Number ID and Access Token are required' });
       }
 
+      await assertChannelExternalIdAvailable('WHATSAPP', String(phoneNumberId), req.auth!.storeId);
+
       const credentials = {
         token: encryptSecret(accessToken),
         phoneNumberId,
@@ -537,13 +573,16 @@ async function startServer() {
 
       await prisma.channel.upsert({
         where: { storeId_type: { storeId: req.auth!.storeId, type: 'WHATSAPP' } },
-        update: { connected: true, externalId: phoneNumberId, credentials },
-        create: { storeId: req.auth!.storeId, type: 'WHATSAPP', connected: true, externalId: phoneNumberId, credentials },
+        update: { connected: true, externalId: String(phoneNumberId), credentials },
+        create: { storeId: req.auth!.storeId, type: 'WHATSAPP', connected: true, externalId: String(phoneNumberId), credentials },
       });
 
       res.json({ success: true });
     } catch (err: any) {
-      console.error('Connect WhatsApp channel error:', err);
+      if (isChannelOwnershipError(err) || isUniqueConstraintError(err)) {
+        return res.status(409).json({ error: CHANNEL_ALREADY_CONNECTED_MESSAGE });
+      }
+      console.error('Connect WhatsApp channel error');
       res.status(500).json({ error: 'Failed to connect WhatsApp channel' });
     }
   });
@@ -559,22 +598,27 @@ async function startServer() {
       }
 
       const shop = await verifyShopifyStore(domain, accessToken);
+      const normalizedDomain = normalizeShopifyDomain(domain);
+      await assertChannelExternalIdAvailable('SHOPIFY', normalizedDomain, req.auth!.storeId);
 
       const credentials = {
         token: encryptSecret(accessToken),
-        domain: domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, ''),
+        domain: normalizedDomain,
         name: shop.name,
       };
 
       await prisma.channel.upsert({
         where: { storeId_type: { storeId: req.auth!.storeId, type: 'SHOPIFY' } },
-        update: { connected: true, credentials },
-        create: { storeId: req.auth!.storeId, type: 'SHOPIFY', connected: true, credentials },
+        update: { connected: true, externalId: normalizedDomain, credentials },
+        create: { storeId: req.auth!.storeId, type: 'SHOPIFY', connected: true, externalId: normalizedDomain, credentials },
       });
 
       res.json({ success: true, name: shop.name });
     } catch (err: any) {
-      console.error('Connect Shopify channel error:', err);
+      if (isChannelOwnershipError(err) || isUniqueConstraintError(err)) {
+        return res.status(409).json({ error: CHANNEL_ALREADY_CONNECTED_MESSAGE });
+      }
+      console.error('Connect Shopify channel error');
       res.status(400).json({ error: 'Unable to connect integration' });
     }
   });
@@ -692,20 +736,33 @@ async function startServer() {
       const { storeId } = statePayload;
       const accessToken = await exchangeShopifyCodeForToken(shop, code);
       const shopInfo = await verifyShopifyStore(shop, accessToken);
+      const normalizedDomain = normalizeShopifyDomain(shop);
+
+      await assertChannelExternalIdAvailable('SHOPIFY', normalizedDomain, storeId);
 
       const credentials = {
         token: encryptSecret(accessToken),
-        domain: shop.trim().toLowerCase(),
+        domain: normalizedDomain,
         name: shopInfo.name,
       };
-      await prisma.channel.upsert({
-        where: { storeId_type: { storeId, type: 'SHOPIFY' } },
-        update: { connected: true, credentials },
-        create: { storeId, type: 'SHOPIFY', connected: true, credentials },
-      });
+      try {
+        await prisma.channel.upsert({
+          where: { storeId_type: { storeId, type: 'SHOPIFY' } },
+          update: { connected: true, externalId: normalizedDomain, credentials },
+          create: { storeId, type: 'SHOPIFY', connected: true, externalId: normalizedDomain, credentials },
+        });
+      } catch (err) {
+        if (isUniqueConstraintError(err)) {
+          return res.redirect(`${frontendBase}/#integrations?shopifyError=already_connected`);
+        }
+        throw err;
+      }
 
       return res.redirect(`${frontendBase}/#integrations?shopifyConnected=1`);
     } catch (err) {
+      if (isChannelOwnershipError(err)) {
+        return res.redirect(`${frontendBase}/#integrations?shopifyError=already_connected`);
+      }
       console.error('Shopify OAuth callback error');
       res.redirect(`${frontendBase}/#integrations?shopifyError=server_error`);
     }
@@ -811,6 +868,9 @@ async function startServer() {
 
       return res.redirect(`${frontendBase}/#integrations?fbConnected=1&waConnected=1`);
     } catch (err) {
+      if (isChannelOwnershipError(err)) {
+        return res.redirect(`${frontendBase}/#integrations?fbError=already_connected`);
+      }
       console.error('Meta OAuth callback error');
       res.redirect(`${frontendBase}/#integrations?fbError=server_error`);
     }
@@ -854,6 +914,9 @@ async function startServer() {
       await finalizeWhatsAppConnection(handoff.storeId!, num);
       res.json({ success: true });
     } catch (err) {
+      if (isChannelOwnershipError(err) || isUniqueConstraintError(err)) {
+        return res.status(409).json({ error: CHANNEL_ALREADY_CONNECTED_MESSAGE });
+      }
       console.error('WhatsApp number selection error');
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
@@ -891,6 +954,9 @@ async function startServer() {
       await finalizeFacebookConnection(handoff.storeId!, page);
       res.json({ success: true });
     } catch (err) {
+      if (isChannelOwnershipError(err) || isUniqueConstraintError(err)) {
+        return res.status(409).json({ error: CHANNEL_ALREADY_CONNECTED_MESSAGE });
+      }
       console.error('Facebook page selection error');
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
@@ -2417,23 +2483,23 @@ async function startServer() {
 
   async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
     if (!isProduction) {
-      console.log('[WEBHOOK] handleIncomingMessengerMessage — pageId:', pageId, '| messageId:', externalMessageId);
+      console.log('[WEBHOOK] handleIncomingMessengerMessage — messageId:', externalMessageId);
     }
     // Meta's webhook delivery is "at-least-once" — it may redeliver the same event.
     // Bail out immediately if we've already recorded this exact message.
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
     if (alreadyProcessed) {
-      console.log('Duplicate Messenger webhook event, skipping:', externalMessageId);
+      console.log('Duplicate Messenger webhook event, skipping');
       return;
     }
 
     // A real self-serve OAuth connection always has a Channel row keyed by this exact
     // Page ID (see finalizeFacebookConnection). There is no fallback: a Page that hasn't
     // been connected through that flow has no known store to attach the message to, so
-    // it's dropped rather than guessed at.
-    const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
+    // it's dropped rather than guessed at. Ownership comes only from the Channel row.
+    const channel = await resolveConnectedChannelByExternalId('FACEBOOK', pageId);
     if (!channel) {
-      console.error('Ignoring Messenger event for unconnected Page:', pageId);
+      console.error('Ignoring Messenger event for unconnected Page');
       return;
     }
     const storeId = channel.storeId;
@@ -2464,7 +2530,7 @@ async function startServer() {
     } catch (err: any) {
       if (err.code === 'P2002') {
         // Lost a race with a concurrent redelivery of the same event — the other one wins.
-        console.log('Duplicate Messenger webhook event (race), skipping:', externalMessageId);
+        console.log('Duplicate Messenger webhook event (race), skipping');
         return;
       }
       throw err;
@@ -2476,13 +2542,13 @@ async function startServer() {
   async function handleIncomingWhatsAppMessage(phoneNumberId: string, senderWaId: string, messageText: string, externalMessageId: string, customerName?: string) {
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
     if (alreadyProcessed) {
-      console.log('Duplicate WhatsApp webhook event, skipping:', externalMessageId);
+      console.log('Duplicate WhatsApp webhook event, skipping');
       return;
     }
 
-    const channel = await prisma.channel.findFirst({ where: { type: 'WHATSAPP', connected: true, externalId: phoneNumberId } });
+    const channel = await resolveConnectedChannelByExternalId('WHATSAPP', phoneNumberId);
     if (!channel) {
-      console.error('Ignoring WhatsApp event for unconnected Phone Number ID:', phoneNumberId);
+      console.error('Ignoring WhatsApp event for unconnected Phone Number ID');
       return;
     }
     const storeId = channel.storeId;
@@ -2513,7 +2579,7 @@ async function startServer() {
       });
     } catch (err: any) {
       if (err.code === 'P2002') {
-        console.log('Duplicate WhatsApp webhook event (race), skipping:', externalMessageId);
+        console.log('Duplicate WhatsApp webhook event (race), skipping');
         return;
       }
       throw err;
@@ -2525,13 +2591,13 @@ async function startServer() {
   async function handleIncomingInstagramMessage(igAccountId: string, senderIgUserId: string, messageText: string, externalMessageId: string) {
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
     if (alreadyProcessed) {
-      console.log('Duplicate Instagram webhook event, skipping:', externalMessageId);
+      console.log('Duplicate Instagram webhook event, skipping');
       return;
     }
 
-    const channel = await prisma.channel.findFirst({ where: { type: 'INSTAGRAM', connected: true, externalId: igAccountId } });
+    const channel = await resolveConnectedChannelByExternalId('INSTAGRAM', igAccountId);
     if (!channel) {
-      console.error('Ignoring Instagram event for unconnected Account ID:', igAccountId);
+      console.error('Ignoring Instagram event for unconnected Account ID');
       return;
     }
     const storeId = channel.storeId;
@@ -2559,7 +2625,7 @@ async function startServer() {
       });
     } catch (err: any) {
       if (err.code === 'P2002') {
-        console.log('Duplicate Instagram webhook event (race), skipping:', externalMessageId);
+        console.log('Duplicate Instagram webhook event (race), skipping');
         return;
       }
       throw err;
@@ -2602,20 +2668,34 @@ async function startServer() {
               if (!isProduction) {
                 console.log('[WEBHOOK] Received FB feed change event');
               }
-              const commentId = val.comment_id || val.id || val.post_id;
+              // Prefer Meta's stable comment_id. Do not fall back to post_id alone —
+              // that would collide across comments on the same post and is not a
+              // reliable per-event idempotency key.
+              const commentId =
+                typeof val.comment_id === 'string'
+                  ? val.comment_id
+                  : val.item === 'comment' && typeof val.id === 'string'
+                    ? val.id
+                    : null;
               const verb = val.verb || 'add';
 
               if (verb === 'add' && commentId) {
+                const claimed = await claimWebhookEvent('meta', `facebook.comment.${commentId}`, 'facebook_comment');
+                if (!claimed) {
+                  console.log('Duplicate Facebook comment webhook event, skipping');
+                  continue;
+                }
+
                 const messageText = val.message || '';
                 const fromPsid = val.from?.id;
                 const fromName = val.from?.name || 'Customer';
 
                 if (messageText && (await isQuestionOrPriceInquiry(messageText))) {
                   if (!isProduction) {
-                    console.log(`[COMMENT BOT] Triggered for FB feed event ${commentId}`);
+                    console.log('[COMMENT BOT] Triggered for FB feed event');
                   }
 
-                  const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
+                  const channel = await resolveConnectedChannelByExternalId('FACEBOOK', pageId);
                   if (channel) {
                     const pageAccessToken = await getPageAccessTokenForStore(channel.storeId);
                     if (pageAccessToken) {
@@ -2623,7 +2703,7 @@ async function startServer() {
                       try {
                         await replyToFacebookComment(commentId, pageAccessToken, 'Check Inbox');
                       } catch (err: any) {
-                        console.error(`Failed to reply to Facebook comment ${commentId}`);
+                        console.error('Failed to reply to Facebook comment');
                       }
 
                       // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
@@ -2635,12 +2715,12 @@ async function startServer() {
                           await sendFacebookPrivateReply(commentId, pageAccessToken, dmText);
                         }
                       } catch (err: any) {
-                        console.error(`Failed to send Facebook inbox message for comment ${commentId}`);
+                        console.error('Failed to send Facebook inbox message for comment');
                       }
                     }
                   }
                 } else if (!isProduction) {
-                  console.log(`[COMMENT BOT] Ignored FB feed event ${commentId} (not a question/price inquiry)`);
+                  console.log('[COMMENT BOT] Ignored FB feed event (not a question/price inquiry)');
                 }
               }
             }
@@ -2662,18 +2742,26 @@ async function startServer() {
           for (const change of entry.changes || []) {
             if (change.field === 'comments' && change.value) {
               const val = change.value;
-              const commentId = val.id;
+              const commentId = typeof val.id === 'string' ? val.id : null;
+              if (!commentId) continue;
+
+              const claimed = await claimWebhookEvent('meta', `instagram.comment.${commentId}`, 'instagram_comment');
+              if (!claimed) {
+                console.log('Duplicate Instagram comment webhook event, skipping');
+                continue;
+              }
+
               const messageText = val.text || '';
               const fromUser = val.from || {};
               const senderIgUserId = fromUser.id;
               let customerName = fromUser.username || fromUser.name || 'Customer';
 
-              if (commentId && messageText && (await isQuestionOrPriceInquiry(messageText))) {
+              if (messageText && (await isQuestionOrPriceInquiry(messageText))) {
                 if (!isProduction) {
-                  console.log(`[COMMENT BOT] Triggered for IG comment ${commentId}`);
+                  console.log('[COMMENT BOT] Triggered for IG comment');
                 }
 
-                const channel = await prisma.channel.findFirst({ where: { type: 'INSTAGRAM', connected: true, externalId: igAccountId } });
+                const channel = await resolveConnectedChannelByExternalId('INSTAGRAM', igAccountId);
                 if (channel) {
                   const igCreds = await getInstagramCredentialsForStore(channel.storeId);
                   if (igCreds) {
@@ -2686,7 +2774,7 @@ async function startServer() {
                     try {
                       await replyToInstagramComment(commentId, igCreds.accessToken, 'Check Inbox');
                     } catch (err: any) {
-                      console.error(`Failed to reply to IG comment ${commentId}`);
+                      console.error('Failed to reply to IG comment');
                     }
 
                     // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
@@ -2696,7 +2784,7 @@ async function startServer() {
                         await sendInstagramPrivateReply(igCreds.igAccountId, igCreds.accessToken, senderIgUserId, dmText);
                       }
                     } catch (err: any) {
-                      console.error(`Failed to send IG inbox message for comment ${commentId}`);
+                      console.error('Failed to send IG inbox message for comment');
                     }
                   }
                 }

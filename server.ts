@@ -3,6 +3,8 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { prisma } from './server/db';
 import { signToken, requireAuth, AuthedRequest, signState, verifyState } from './server/auth';
 import { ai } from './server/gemini';
@@ -35,8 +37,72 @@ interface RequestWithRawBody extends express.Request {
   rawBody?: Buffer;
 }
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+const MAX_PRODUCT_PRICE = 1_000_000;
+const MAX_PRODUCT_INVENTORY = 1_000_000;
+const MAX_CART_QUANTITY = 10_000;
+
+function parseValidatedPrice(price: unknown): number | null {
+  const n = typeof price === 'number' ? price : Number(price);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_PRODUCT_PRICE) return null;
+  return n;
+}
+
+function parseValidatedInventory(inventory: unknown): number | null {
+  if (inventory === undefined || inventory === null || inventory === '') return 0;
+  const n = typeof inventory === 'number' ? inventory : Number(inventory);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > MAX_PRODUCT_INVENTORY) return null;
+  return n;
+}
+
+function sanitizeCartInput(cart: unknown): { sku: string; quantity: number }[] | null {
+  if (!Array.isArray(cart)) return null;
+  const sanitized: { sku: string; quantity: number }[] = [];
+  for (const item of cart) {
+    if (!item || typeof item !== 'object') return null;
+    const sku = (item as { sku?: unknown }).sku;
+    const quantity = (item as { quantity?: unknown }).quantity;
+    if (typeof sku !== 'string' || !sku.trim()) return null;
+    const qty = typeof quantity === 'number' ? quantity : Number(quantity);
+    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1 || qty > MAX_CART_QUANTITY) return null;
+    sanitized.push({ sku: sku.trim(), quantity: qty });
+  }
+  return sanitized;
+}
+
 async function startServer() {
   const app = express();
+
+  // Needed so express-rate-limit sees the real client IP behind Railway/other reverse proxies.
+  app.set('trust proxy', 1);
+
+  // Security headers. CSP is left off: a strict policy would break the Vite/React SPA,
+  // inline styles, and third-party OAuth/asset flows until a full allowlist is designed.
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  }));
+
+  // In-memory store: fine for a single Node process. Multi-instance (e.g. multiple
+  // Railway replicas) would need a shared store for accurate global limits.
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again later.' },
+  });
+
+  const aiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again later.' },
+  });
+
   app.use(express.json({
     verify: (req: RequestWithRawBody, _res, buf) => {
       req.rawBody = buf;
@@ -52,7 +118,7 @@ async function startServer() {
   });
 
   // Signup: creates a Merchant + their Store, returns a JWT
-  app.post('/api/auth/signup', async (req, res) => {
+  app.post('/api/auth/signup', authLimiter, async (req, res) => {
     try {
       const { fullName, businessName, email, password } = req.body;
 
@@ -89,7 +155,7 @@ async function startServer() {
   });
 
   // Login: verifies credentials, returns a JWT
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', authLimiter, async (req, res) => {
     try {
       const { email, password } = req.body;
       if (!email || !password) {
@@ -418,7 +484,7 @@ async function startServer() {
       res.json({ success: true, name: shop.name });
     } catch (err: any) {
       console.error('Connect Shopify channel error:', err);
-      res.status(400).json({ error: err.message || 'Failed to connect Shopify store' });
+      res.status(400).json({ error: 'Unable to connect integration' });
     }
   });
 
@@ -469,7 +535,7 @@ async function startServer() {
       res.json({ success: true, created, updated, total: shopifyProducts.length });
     } catch (err: any) {
       console.error('Shopify sync error:', err);
-      res.status(500).json({ error: err.message || 'Failed to sync Shopify products' });
+      res.status(500).json({ error: 'Unable to connect integration' });
     }
   });
 
@@ -705,6 +771,15 @@ async function startServer() {
         return res.status(400).json({ error: 'Name, SKU, and price are required' });
       }
 
+      const validatedPrice = parseValidatedPrice(price);
+      if (validatedPrice === null) {
+        return res.status(400).json({ error: 'Price must be a number between 0 and 1000000' });
+      }
+      const validatedInventory = parseValidatedInventory(inventory);
+      if (validatedInventory === null) {
+        return res.status(400).json({ error: 'Inventory must be an integer between 0 and 1000000' });
+      }
+
       const existing = await prisma.product.findUnique({
         where: { storeId_sku: { storeId: req.auth!.storeId, sku } },
       });
@@ -717,15 +792,15 @@ async function startServer() {
           storeId: req.auth!.storeId,
           name,
           sku,
-          price,
-          inventory: inventory ?? 0,
+          price: validatedPrice,
+          inventory: validatedInventory,
           status: status === 'Pending' ? 'PENDING' : 'TRAINED',
         },
       });
       res.status(201).json(toPublicProduct(product));
     } catch (err: any) {
       console.error('Create product error:', err);
-      res.status(500).json({ error: 'Failed to create product' });
+      res.status(500).json({ error: 'Unable to process request' });
     }
   });
 
@@ -948,10 +1023,10 @@ async function startServer() {
       res.status(201).json(toPublicOrder(order));
     } catch (err: any) {
       if (err?.code === 'INSUFFICIENT_STOCK') {
-        return res.status(409).json({ error: err.message || 'Insufficient stock to create this order' });
+        return res.status(409).json({ error: 'Insufficient stock to create this order' });
       }
       console.error('Create order error:', err);
-      res.status(500).json({ error: 'Failed to create order' });
+      res.status(500).json({ error: 'Unable to process request' });
     }
   });
 
@@ -1326,7 +1401,9 @@ async function startServer() {
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
   async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
-    console.log('[AGENT REPLY] generateAndStoreAgentReply ENTERED — conversationId:', conversation.id, '| text:', JSON.stringify(customerText));
+    if (!isProduction) {
+      console.log('[AGENT REPLY] generateAndStoreAgentReply — conversationId:', conversation.id, '| storeId:', conversation.storeId);
+    }
     const [store, products, recentMessages, currentConversation, conversationOrders] = await Promise.all([
       prisma.store.findUnique({ where: { id: conversation.storeId } }),
       prisma.product.findMany({ where: { storeId: conversation.storeId } }),
@@ -1410,18 +1487,6 @@ async function startServer() {
 
     const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
     const isAutopilot = conversation.status === 'AI_MANAGED';
-
-    // ── DIAGNOSTIC LOG (remove once stable) ──────────────────────────────────
-    console.log('[CHECKOUT DEBUG] customerText:', JSON.stringify(customerText));
-    console.log('[CHECKOUT DEBUG] rawAWQ:', rawAWQ);
-    console.log('[CHECKOUT DEBUG] isConfirmState:', isConfirmState, '| isDetailsState:', isDetailsState);
-    console.log('[CHECKOUT DEBUG] pendingEncodedSku:', pendingEncodedSku, '| pendingEncodedQty:', pendingEncodedQty);
-    console.log('[CHECKOUT DEBUG] result.cartAction:', JSON.stringify(result.cartAction));
-    console.log('[CHECKOUT DEBUG] result.askQuantityForSku:', result.askQuantityForSku);
-    console.log('[CHECKOUT DEBUG] result.orderConfirmed:', result.orderConfirmed, '| result.orderCancelled:', result.orderCancelled);
-    console.log('[CHECKOUT DEBUG] result.extractedAddress:', result.extractedAddress);
-    console.log('[CHECKOUT DEBUG] currentConversation.orderConfirmationRequested:', currentConversation.orderConfirmationRequested);
-    // ─────────────────────────────────────────────────────────────────────────
 
     // CART-ADD INTERCEPTION: If the agent (Ollama or fallback) returned cartAction='add',
     // redirect through the confirmation-first flow rather than writing to cart immediately.
@@ -1585,7 +1650,7 @@ async function startServer() {
           });
           console.log('[ORDER CANCEL] Cancelled ongoing order:', orderToCancel.id);
         } catch (cancelErr: any) {
-          console.error('[ORDER CANCEL] Failed to cancel ongoing order:', cancelErr.message);
+          console.error('[ORDER CANCEL] Failed to cancel ongoing order');
         }
       }
     }
@@ -1627,28 +1692,21 @@ async function startServer() {
       }
     }
 
-    console.log('[CHECKOUT DEBUG] conversationData.cart BEFORE update:', JSON.stringify(conversationData.cart));
-    console.log('[CHECKOUT DEBUG] conversationData.awaitingQuantityFor BEFORE update:', conversationData.awaitingQuantityFor);
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: conversationData,
     });
-    console.log('[CHECKOUT DEBUG] prisma.conversation.update() executed');
 
     // DETAILS state: customer provided phone+address (or already had address on file and
     // confirmed) → add the pending item to cart and create the order atomically.
     // Use extractedAddress from this turn OR the previously stored detectedAddress so that
     // an Ollama model that notes the address in replyText but forgets to fill extractedAddress
     // still triggers order creation on a subsequent "Yes" / affirmative turn.
-    console.log('[CHECKOUT DEBUG] isDetailsState check:', isDetailsState, '| pendingEncodedSku:', pendingEncodedSku, '| pendingEncodedQty:', pendingEncodedQty);
     if (isDetailsState && pendingEncodedSku && pendingEncodedQty > 0) {
       const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
-      console.log('[CHECKOUT DEBUG] detailsContactInfo:', detailsContactInfo);
       if (detailsContactInfo) {
         const detailsProduct = products.find((p) => p.sku === pendingEncodedSku);
-        console.log('[CHECKOUT DEBUG] detailsProduct found:', !!detailsProduct, '| inventory:', detailsProduct?.inventory);
         if (detailsProduct && detailsProduct.inventory >= pendingEncodedQty) {
-          console.log('[CHECKOUT DEBUG] calling createOrderForConversation (DETAILS path)');
           try {
             await createOrderForConversation(
               { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
@@ -1656,7 +1714,7 @@ async function startServer() {
               detailsContactInfo,
             );
           } catch (err: any) {
-            console.error('New-flow order creation failed:', err.message);
+            console.error('New-flow order creation failed for conversation:', conversation.id);
           }
         } else {
           // Product not found or out of stock — surface a clear error to the customer
@@ -1844,7 +1902,11 @@ async function startServer() {
       }
 
       if (cart !== undefined) {
-        dataToUpdate.cart = cart;
+        const sanitizedCart = sanitizeCartInput(cart);
+        if (sanitizedCart === null) {
+          return res.status(400).json({ error: 'Invalid cart: each item needs a SKU and a quantity from 1 to 10000' });
+        }
+        dataToUpdate.cart = sanitizedCart;
       }
 
       if (isComplaint !== undefined) {
@@ -1887,8 +1949,10 @@ async function startServer() {
   // Facebook Messenger); omitting it (or 'customer') simulates an incoming customer
   // message for demo/testing channels that have no real external customer, and triggers
   // an AI reply if the conversation is AI-managed.
-  app.post('/api/conversations/:id/messages', requireAuth, async (req: AuthedRequest, res) => {
-    console.log('[ROUTE] POST /api/conversations/:id/messages — id:', req.params.id, '| sender:', req.body?.sender, '| text:', JSON.stringify(req.body?.text));
+  app.post('/api/conversations/:id/messages', requireAuth, aiLimiter, async (req: AuthedRequest, res) => {
+    if (!isProduction) {
+      console.log('[ROUTE] POST /api/conversations/:id/messages — id:', req.params.id, '| sender:', req.body?.sender);
+    }
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
@@ -1961,7 +2025,7 @@ async function startServer() {
       res.json(toPublicConversation(updated));
     } catch (err: any) {
       console.error('Send message error:', err);
-      res.status(500).json({ error: 'Failed to send message' });
+      res.status(500).json({ error: 'Unable to process request' });
     }
   });
 
@@ -2025,20 +2089,55 @@ async function startServer() {
     }
   });
 
-  // API endpoint for AI responses
-  app.post('/api/chat', async (req, res) => {
+  // Dev-only AI sandbox. Unused by the SPA (Inbox uses /api/conversations/:id/messages).
+  // Disabled in production; in development requires auth and uses the merchant's real
+  // store persona/catalog — never client-supplied catalog/persona or raw error details.
+  app.post('/api/chat', (req, res, next) => {
+    if (isProduction) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    next();
+  }, aiLimiter, requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { message, history = [], persona, catalog = [] } = req.body;
+      const { message, history = [] } = req.body;
 
-      if (!message) {
+      if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'Message is required' });
       }
 
-      const result = await generateAgentReply({ message, history, persona, catalog });
+      const [store, products] = await Promise.all([
+        prisma.store.findUnique({ where: { id: req.auth!.storeId } }),
+        prisma.product.findMany({ where: { storeId: req.auth!.storeId } }),
+      ]);
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+
+      const persona = {
+        tone: store.tone,
+        style: store.style,
+        customInstructions: store.customInstructions,
+      };
+      const catalog = products.map((p) => ({
+        name: p.name,
+        sku: p.sku,
+        price: Number(p.price),
+        inventory: p.inventory,
+        status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+      }));
+
+      const safeHistory = Array.isArray(history)
+        ? history
+            .filter((h: any) => h && typeof h.text === 'string' && typeof h.sender === 'string')
+            .slice(-10)
+            .map((h: any) => ({ sender: h.sender, text: h.text }))
+        : [];
+
+      const result = await generateAgentReply({ message, history: safeHistory, persona, catalog });
       return res.json(result);
     } catch (err: any) {
-      console.error('Server error handling chat:', err);
-      res.status(500).json({ error: 'Failed to process conversation: ' + err.message });
+      console.error('Server error handling chat');
+      res.status(500).json({ error: 'Unable to process request' });
     }
   });
 
@@ -2056,7 +2155,9 @@ async function startServer() {
   });
 
   async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
-    console.log('[WEBHOOK] handleIncomingMessengerMessage — pageId:', pageId, '| senderPsid:', senderPsid, '| text:', JSON.stringify(messageText));
+    if (!isProduction) {
+      console.log('[WEBHOOK] handleIncomingMessengerMessage — pageId:', pageId, '| messageId:', externalMessageId);
+    }
     // Meta's webhook delivery is "at-least-once" — it may redeliver the same event.
     // Bail out immediately if we've already recorded this exact message.
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
@@ -2237,7 +2338,9 @@ async function startServer() {
           for (const change of entry.changes || []) {
             if (change.field === 'feed' && change.value) {
               const val = change.value;
-              console.log('[WEBHOOK] Received FB feed change event:', JSON.stringify(val));
+              if (!isProduction) {
+                console.log('[WEBHOOK] Received FB feed change event');
+              }
               const commentId = val.comment_id || val.id || val.post_id;
               const verb = val.verb || 'add';
 
@@ -2247,7 +2350,9 @@ async function startServer() {
                 const fromName = val.from?.name || 'Customer';
 
                 if (messageText && (await isQuestionOrPriceInquiry(messageText))) {
-                  console.log(`[COMMENT BOT] Triggered for FB feed event ${commentId} by ${fromName}: "${messageText}"`);
+                  if (!isProduction) {
+                    console.log(`[COMMENT BOT] Triggered for FB feed event ${commentId}`);
+                  }
 
                   const channel = await prisma.channel.findFirst({ where: { type: 'FACEBOOK', connected: true, externalId: pageId } });
                   if (channel) {
@@ -2257,7 +2362,7 @@ async function startServer() {
                       try {
                         await replyToFacebookComment(commentId, pageAccessToken, 'Check Inbox');
                       } catch (err: any) {
-                        console.error(`Failed to reply to Facebook comment ${commentId}:`, err.message);
+                        console.error(`Failed to reply to Facebook comment ${commentId}`);
                       }
 
                       // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
@@ -2269,12 +2374,12 @@ async function startServer() {
                           await sendFacebookPrivateReply(commentId, pageAccessToken, dmText);
                         }
                       } catch (err: any) {
-                        console.error(`Failed to send Facebook inbox message to ${fromName}:`, err.message);
+                        console.error(`Failed to send Facebook inbox message for comment ${commentId}`);
                       }
                     }
                   }
-                } else {
-                  console.log(`[COMMENT BOT] Ignored message (not a question/price inquiry): "${messageText}"`);
+                } else if (!isProduction) {
+                  console.log(`[COMMENT BOT] Ignored FB feed event ${commentId} (not a question/price inquiry)`);
                 }
               }
             }
@@ -2303,7 +2408,9 @@ async function startServer() {
               let customerName = fromUser.username || fromUser.name || 'Customer';
 
               if (commentId && messageText && (await isQuestionOrPriceInquiry(messageText))) {
-                console.log(`[COMMENT BOT] Triggered for IG comment ${commentId} by ${customerName}: "${messageText}"`);
+                if (!isProduction) {
+                  console.log(`[COMMENT BOT] Triggered for IG comment ${commentId}`);
+                }
 
                 const channel = await prisma.channel.findFirst({ where: { type: 'INSTAGRAM', connected: true, externalId: igAccountId } });
                 if (channel) {
@@ -2318,7 +2425,7 @@ async function startServer() {
                     try {
                       await replyToInstagramComment(commentId, igCreds.accessToken, 'Check Inbox');
                     } catch (err: any) {
-                      console.error(`Failed to reply to IG comment ${commentId}:`, err.message);
+                      console.error(`Failed to reply to IG comment ${commentId}`);
                     }
 
                     // 2. Send private message in inbox: "Hello [customer_name] Please tell us about any inquiry you have"
@@ -2328,7 +2435,7 @@ async function startServer() {
                         await sendInstagramPrivateReply(igCreds.igAccountId, igCreds.accessToken, senderIgUserId, dmText);
                       }
                     } catch (err: any) {
-                      console.error(`Failed to send IG inbox message to ${customerName}:`, err.message);
+                      console.error(`Failed to send IG inbox message for comment ${commentId}`);
                     }
                   }
                 }
@@ -2434,9 +2541,5 @@ async function startServer() {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
-
-// ── DIAGNOSTIC: confirm this version of server.ts is what's running ─────────
-console.log('[SERVER LOADED] server.ts loaded at', new Date().toISOString());
-// ─────────────────────────────────────────────────────────────────────────────
 
 startServer();

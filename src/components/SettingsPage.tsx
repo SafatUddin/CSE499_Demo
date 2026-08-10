@@ -129,8 +129,8 @@ export default function SettingsPage({ userProfile, onUpdateProfile }: SettingsP
         setErrorMessage('Please enter your current password to set a new one.');
         return;
       }
-      if (newPassword.length < 6) {
-        setErrorMessage('New password must be at least 6 characters.');
+      if (newPassword.length < 8) {
+        setErrorMessage('Password does not meet requirements.');
         return;
       }
       if (newPassword !== confirmPassword) {

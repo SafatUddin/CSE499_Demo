@@ -9,9 +9,10 @@ import { ShopMateLogo } from './ShopMateLogo';
 interface LoginPageProps {
   onNavigate: (tab: Tab) => void;
   onLoginSuccess: (auth: AuthResponse) => void;
+  initialError?: string;
 }
 
-export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps) {
+export default function LoginPage({ onNavigate, onLoginSuccess, initialError }: LoginPageProps) {
   const [mode, setMode] = useState<'login' | 'reset_password'>('login');
 
   // Login states
@@ -19,7 +20,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess }: LoginPageProps
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [loginError, setLoginError] = useState('');
+  const [loginError, setLoginError] = useState(initialError || '');
 
   // Reset password states
   const [resetEmail, setResetEmail] = useState('merchant@shopmate.ai');

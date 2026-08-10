@@ -20,6 +20,7 @@ import {
   updateConversationStatus,
   deleteConversation,
   listChannels,
+  exchangeGoogleCode,
   AuthResponse,
   PublicMerchant,
   PublicStore,
@@ -63,7 +64,7 @@ export default function App() {
     // Don't overwrite the URL if the Google OAuth callback hash is still present —
     // the Google callback useEffect (below) needs to read it before it is cleaned.
     const incomingHash = window.location.hash;
-    const hasGoogleParams = incomingHash.includes('googleToken') || incomingHash.includes('googleError');
+    const hasGoogleParams = incomingHash.includes('googleCode') || incomingHash.includes('googleError');
     if (!hasGoogleParams) {
       window.history.replaceState({ tab: activeTab }, '', `#${activeTab}`);
     }
@@ -111,33 +112,32 @@ export default function App() {
       .finally(() => setIsCheckingAuth(false));
   }, []);
 
-  // Detect a successful Google OAuth callback — the backend redirects back to
-  // /#login?googleToken=...&googleMerchant=...&googleStore=... after sign-in.
+  // Detect a successful Google OAuth callback — backend redirects to
+  // /#login?googleCode=<opaque> ; we exchange it for the session JWT (never in the URL).
   useEffect(() => {
     const hash = window.location.hash;
     const queryIndex = hash.indexOf('?');
     if (queryIndex === -1) return;
     const params = new URLSearchParams(hash.slice(queryIndex + 1));
 
-    const googleToken = params.get('googleToken');
+    const googleCode = params.get('googleCode');
     const googleError = params.get('googleError');
-    if (!googleToken && !googleError) return;
+    if (!googleCode && !googleError) return;
 
     // Clean the URL before any state change
     window.history.replaceState(null, '', '#login');
 
     if (googleError) {
       setActiveTab('login');
+      setIsCheckingAuth(false);
       return;
     }
 
-    try {
-      const merchantData = JSON.parse(params.get('googleMerchant')!);
-      const storeData = JSON.parse(params.get('googleStore')!);
-      handleAuthSuccess({ token: googleToken!, merchant: merchantData, store: storeData });
-    } catch {
-      setActiveTab('login');
-    }
+    setIsCheckingAuth(true);
+    exchangeGoogleCode(googleCode!)
+      .then((auth) => handleAuthSuccess(auth))
+      .catch(() => setActiveTab('login'))
+      .finally(() => setIsCheckingAuth(false));
   }, []);
 
   // Listen to custom header actions for seamless routing & logging out

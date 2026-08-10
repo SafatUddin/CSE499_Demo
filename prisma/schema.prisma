@@ -159,3 +159,19 @@ model Order {
   total          Decimal
   createdAt      DateTime    @default(now())
 }
+
+// Short-lived opaque handoff codes for OAuth (connect / pending selection / Google login
+// exchange). Browser only ever sees `code` — never session JWTs or provider access tokens.
+model OAuthHandoff {
+  id         String    @id @default(cuid())
+  code       String    @unique
+  purpose    String
+  storeId    String?
+  merchantId String?
+  payload    Json?
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([expiresAt])
+}

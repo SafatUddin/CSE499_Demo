@@ -30,6 +30,13 @@ import {
 import { encryptSecret, decryptSecret } from './server/crypto';
 import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
 import { verifyShopifyStore, fetchShopifyProducts, getShopifyOAuthUrl, verifyShopifyCallbackHmac, exchangeShopifyCodeForToken } from './server/shopify';
+import {
+  createOAuthHandoff,
+  consumeOAuthHandoff,
+  peekOAuthHandoff,
+  OAuthHandoffError,
+  purgeExpiredOAuthHandoffs,
+} from './server/oauthHandoff';
 
 dotenv.config();
 
@@ -212,7 +219,10 @@ async function startServer() {
 
       if (!state) return errorRedirect('Missing OAuth state');
       try {
-        verifyState<{ purpose: string }>(state);
+        const statePayload = verifyState<{ purpose: string }>(state);
+        if (statePayload.purpose !== 'google_oauth') {
+          return errorRedirect('Invalid or expired OAuth state');
+        }
       } catch {
         return errorRedirect('Invalid or expired OAuth state');
       }
@@ -268,16 +278,56 @@ async function startServer() {
         return errorRedirect('Merchant has no store');
       }
 
-      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
-      const params = new URLSearchParams({
-        googleToken: token,
-        googleMerchant: JSON.stringify(toPublicMerchant(merchant)),
-        googleStore: JSON.stringify({ id: merchant.store.id, name: merchant.store.name }),
+      // One-time opaque exchange code — session JWT never goes in the URL.
+      void purgeExpiredOAuthHandoffs();
+      const exchangeCode = await createOAuthHandoff({
+        purpose: 'google_login',
+        merchantId: merchant.id,
+        storeId: merchant.store.id,
+        payload: { merchantId: merchant.id, storeId: merchant.store.id },
       });
-      res.redirect(`${appUrl}/#login?${params.toString()}`);
+      res.redirect(`${appUrl}/#login?googleCode=${encodeURIComponent(exchangeCode)}`);
     } catch (err: any) {
-      console.error('Google callback error:', err);
+      console.error('Google callback error');
       errorRedirect('Google sign-in failed');
+    }
+  });
+
+  // Exchange a one-time Google login code for the normal session JWT + public profile.
+  app.post('/api/auth/google/exchange', async (req, res) => {
+    try {
+      const { code } = req.body;
+      if (!code || typeof code !== 'string') {
+        return res.status(400).json({ error: 'Authentication failed' });
+      }
+      const handoff = await consumeOAuthHandoff(code, 'google_login');
+      const payload = handoff.payload as { merchantId?: string; storeId?: string } | null;
+      const merchantId = payload?.merchantId || handoff.merchantId;
+      const storeId = payload?.storeId || handoff.storeId;
+      if (!merchantId || !storeId) {
+        return res.status(400).json({ error: 'Authentication failed' });
+      }
+
+      const merchant = await prisma.merchant.findUnique({
+        where: { id: merchantId },
+        include: { store: true },
+      });
+      if (!merchant?.store || merchant.store.id !== storeId) {
+        return res.status(400).json({ error: 'Authentication failed' });
+      }
+
+      const token = signToken({ merchantId: merchant.id, storeId: merchant.store.id });
+      res.json({
+        token,
+        merchant: toPublicMerchant(merchant),
+        store: { id: merchant.store.id, name: merchant.store.name },
+      });
+    } catch (err: any) {
+      if (err instanceof OAuthHandoffError) {
+        return res.status(400).json({ error: 'Authentication failed' });
+      }
+      console.error('Google exchange error');
+      res.status(500).json({ error: 'Authentication failed' });
     }
   });
 
@@ -539,23 +589,43 @@ async function startServer() {
     }
   });
 
-  // Start the Shopify OAuth flow (self-serve "Connect with Shopify"). Unlike Facebook,
-  // Shopify's authorize URL is per-store, so the merchant's shop domain must already be
-  // known before this redirect — the frontend collects it first. Browser navigation
-  // can't carry an Authorization header, so the JWT travels as a query param instead.
-  app.get('/api/channels/shopify/connect', (req, res) => {
+  // Mint a short-lived opaque Shopify connect code (session JWT never goes in the URL).
+  app.post('/api/channels/shopify/prepare', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const token = req.query.token as string;
-      const domain = req.query.domain as string;
-      if (!token) return res.status(401).send('Missing token');
-      if (!domain) return res.status(400).send('Missing store domain');
-      const auth = verifyState<{ merchantId: string; storeId: string }>(token);
+      const domain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : '';
+      if (!domain) {
+        return res.status(400).json({ error: 'Store domain is required' });
+      }
+      void purgeExpiredOAuthHandoffs();
+      const code = await createOAuthHandoff({
+        purpose: 'shopify_connect',
+        storeId: req.auth!.storeId,
+        merchantId: req.auth!.merchantId,
+        payload: { domain },
+      });
+      res.json({ code });
+    } catch (err) {
+      console.error('Shopify prepare error');
+      res.status(500).json({ error: 'Unable to connect integration' });
+    }
+  });
 
-      const state = signState({ storeId: auth.storeId }, '10m');
+  // Start the Shopify OAuth flow using a one-time opaque connect code.
+  app.get('/api/channels/shopify/connect', async (req, res) => {
+    try {
+      const code = req.query.code as string;
+      if (!code) return res.status(401).send('Missing connect code');
+      const handoff = await consumeOAuthHandoff(code, 'shopify_connect');
+      const domain = (handoff.payload as { domain?: string } | null)?.domain;
+      if (!handoff.storeId || !domain) {
+        return res.status(400).send('Invalid connect code');
+      }
+
+      const state = signState({ storeId: handoff.storeId, purpose: 'shopify_oauth' }, '10m');
       const url = getShopifyOAuthUrl(domain, getShopifyRedirectUri(), state);
       res.redirect(url);
     } catch (err) {
-      console.error('Shopify connect error:', err);
+      console.error('Shopify connect error');
       res.status(401).send('Invalid or expired session. Please log in again and retry.');
     }
   });
@@ -574,7 +644,11 @@ async function startServer() {
         return res.redirect(`${frontendBase}/#integrations?shopifyError=invalid_signature`);
       }
 
-      const { storeId } = verifyState<{ storeId: string }>(state);
+      const statePayload = verifyState<{ storeId: string; purpose?: string }>(state);
+      if (statePayload.purpose && statePayload.purpose !== 'shopify_oauth') {
+        return res.redirect(`${frontendBase}/#integrations?shopifyError=denied`);
+      }
+      const { storeId } = statePayload;
       const accessToken = await exchangeShopifyCodeForToken(shop, code);
       const shopInfo = await verifyShopifyStore(shop, accessToken);
 
@@ -591,25 +665,42 @@ async function startServer() {
 
       return res.redirect(`${frontendBase}/#integrations?shopifyConnected=1`);
     } catch (err) {
-      console.error('Shopify OAuth callback error:', err);
+      console.error('Shopify OAuth callback error');
       res.redirect(`${frontendBase}/#integrations?shopifyError=server_error`);
     }
   });
 
-  // Start the Facebook OAuth flow. Browser navigation can't carry an Authorization
-  // header, so the JWT is passed as a query param and verified inline here instead
-  // of via the requireAuth middleware.
-  app.get('/api/channels/facebook/connect', (req, res) => {
+  // Mint a short-lived opaque Facebook connect code (session JWT never goes in the URL).
+  app.post('/api/channels/facebook/prepare', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const token = req.query.token as string;
-      if (!token) return res.status(401).send('Missing token');
-      const auth = verifyState<{ merchantId: string; storeId: string }>(token);
+      void purgeExpiredOAuthHandoffs();
+      const code = await createOAuthHandoff({
+        purpose: 'facebook_connect',
+        storeId: req.auth!.storeId,
+        merchantId: req.auth!.merchantId,
+      });
+      res.json({ code });
+    } catch (err) {
+      console.error('Facebook prepare error');
+      res.status(500).json({ error: 'Unable to connect integration' });
+    }
+  });
 
-      const state = signState({ storeId: auth.storeId }, '10m');
+  // Start the Facebook OAuth flow using a one-time opaque connect code.
+  app.get('/api/channels/facebook/connect', async (req, res) => {
+    try {
+      const code = req.query.code as string;
+      if (!code) return res.status(401).send('Missing connect code');
+      const handoff = await consumeOAuthHandoff(code, 'facebook_connect');
+      if (!handoff.storeId) {
+        return res.status(400).send('Invalid connect code');
+      }
+
+      const state = signState({ storeId: handoff.storeId, purpose: 'facebook_oauth' }, '10m');
       const url = getFacebookOAuthUrl(getFacebookRedirectUri(), state);
       res.redirect(url);
     } catch (err) {
-      console.error('Facebook connect error:', err);
+      console.error('Facebook connect error');
       res.status(401).send('Invalid or expired session. Please log in again and retry.');
     }
   });
@@ -623,7 +714,11 @@ async function startServer() {
         return res.redirect(`${frontendBase}/#integrations?fbError=denied`);
       }
 
-      const { storeId } = verifyState<{ storeId: string }>(state);
+      const statePayload = verifyState<{ storeId: string; purpose?: string }>(state);
+      if (statePayload.purpose && statePayload.purpose !== 'facebook_oauth') {
+        return res.redirect(`${frontendBase}/#integrations?fbError=denied`);
+      }
+      const { storeId } = statePayload;
       const redirectUri = getFacebookRedirectUri();
       const userAccessToken = await exchangeCodeForUserToken(code, redirectUri);
 
@@ -650,14 +745,23 @@ async function startServer() {
         await finalizeWhatsAppConnection(storeId, allWaNumbers[0]);
       }
 
+      // Multi-select: store provider tokens server-side; browser only gets an opaque pending code.
       if (pages.length > 1) {
-        const pendingToken = signState({ storeId, pages }, '10m');
-        return res.redirect(`${frontendBase}/#integrations?fbPending=${encodeURIComponent(pendingToken)}`);
+        const pendingCode = await createOAuthHandoff({
+          purpose: 'facebook_pending',
+          storeId,
+          payload: { pages },
+        });
+        return res.redirect(`${frontendBase}/#integrations?fbPending=${encodeURIComponent(pendingCode)}`);
       }
 
       if (allWaNumbers.length > 1) {
-        const waPendingToken = signState({ storeId, numbers: allWaNumbers }, '10m');
-        return res.redirect(`${frontendBase}/#integrations?waPending=${encodeURIComponent(waPendingToken)}`);
+        const waPendingCode = await createOAuthHandoff({
+          purpose: 'whatsapp_pending',
+          storeId,
+          payload: { numbers: allWaNumbers },
+        });
+        return res.redirect(`${frontendBase}/#integrations?waPending=${encodeURIComponent(waPendingCode)}`);
       }
 
       if (pages.length === 0 && allWaNumbers.length === 0) {
@@ -666,20 +770,27 @@ async function startServer() {
 
       return res.redirect(`${frontendBase}/#integrations?fbConnected=1&waConnected=1`);
     } catch (err) {
-      console.error('Meta OAuth callback error:', err);
+      console.error('Meta OAuth callback error');
       res.redirect(`${frontendBase}/#integrations?fbError=server_error`);
     }
   });
 
-  // Returns candidate WhatsApp phone numbers for multi-number selection
+  // Returns candidate WhatsApp phone numbers for multi-number selection (no tokens).
   app.get('/api/channels/whatsapp/pending', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const pendingToken = req.query.token as string;
-      const decoded = verifyState<{ storeId: string; numbers: any[] }>(pendingToken);
-      if (decoded.storeId !== req.auth!.storeId) {
-        return res.status(403).json({ error: 'Token does not match your account' });
+      const pendingCode = (req.query.code || req.query.token) as string;
+      const handoff = await peekOAuthHandoff(pendingCode, 'whatsapp_pending');
+      if (handoff.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Unable to process request' });
       }
-      res.json({ numbers: decoded.numbers.map((n) => ({ id: n.id, display_phone_number: n.display_phone_number, name: n.name })) });
+      const numbers = ((handoff.payload as { numbers?: any[] } | null)?.numbers) || [];
+      res.json({
+        numbers: numbers.map((n) => ({
+          id: n.id,
+          display_phone_number: n.display_phone_number,
+          name: n.name,
+        })),
+      });
     } catch (err) {
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
@@ -688,33 +799,35 @@ async function startServer() {
   // Finalizes WhatsApp connection after merchant picks a number
   app.post('/api/channels/whatsapp/select', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { pendingToken, phoneNumberId } = req.body;
-      const decoded = verifyState<{ storeId: string; numbers: any[] }>(pendingToken);
-      if (decoded.storeId !== req.auth!.storeId) {
-        return res.status(403).json({ error: 'Token does not match your account' });
+      const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
+      const { phoneNumberId } = req.body;
+      const handoff = await consumeOAuthHandoff(pendingCode, 'whatsapp_pending');
+      if (handoff.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Unable to process request' });
       }
-      const num = decoded.numbers.find((n) => n.id === phoneNumberId);
+      const numbers = ((handoff.payload as { numbers?: any[] } | null)?.numbers) || [];
+      const num = numbers.find((n) => n.id === phoneNumberId);
       if (!num) {
         return res.status(404).json({ error: 'Phone number not found in this selection' });
       }
-      await finalizeWhatsAppConnection(decoded.storeId, num);
+      await finalizeWhatsAppConnection(handoff.storeId!, num);
       res.json({ success: true });
     } catch (err) {
-      console.error('WhatsApp number selection error:', err);
+      console.error('WhatsApp number selection error');
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
   });
 
-  // Returns the candidate Pages for a pending multi-page selection (names only — the
-  // access tokens stay server-side inside the signed pendingToken).
+  // Returns the candidate Pages for a pending multi-page selection (names only).
   app.get('/api/channels/facebook/pending', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const pendingToken = req.query.token as string;
-      const decoded = verifyState<{ storeId: string; pages: ManagedPage[] }>(pendingToken);
-      if (decoded.storeId !== req.auth!.storeId) {
-        return res.status(403).json({ error: 'Token does not match your account' });
+      const pendingCode = (req.query.code || req.query.token) as string;
+      const handoff = await peekOAuthHandoff(pendingCode, 'facebook_pending');
+      if (handoff.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Unable to process request' });
       }
-      res.json({ pages: decoded.pages.map((p) => ({ id: p.id, name: p.name })) });
+      const pages = ((handoff.payload as { pages?: ManagedPage[] } | null)?.pages) || [];
+      res.json({ pages: pages.map((p) => ({ id: p.id, name: p.name })) });
     } catch (err) {
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
@@ -723,19 +836,21 @@ async function startServer() {
   // Finalizes the connection once the merchant picks a Page from the multi-page list.
   app.post('/api/channels/facebook/select', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { pendingToken, pageId } = req.body;
-      const decoded = verifyState<{ storeId: string; pages: ManagedPage[] }>(pendingToken);
-      if (decoded.storeId !== req.auth!.storeId) {
-        return res.status(403).json({ error: 'Token does not match your account' });
+      const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
+      const { pageId } = req.body;
+      const handoff = await consumeOAuthHandoff(pendingCode, 'facebook_pending');
+      if (handoff.storeId !== req.auth!.storeId) {
+        return res.status(403).json({ error: 'Unable to process request' });
       }
-      const page = decoded.pages.find((p) => p.id === pageId);
+      const pages = ((handoff.payload as { pages?: ManagedPage[] } | null)?.pages) || [];
+      const page = pages.find((p) => p.id === pageId);
       if (!page) {
         return res.status(404).json({ error: 'Page not found in this selection' });
       }
-      await finalizeFacebookConnection(decoded.storeId, page);
+      await finalizeFacebookConnection(handoff.storeId!, page);
       res.json({ success: true });
     } catch (err) {
-      console.error('Facebook page selection error:', err);
+      console.error('Facebook page selection error');
       res.status(400).json({ error: 'Invalid or expired selection. Please reconnect.' });
     }
   });

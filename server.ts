@@ -68,6 +68,15 @@ import {
   CHANNEL_ALREADY_CONNECTED_MESSAGE,
 } from './server/channelSecurity';
 import { claimWebhookEvent } from './server/webhookIdempotency';
+import {
+  JSON_BODY_LIMIT,
+  validateProductInput,
+  sanitizeCartInput,
+  validateCartSkusInStore,
+  conversationPatchHasOnlyAllowedKeys,
+  validateAvatarUrl,
+  validatePersonaInput,
+} from './server/inputValidation';
 
 dotenv.config();
 
@@ -76,38 +85,6 @@ interface RequestWithRawBody extends express.Request {
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
-
-const MAX_PRODUCT_PRICE = 1_000_000;
-const MAX_PRODUCT_INVENTORY = 1_000_000;
-const MAX_CART_QUANTITY = 10_000;
-
-function parseValidatedPrice(price: unknown): number | null {
-  const n = typeof price === 'number' ? price : Number(price);
-  if (!Number.isFinite(n) || n < 0 || n > MAX_PRODUCT_PRICE) return null;
-  return n;
-}
-
-function parseValidatedInventory(inventory: unknown): number | null {
-  if (inventory === undefined || inventory === null || inventory === '') return 0;
-  const n = typeof inventory === 'number' ? inventory : Number(inventory);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > MAX_PRODUCT_INVENTORY) return null;
-  return n;
-}
-
-function sanitizeCartInput(cart: unknown): { sku: string; quantity: number }[] | null {
-  if (!Array.isArray(cart)) return null;
-  const sanitized: { sku: string; quantity: number }[] = [];
-  for (const item of cart) {
-    if (!item || typeof item !== 'object') return null;
-    const sku = (item as { sku?: unknown }).sku;
-    const quantity = (item as { quantity?: unknown }).quantity;
-    if (typeof sku !== 'string' || !sku.trim()) return null;
-    const qty = typeof quantity === 'number' ? quantity : Number(quantity);
-    if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1 || qty > MAX_CART_QUANTITY) return null;
-    sanitized.push({ sku: sku.trim(), quantity: qty });
-  }
-  return sanitized;
-}
 
 async function startServer() {
   const app = express();
@@ -142,6 +119,7 @@ async function startServer() {
   });
 
   app.use(express.json({
+    limit: JSON_BODY_LIMIT,
     verify: (req: RequestWithRawBody, _res, buf) => {
       req.rawBody = buf;
     },
@@ -184,7 +162,7 @@ async function startServer() {
         return res.status(400).json({ error: 'All fields are required' });
       }
       if (!isPasswordStrongEnough(password)) {
-        return res.status(400).json({ error: 'Password does not meet requirements' });
+        return res.status(400).json({ error: 'Invalid request.' });
       }
 
       const existing = await prisma.merchant.findUnique({ where: { email } });
@@ -407,8 +385,18 @@ async function startServer() {
       }
 
       const data: { name?: string; email?: string; avatarUrl?: string; passwordHash?: string } = {};
-      if (typeof name === 'string' && name.trim()) data.name = name;
-      if (typeof avatarUrl === 'string') data.avatarUrl = avatarUrl;
+      if (typeof name === 'string' && name.trim()) data.name = name.trim();
+      if (typeof avatarUrl === 'string') {
+        if (avatarUrl === merchant.avatarUrl) {
+          data.avatarUrl = avatarUrl;
+        } else if (avatarUrl === '') {
+          data.avatarUrl = avatarUrl;
+        } else if (!validateAvatarUrl(avatarUrl, { allowHttp: !isProduction })) {
+          return res.status(400).json({ error: 'Invalid avatar URL.' });
+        } else {
+          data.avatarUrl = avatarUrl;
+        }
+      }
       if (typeof email === 'string' && email.trim() && email !== merchant.email) {
         const emailTaken = await prisma.merchant.findUnique({ where: { email } });
         if (emailTaken) {
@@ -429,7 +417,7 @@ async function startServer() {
           return res.status(401).json({ error: 'Current password is incorrect' });
         }
         if (!isPasswordStrongEnough(password)) {
-          return res.status(400).json({ error: 'Password does not meet requirements' });
+          return res.status(400).json({ error: 'Invalid request.' });
         }
         data.passwordHash = await bcrypt.hash(password, 12);
       }
@@ -984,22 +972,13 @@ async function startServer() {
   // Add a product to this merchant's catalog
   app.post('/api/products', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { name, sku, price, inventory, status } = req.body;
-      if (!name || !sku || price === undefined || price === null) {
-        return res.status(400).json({ error: 'Name, SKU, and price are required' });
-      }
-
-      const validatedPrice = parseValidatedPrice(price);
-      if (validatedPrice === null) {
-        return res.status(400).json({ error: 'Price must be a number between 0 and 1000000' });
-      }
-      const validatedInventory = parseValidatedInventory(inventory);
-      if (validatedInventory === null) {
-        return res.status(400).json({ error: 'Inventory must be an integer between 0 and 1000000' });
+      const validated = validateProductInput(req.body);
+      if (!validated) {
+        return res.status(400).json({ error: 'Invalid product data.' });
       }
 
       const existing = await prisma.product.findUnique({
-        where: { storeId_sku: { storeId: req.auth!.storeId, sku } },
+        where: { storeId_sku: { storeId: req.auth!.storeId, sku: validated.sku } },
       });
       if (existing) {
         return res.status(409).json({ error: 'A product with this SKU already exists' });
@@ -1008,11 +987,12 @@ async function startServer() {
       const product = await prisma.product.create({
         data: {
           storeId: req.auth!.storeId,
-          name,
-          sku,
-          price: validatedPrice,
-          inventory: validatedInventory,
-          status: status === 'Pending' ? 'PENDING' : 'TRAINED',
+          name: validated.name,
+          sku: validated.sku,
+          price: validated.price,
+          inventory: validated.inventory,
+          status: validated.status,
+          ...(validated.description !== undefined ? { description: validated.description } : {}),
         },
       });
       res.status(201).json(toPublicProduct(product));
@@ -1500,17 +1480,17 @@ async function startServer() {
   // Update this store's AI persona
   app.put('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { tone, style, customInstructions, autoFinalizeOrdersAlways } = req.body;
-      if (!tone || !style) {
-        return res.status(400).json({ error: 'Tone and style are required' });
+      const validated = validatePersonaInput(req.body);
+      if (!validated) {
+        return res.status(400).json({ error: 'Invalid request.' });
       }
       const store = await prisma.store.update({
         where: { id: req.auth!.storeId },
         data: {
-          tone,
-          style,
-          customInstructions: customInstructions ?? '',
-          autoFinalizeOrdersAlways: !!autoFinalizeOrdersAlways,
+          tone: validated.tone,
+          style: validated.style,
+          customInstructions: validated.customInstructions,
+          autoFinalizeOrdersAlways: validated.autoFinalizeOrdersAlways,
         },
       });
       res.json({
@@ -2208,16 +2188,24 @@ async function startServer() {
   // Update a conversation's status (AI Managed / Active / Closed) or cart
   app.patch('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
     try {
+      if (!conversationPatchHasOnlyAllowedKeys(req.body)) {
+        return res.status(400).json({ error: 'Invalid request.' });
+      }
+
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
       const { status, cart, isComplaint } = req.body;
-      const dataToUpdate: any = {};
+      const dataToUpdate: {
+        status?: 'AI_MANAGED' | 'ACTIVE' | 'CLOSED';
+        cart?: { sku: string; quantity: number }[];
+        isComplaint?: boolean;
+      } = {};
 
       if (status) {
-        const mappedStatus = FRONTEND_TO_STATUS[status];
+        const mappedStatus = FRONTEND_TO_STATUS[status] as 'AI_MANAGED' | 'ACTIVE' | 'CLOSED' | undefined;
         if (!mappedStatus) {
           return res.status(400).json({ error: 'Invalid status' });
         }
@@ -2227,13 +2215,27 @@ async function startServer() {
       if (cart !== undefined) {
         const sanitizedCart = sanitizeCartInput(cart);
         if (sanitizedCart === null) {
-          return res.status(400).json({ error: 'Invalid cart: each item needs a SKU and a quantity from 1 to 10000' });
+          return res.status(400).json({ error: 'Invalid cart data.' });
+        }
+        if (sanitizedCart.length > 0) {
+          const storeProducts = await prisma.product.findMany({
+            where: { storeId: req.auth!.storeId },
+            select: { sku: true },
+          });
+          const storeSkus = new Set(storeProducts.map((p) => p.sku));
+          if (!validateCartSkusInStore(sanitizedCart, storeSkus)) {
+            return res.status(400).json({ error: 'Invalid cart data.' });
+          }
         }
         dataToUpdate.cart = sanitizedCart;
       }
 
       if (isComplaint !== undefined) {
         dataToUpdate.isComplaint = Boolean(isComplaint);
+      }
+
+      if (Object.keys(dataToUpdate).length === 0) {
+        return res.status(400).json({ error: 'Invalid request.' });
       }
 
       const updated = await prisma.conversation.update({

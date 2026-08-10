@@ -19,6 +19,7 @@ export const SESSION_COOKIE_NAME = 'shopmate_session';
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 128;
 
 export interface AuthTokenPayload {
   merchantId: string;
@@ -125,8 +126,12 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   }
 }
 
-export function isPasswordStrongEnough(password: string): boolean {
-  return typeof password === 'string' && password.length >= MIN_PASSWORD_LENGTH;
+export function isPasswordStrongEnough(password: unknown): boolean {
+  return (
+    typeof password === 'string' &&
+    password.length >= MIN_PASSWORD_LENGTH &&
+    password.length <= MAX_PASSWORD_LENGTH
+  );
 }
 
 // Generic short-lived signed tokens for stateless server-side handoffs (OAuth `state`

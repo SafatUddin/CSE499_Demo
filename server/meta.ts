@@ -225,8 +225,7 @@ export async function sendFacebookPrivateReply(commentId: string, pageAccessToke
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    console.warn(`Facebook private reply by comment_id failed (${res.status} ${body}), trying direct message fallback...`);
+    console.warn(`Facebook private reply by comment_id failed (${res.status}), trying direct message fallback...`);
   }
 }
 

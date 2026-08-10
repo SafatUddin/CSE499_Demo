@@ -199,7 +199,7 @@ ${catalogText || 'No products registered in catalog.'}`;
         return JSON.parse(response.text.trim()) as AgentReply;
       }
     } catch (geminiError: any) {
-      console.error('Gemini call failed, falling back to simulated logic:', geminiError.message);
+      console.error('Gemini call failed, falling back to simulated logic');
       // Fall through to the rule-based simulator
     }
   }
@@ -792,7 +792,7 @@ export async function isQuestionOrPriceInquiry(text: string): Promise<boolean> {
         return !!parsed.isQuestionOrPrice;
       }
     } catch (err: any) {
-      console.error('Error classifying comment question/price intent via Gemini:', err.message);
+      console.error('Error classifying comment question/price intent via Gemini');
     }
   }
 

@@ -39,7 +39,11 @@ export function verifyShopifyCallbackHmac(query: Record<string, string>): boolea
     .createHmac('sha256', process.env.SHOPIFY_API_SECRET || '')
     .update(message)
     .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hmac));
+  const expectedBuf = Buffer.from(computed, 'utf8');
+  const actualBuf = Buffer.from(String(hmac), 'utf8');
+  // timingSafeEqual throws if lengths differ — treat that as an invalid signature.
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
 }
 
 // Exchanges the OAuth callback's temporary code for a permanent Admin API access

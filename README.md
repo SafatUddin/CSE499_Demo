@@ -2,7 +2,7 @@
 
 The deployed app is live on Railway: [shopmateai-production.up.railway.app](https://shopmateai-production.up.railway.app)
 
-Demo login: `merchant@shopmate.ai` / `password123`
+Demo login: `merchant@shopmate.ai` / `password1234`
 
 ## Run Locally
 

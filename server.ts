@@ -80,9 +80,9 @@ import {
 
 dotenv.config();
 
-interface RequestWithRawBody extends express.Request {
+type RequestWithRawBody = express.Request & {
   rawBody?: Buffer;
-}
+};
 
 const isProduction = process.env.NODE_ENV === 'production';
 

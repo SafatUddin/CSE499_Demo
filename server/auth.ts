@@ -47,9 +47,9 @@ export function verifyToken(token: string): AuthTokenPayload {
   return decoded;
 }
 
-export interface AuthedRequest extends Request {
+export type AuthedRequest = Request & {
   auth?: AuthTokenPayload;
-}
+};
 
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};

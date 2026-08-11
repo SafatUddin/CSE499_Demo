@@ -2,6 +2,7 @@ export type Tab =
   | 'landing'
   | 'login'
   | 'signup'
+  | 'onboarding'
   | 'inbox'
   | 'catalog'
   | 'orders'

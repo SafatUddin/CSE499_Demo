@@ -79,7 +79,12 @@ import {
   validateStoreBusinessInput,
   validatePhone,
   validateMerchantName,
+  validateOnboardingInput,
 } from './server/inputValidation';
+import {
+  getProfileCompletionStatus,
+  requireProfileComplete,
+} from './server/profileCompletion';
 import {
   avatarUpload,
   saveAvatarFile,
@@ -178,8 +183,9 @@ async function startServer() {
   function sendAuthSuccess(
     res: express.Response,
     merchant: { id: string; name: string; email: string; phone?: string | null; avatarUrl: string | null; tokenVersion: number },
-    store: { id: string; name: string },
+    store: { id: string; name: string; businessPhone?: string | null; website?: string | null; streetAddress?: string | null; city?: string | null; province?: string | null; postalCode?: string | null; country?: string | null },
   ) {
+    const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, store);
     establishMerchantSession(res, {
       merchantId: merchant.id,
       storeId: store.id,
@@ -188,6 +194,8 @@ async function startServer() {
     res.json({
       merchant: toPublicMerchant(merchant),
       store: toPublicStore(store),
+      profileComplete,
+      missingFields,
     });
   }
 
@@ -403,9 +411,12 @@ async function startServer() {
       if (!merchant || !merchant.store) {
         return res.status(404).json({ error: 'Account not found' });
       }
+      const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, merchant.store);
       res.json({
         merchant: toPublicMerchant(merchant),
         store: toPublicStore(merchant.store),
+        profileComplete,
+        missingFields,
       });
     } catch (err: any) {
       console.error('Fetch profile error:', err);
@@ -493,7 +504,15 @@ async function startServer() {
         });
       }
 
-      res.json({ merchant: toPublicMerchant(updated) });
+      const store = await prisma.store.findUnique({
+        where: { merchantId: updated.id },
+        select: { name: true, businessPhone: true, streetAddress: true, city: true, province: true, postalCode: true, country: true },
+      });
+      const { profileComplete, missingFields } = store
+        ? getProfileCompletionStatus(updated, store)
+        : { profileComplete: false, missingFields: ['store'] };
+
+      res.json({ merchant: toPublicMerchant(updated), profileComplete, missingFields });
     } catch (err: any) {
       console.error('Update profile error');
       res.status(500).json({ error: 'Failed to update profile' });
@@ -585,10 +604,65 @@ async function startServer() {
         data,
       });
 
-      res.json({ store: toPublicStore(updated) });
+      const merchant = await prisma.merchant.findUnique({
+        where: { id: merchantId },
+        select: { name: true, email: true, phone: true },
+      });
+      const { profileComplete, missingFields } = merchant
+        ? getProfileCompletionStatus(merchant, updated)
+        : { profileComplete: false, missingFields: ['merchant'] };
+
+      res.json({ store: toPublicStore(updated), profileComplete, missingFields });
     } catch (err: any) {
       console.error('Update store error');
       res.status(500).json({ error: 'Failed to update business information' });
+    }
+  });
+
+  // Complete onboarding: atomic update of both merchant and store required fields.
+  // Accessible even when profile is incomplete (onboarding allowlist).
+  app.post('/api/me/complete-profile', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const merchantId = req.auth!.merchantId;
+
+      const result = validateOnboardingInput(req.body, { allowHttp: !isProduction });
+      if ('fieldErrors' in result) {
+        return res.status(400).json({ error: 'Validation failed.', fieldErrors: result.fieldErrors });
+      }
+
+      const { merchant: mData, store: sData } = result.data;
+
+      const [updatedMerchant, updatedStore] = await prisma.$transaction([
+        prisma.merchant.update({
+          where: { id: merchantId },
+          data: { name: mData.name, phone: mData.phone },
+        }),
+        prisma.store.update({
+          where: { merchantId },
+          data: {
+            name: sData.name,
+            businessPhone: sData.businessPhone,
+            streetAddress: sData.streetAddress,
+            city: sData.city,
+            province: sData.province,
+            postalCode: sData.postalCode,
+            country: sData.country,
+            website: sData.website || null,
+          },
+        }),
+      ]);
+
+      const { profileComplete, missingFields } = getProfileCompletionStatus(updatedMerchant, updatedStore);
+
+      res.json({
+        merchant: toPublicMerchant(updatedMerchant),
+        store: toPublicStore(updatedStore),
+        profileComplete,
+        missingFields,
+      });
+    } catch (err: any) {
+      console.error('Complete profile error');
+      res.status(500).json({ error: 'Failed to save profile.' });
     }
   });
 
@@ -672,7 +746,7 @@ async function startServer() {
   }
 
   // List this store's real channel connections (Facebook & WhatsApp)
-  app.get('/api/channels', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/channels', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const channels = await prisma.channel.findMany({ where: { storeId: req.auth!.storeId } });
       res.json(channels.map((c) => ({
@@ -687,7 +761,7 @@ async function startServer() {
   });
 
   // Disconnect a channel
-  app.delete('/api/channels/:type', requireAuth, async (req: AuthedRequest, res) => {
+  app.delete('/api/channels/:type', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const type = req.params.type.toUpperCase();
       await prisma.channel.updateMany({
@@ -702,7 +776,7 @@ async function startServer() {
   });
 
   // Connect WhatsApp Business Cloud API with Phone Number ID and Access Token
-  app.post('/api/channels/whatsapp/connect', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/whatsapp/connect', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const { phoneNumberId, accessToken, phoneNumber } = req.body;
       if (!phoneNumberId || !accessToken) {
@@ -736,7 +810,7 @@ async function startServer() {
   // Connect a Shopify store via a merchant-supplied custom-app Admin API access
   // token (not a public OAuth app — see ShopifySetup.md). Verifies the credentials
   // actually work against the real store before saving anything.
-  app.post('/api/channels/shopify/connect', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/shopify/connect', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const { domain, accessToken } = req.body;
       if (!domain || !accessToken) {
@@ -772,7 +846,7 @@ async function startServer() {
   // Pulls the latest products from the connected Shopify store and upserts them into
   // this store's catalog, matching on SKU. A manual action (button click), not a
   // background job — simplest thing that works for a beta-scale catalog.
-  app.post('/api/channels/shopify/sync', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/shopify/sync', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const channel = await prisma.channel.findUnique({
         where: { storeId_type: { storeId: req.auth!.storeId, type: 'SHOPIFY' } },
@@ -821,7 +895,7 @@ async function startServer() {
   });
 
   // Mint a short-lived opaque Shopify connect code (session JWT never goes in the URL).
-  app.post('/api/channels/shopify/prepare', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/shopify/prepare', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const domain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : '';
       if (!domain) {
@@ -915,7 +989,7 @@ async function startServer() {
   });
 
   // Mint a short-lived opaque Facebook connect code (session JWT never goes in the URL).
-  app.post('/api/channels/facebook/prepare', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/facebook/prepare', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       void purgeExpiredOAuthHandoffs();
       const code = await createOAuthHandoff({
@@ -1023,7 +1097,7 @@ async function startServer() {
   });
 
   // Returns candidate WhatsApp phone numbers for multi-number selection (no tokens).
-  app.get('/api/channels/whatsapp/pending', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/channels/whatsapp/pending', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const pendingCode = (req.query.code || req.query.token) as string;
       const handoff = await peekOAuthHandoff(pendingCode, 'whatsapp_pending');
@@ -1044,7 +1118,7 @@ async function startServer() {
   });
 
   // Finalizes WhatsApp connection after merchant picks a number
-  app.post('/api/channels/whatsapp/select', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/whatsapp/select', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
       const { phoneNumberId } = req.body;
@@ -1069,7 +1143,7 @@ async function startServer() {
   });
 
   // Returns the candidate Pages for a pending multi-page selection (names only).
-  app.get('/api/channels/facebook/pending', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/channels/facebook/pending', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const pendingCode = (req.query.code || req.query.token) as string;
       const handoff = await peekOAuthHandoff(pendingCode, 'facebook_pending');
@@ -1084,7 +1158,7 @@ async function startServer() {
   });
 
   // Finalizes the connection once the merchant picks a Page from the multi-page list.
-  app.post('/api/channels/facebook/select', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/channels/facebook/select', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
       const { pageId } = req.body;
@@ -1118,7 +1192,7 @@ async function startServer() {
   });
 
   // List this merchant's products
-  app.get('/api/products', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/products', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const products = await prisma.product.findMany({
         where: { storeId: req.auth!.storeId },
@@ -1132,7 +1206,7 @@ async function startServer() {
   });
 
   // Add a product to this merchant's catalog
-  app.post('/api/products', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/products', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const validated = validateProductInput(req.body);
       if (!validated) {
@@ -1165,7 +1239,7 @@ async function startServer() {
   });
 
   // Remove a product from this merchant's catalog
-  app.delete('/api/products/:id', requireAuth, async (req: AuthedRequest, res) => {
+  app.delete('/api/products/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const product = await prisma.product.findUnique({ where: { id: req.params.id } });
       if (!product || product.storeId !== req.auth!.storeId) {
@@ -1197,7 +1271,7 @@ async function startServer() {
   };
 
   // List this store's orders
-  app.get('/api/orders', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/orders', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const orders = await prisma.order.findMany({
         where: { storeId: req.auth!.storeId },
@@ -1211,7 +1285,7 @@ async function startServer() {
   });
 
   // Update an order's status
-  app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
+  app.patch('/api/orders/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const { status } = req.body;
       const statusMap: Record<string, 'PROCESSING' | 'ON_THE_WAY' | 'DELIVERED' | 'CANCELLED'> = {
@@ -1362,7 +1436,7 @@ async function startServer() {
     });
   }
 
-  app.post('/api/conversations/:id/orders', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/conversations/:id/orders', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
@@ -1397,7 +1471,7 @@ async function startServer() {
   //
   // GET /api/analytics?range=30   (default)
   // GET /api/analytics?range=90
-  app.get('/api/analytics', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/analytics', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const storeId = req.auth!.storeId;
 
@@ -1621,7 +1695,7 @@ async function startServer() {
   });
 
   // Get this store's AI persona
-  app.get('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/persona', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const store = await prisma.store.findUnique({ where: { id: req.auth!.storeId } });
       if (!store) {
@@ -1640,7 +1714,7 @@ async function startServer() {
   });
 
   // Update this store's AI persona
-  app.put('/api/persona', requireAuth, async (req: AuthedRequest, res) => {
+  app.put('/api/persona', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const validated = validatePersonaInput(req.body);
       if (!validated) {
@@ -2279,7 +2353,7 @@ async function startServer() {
   // Derived, real-time notifications: unread/complaint conversations + low-stock products.
   // Computed on the fly rather than stored, since these all resolve naturally elsewhere
   // (opening a conversation marks it read; restocking a product clears its low-stock alert).
-  app.get('/api/notifications', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/notifications', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const storeId = req.auth!.storeId;
       const [conversations, lowStockProducts] = await Promise.all([
@@ -2333,7 +2407,7 @@ async function startServer() {
   });
 
   // List this store's conversations across all channels
-  app.get('/api/conversations', requireAuth, async (req: AuthedRequest, res) => {
+  app.get('/api/conversations', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const conversations = await prisma.conversation.findMany({
         where: { storeId: req.auth!.storeId },
@@ -2348,7 +2422,7 @@ async function startServer() {
   });
 
   // Update a conversation's status (AI Managed / Active / Closed) or cart
-  app.patch('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
+  app.patch('/api/conversations/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       if (!conversationPatchHasOnlyAllowedKeys(req.body)) {
         return res.status(400).json({ error: 'Invalid request.' });
@@ -2413,7 +2487,7 @@ async function startServer() {
   });
 
   // Delete a conversation
-  app.delete('/api/conversations/:id', requireAuth, async (req: AuthedRequest, res) => {
+  app.delete('/api/conversations/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
@@ -2436,7 +2510,7 @@ async function startServer() {
   // Facebook Messenger); omitting it (or 'customer') simulates an incoming customer
   // message for demo/testing channels that have no real external customer, and triggers
   // an AI reply if the conversation is AI-managed.
-  app.post('/api/conversations/:id/messages', requireAuth, aiLimiter, async (req: AuthedRequest, res) => {
+  app.post('/api/conversations/:id/messages', requireAuth, requireProfileComplete, aiLimiter, async (req: AuthedRequest, res) => {
     if (!isProduction) {
       console.log('[ROUTE] POST /api/conversations/:id/messages — id:', req.params.id, '| sender:', req.body?.sender);
     }
@@ -2518,7 +2592,7 @@ async function startServer() {
 
   // Approves a pending AI draft (Copilot-off mode): delivers it to the real customer
   // (e.g. via Messenger/WhatsApp) when applicable, and marks it as sent.
-  app.post('/api/conversations/:id/messages/:messageId/approve', requireAuth, async (req: AuthedRequest, res) => {
+  app.post('/api/conversations/:id/messages/:messageId/approve', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
       if (!conversation || conversation.storeId !== req.auth!.storeId) {
@@ -2584,7 +2658,7 @@ async function startServer() {
       return res.status(404).json({ error: 'Not found' });
     }
     next();
-  }, aiLimiter, requireAuth, async (req: AuthedRequest, res) => {
+  }, aiLimiter, requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
       const { message, history = [] } = req.body;
 

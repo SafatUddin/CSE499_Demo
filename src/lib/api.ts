@@ -33,7 +33,17 @@ export interface PublicStore {
   country: string | null;
 }
 
-export interface AuthResponse {
+export interface ProfileStatus {
+  profileComplete: boolean;
+  missingFields: string[];
+}
+
+export interface AuthResponse extends ProfileStatus {
+  merchant: PublicMerchant;
+  store: PublicStore;
+}
+
+export interface OnboardingResponse extends ProfileStatus {
   merchant: PublicMerchant;
   store: PublicStore;
 }
@@ -49,7 +59,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || 'Request failed');
+    // Notify App-level listeners that the merchant's profile is incomplete.
+    // This lets dashboard API calls auto-redirect to onboarding without extra round-trips.
+    if (res.status === 403 && (data as any)?.code === 'PROFILE_INCOMPLETE') {
+      window.dispatchEvent(new CustomEvent('shopmate_profile_incomplete'));
+    }
+    const err = new Error(data.error || 'Request failed') as Error & { fieldErrors?: Record<string, string> };
+    if ((data as any)?.fieldErrors) err.fieldErrors = (data as any).fieldErrors;
+    throw err;
   }
   return data as T;
 }
@@ -77,7 +94,7 @@ export async function logout(): Promise<void> {
 }
 
 export function fetchMe() {
-  return request<{ merchant: PublicMerchant; store: PublicStore }>('/api/me');
+  return request<AuthResponse>('/api/me');
 }
 
 export function updateProfile(input: {
@@ -87,7 +104,7 @@ export function updateProfile(input: {
   currentPassword?: string;
   password?: string;
 }) {
-  return request<{ merchant: PublicMerchant }>('/api/me', { method: 'PATCH', body: JSON.stringify(input) });
+  return request<{ merchant: PublicMerchant } & ProfileStatus>('/api/me', { method: 'PATCH', body: JSON.stringify(input) });
 }
 
 export function updateStoreProfile(input: {
@@ -100,7 +117,32 @@ export function updateStoreProfile(input: {
   postalCode?: string;
   country?: string;
 }) {
-  return request<{ store: PublicStore }>('/api/me/store', { method: 'PATCH', body: JSON.stringify(input) });
+  return request<{ store: PublicStore } & ProfileStatus>('/api/me/store', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function completeProfile(input: {
+  name: string;
+  phone: string;
+  storeName: string;
+  businessPhone: string;
+  website?: string;
+  streetAddress: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+}) {
+  return request<OnboardingResponse>('/api/me/complete-profile', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function exchangeGoogleCode(code: string) {
+  return request<AuthResponse>('/api/auth/google/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
 }
 
 /** Upload a new profile picture. Never uses base64 — sends multipart FormData. */
@@ -296,13 +338,6 @@ export async function getFacebookConnectUrl(): Promise<string> {
 // this is the merchant login/signup entry point, not a channel connection).
 export function getGoogleConnectUrl(): string {
   return '/api/auth/google/connect';
-}
-
-export function exchangeGoogleCode(code: string) {
-  return request<AuthResponse>('/api/auth/google/exchange', {
-    method: 'POST',
-    body: JSON.stringify({ code }),
-  });
 }
 
 export interface FacebookPendingPage {

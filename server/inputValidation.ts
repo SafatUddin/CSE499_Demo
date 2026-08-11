@@ -272,6 +272,144 @@ export function validateStoreBusinessInput(
   return result;
 }
 
+// ── Onboarding-specific validators ───────────────────────────────────────────
+
+/** Phone is required during onboarding (non-empty). */
+export function validateRequiredPhone(value: unknown): string | null {
+  const result = validatePhone(value);
+  if (result === undefined || result === null || result === '') return null;
+  return result;
+}
+
+/** Postal code: required, ≤MAX_POSTAL_CODE_LENGTH, alphanumeric + space/dash only. */
+export function validateRequiredPostalCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > MAX_POSTAL_CODE_LENGTH) return null;
+  if (hasControlChars(trimmed)) return null;
+  if (!/^[A-Za-z0-9 -]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+export type ValidatedOnboardingInput = {
+  merchant: { name: string; phone: string };
+  store: {
+    name: string;
+    businessPhone: string;
+    streetAddress: string;
+    city: string;
+    province: string;
+    postalCode: string;
+    country: string;
+    website: string;
+  };
+};
+
+/**
+ * Validates the full onboarding completion payload in one pass.
+ * Returns field-level errors so the UI can highlight individual fields.
+ * The email field is intentionally absent — email comes from the authenticated session.
+ */
+export function validateOnboardingInput(
+  body: unknown,
+  options?: { allowHttp?: boolean },
+): { data: ValidatedOnboardingInput } | { fieldErrors: Record<string, string> } {
+  const fieldErrors: Record<string, string> = {};
+
+  if (!isPlainObject(body)) {
+    return { fieldErrors: { _form: 'Invalid request body.' } };
+  }
+
+  const allowed = new Set([
+    'name', 'phone',
+    'storeName', 'businessPhone', 'website',
+    'streetAddress', 'city', 'province', 'postalCode', 'country',
+  ]);
+  for (const key of Object.keys(body)) {
+    if (!allowed.has(key)) {
+      return { fieldErrors: { _form: 'Unexpected field in request.' } };
+    }
+  }
+
+  // Merchant fields
+  const name = validateMerchantName(body.name);
+  if (name === null) fieldErrors.name = 'Full name is required and must be ≤200 characters.';
+
+  const phone = validateRequiredPhone(body.phone);
+  if (phone === null) fieldErrors.phone = 'A valid phone number is required.';
+
+  // Store fields
+  const storeName = nonEmptyString(body.storeName, MAX_STORE_NAME_LENGTH);
+  if (storeName === null) fieldErrors.storeName = 'Business name is required and must be ≤200 characters.';
+
+  const businessPhone = validateRequiredPhone(body.businessPhone);
+  if (businessPhone === null) fieldErrors.businessPhone = 'A valid business phone number is required.';
+
+  const streetAddress = nonEmptyString(body.streetAddress, MAX_ADDRESS_FIELD_LENGTH);
+  if (streetAddress === null) fieldErrors.streetAddress = 'Street address is required.';
+
+  const city = nonEmptyString(body.city, MAX_ADDRESS_FIELD_LENGTH);
+  if (city === null) fieldErrors.city = 'City is required.';
+
+  const province = nonEmptyString(body.province, MAX_ADDRESS_FIELD_LENGTH);
+  if (province === null) fieldErrors.province = 'Province/State is required.';
+
+  const postalCode = validateRequiredPostalCode(body.postalCode);
+  if (postalCode === null) fieldErrors.postalCode = 'A valid postal/ZIP code is required (letters, digits, spaces, hyphens).';
+
+  const country = nonEmptyString(body.country, MAX_COUNTRY_LENGTH);
+  if (country === null) fieldErrors.country = 'Country is required.';
+
+  // Website (optional)
+  let website = '';
+  if (body.website !== undefined && body.website !== null && body.website !== '') {
+    const ws = body.website;
+    if (typeof ws !== 'string') {
+      fieldErrors.website = 'Website must be a valid URL.';
+    } else {
+      const trimmed = ws.trim();
+      if (trimmed !== '') {
+        if (trimmed.length > MAX_WEBSITE_LENGTH || DANGEROUS_URL_SCHEMES.test(trimmed)) {
+          fieldErrors.website = 'Website must be a valid URL.';
+        } else {
+          let parsed: URL;
+          try {
+            parsed = new URL(trimmed);
+            if (parsed.protocol !== 'https:' && !(options?.allowHttp && parsed.protocol === 'http:')) {
+              fieldErrors.website = 'Website must start with https://.';
+            } else {
+              website = trimmed;
+            }
+          } catch {
+            fieldErrors.website = 'Website must be a valid URL.';
+          }
+        }
+      }
+    }
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return { fieldErrors };
+  }
+
+  return {
+    data: {
+      merchant: { name: name!, phone: phone! },
+      store: {
+        name: storeName!,
+        businessPhone: businessPhone!,
+        streetAddress: streetAddress!,
+        city: city!,
+        province: province!,
+        postalCode: postalCode!,
+        country: country!,
+        website,
+      },
+    },
+  };
+}
+
 export type ValidatedPersonaInput = {
   tone: string;
   style: string;

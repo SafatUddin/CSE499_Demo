@@ -24,6 +24,7 @@ import {
   listChannels,
   exchangeGoogleCode,
   AuthResponse,
+  OnboardingResponse,
   PublicMerchant,
   PublicStore,
 } from './lib/api';
@@ -32,6 +33,7 @@ import {
 import LandingPage from './components/LandingPage';
 import LoginPage from './components/LoginPage';
 import SignupPage from './components/SignupPage';
+import OnboardingPage from './components/OnboardingPage';
 import Sidebar from './components/Sidebar';
 import InboxConsole from './components/InboxConsole';
 import ProductCatalog from './components/ProductCatalog';
@@ -53,12 +55,22 @@ export default function App() {
 
   // Pushes a browser history entry per tab change so the back button undoes the last
   // in-app navigation instead of leaving the whole app.
+  // Safe navigation: if authenticated but profile is incomplete, only allow onboarding-related tabs.
+  // We reference `profileComplete` via a ref so the function doesn't need to re-bind on every state change.
+  const profileCompleteRef = useRef(false);
+  const isAuthenticatedRef = useRef(false);
+
   const navigateTo = (tab: Tab, replace = false) => {
-    setActiveTab(tab);
+    const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+    const effectiveTab: Tab =
+      isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(tab)
+        ? 'onboarding'
+        : tab;
+    setActiveTab(effectiveTab);
     if (replace) {
-      window.history.replaceState({ tab }, '', `#${tab}`);
+      window.history.replaceState({ tab: effectiveTab }, '', `#${effectiveTab}`);
     } else {
-      window.history.pushState({ tab }, '', `#${tab}`);
+      window.history.pushState({ tab: effectiveTab }, '', `#${effectiveTab}`);
     }
   };
 
@@ -71,7 +83,12 @@ export default function App() {
       window.history.replaceState({ tab: activeTab }, '', `#${activeTab}`);
     }
     const handlePopState = (e: PopStateEvent) => {
-      const tab = (e.state?.tab as Tab) || 'landing';
+      const requested = (e.state?.tab as Tab) || 'landing';
+      const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+      const tab: Tab =
+        isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(requested)
+          ? 'onboarding'
+          : requested;
       setActiveTab(tab);
     };
     window.addEventListener('popstate', handlePopState);
@@ -81,6 +98,7 @@ export default function App() {
   // Real auth state — merchant is null when logged out
   const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
   const [store, setStore] = useState<PublicStore | null>(null);
+  const [profileComplete, setProfileComplete] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [authFlashError, setAuthFlashError] = useState('');
   const isAuthenticated = !!merchant;
@@ -102,10 +120,13 @@ export default function App() {
     clearLegacyTokenStorage();
     fetchMe()
       .then((res) => {
+        isAuthenticatedRef.current = true;
+        profileCompleteRef.current = res.profileComplete;
         setMerchant(res.merchant);
         setStore(res.store);
+        setProfileComplete(res.profileComplete);
         syncProfileToLocalStorage(res.merchant);
-        navigateTo('inbox', true);
+        navigateTo(res.profileComplete ? 'inbox' : 'onboarding', true);
       })
       .catch(() => {
         // Not authenticated — expected on first visit or after logout.
@@ -158,24 +179,47 @@ export default function App() {
     const handleToggleSidebarEvent = () => {
       setIsSidebarOpen(prev => !prev);
     };
+    // When a dashboard API call receives PROFILE_INCOMPLETE 403, redirect to onboarding.
+    const handleProfileIncomplete = () => {
+      profileCompleteRef.current = false;
+      setProfileComplete(false);
+      setActiveTab('onboarding');
+      window.history.replaceState({ tab: 'onboarding' }, '', '#onboarding');
+    };
     window.addEventListener('shopmate_navigate', handleNavigateEvent);
     window.addEventListener('shopmate_logout', handleLogoutEvent);
     window.addEventListener('shopmate_toggle_sidebar', handleToggleSidebarEvent);
+    window.addEventListener('shopmate_profile_incomplete', handleProfileIncomplete);
     return () => {
       window.removeEventListener('shopmate_navigate', handleNavigateEvent);
       window.removeEventListener('shopmate_logout', handleLogoutEvent);
       window.removeEventListener('shopmate_toggle_sidebar', handleToggleSidebarEvent);
+      window.removeEventListener('shopmate_profile_incomplete', handleProfileIncomplete);
     };
   }, []);
 
   const handleAuthSuccess = (auth: AuthResponse) => {
     clearLegacyTokenStorage();
+    isAuthenticatedRef.current = true;
+    profileCompleteRef.current = auth.profileComplete ?? false;
     setMerchant(auth.merchant);
     setStore(auth.store);
+    setProfileComplete(auth.profileComplete ?? false);
     setAuthFlashError('');
     syncProfileToLocalStorage(auth.merchant);
-    navigateTo('inbox');
+    navigateTo(auth.profileComplete ? 'inbox' : 'onboarding');
     setIsSidebarOpen(false);
+  };
+
+  const handleOnboardingComplete = (response: OnboardingResponse) => {
+    profileCompleteRef.current = true;
+    setProfileComplete(true);
+    if (response.merchant) {
+      setMerchant(response.merchant);
+      syncProfileToLocalStorage(response.merchant);
+    }
+    if (response.store) setStore(response.store);
+    navigateTo('inbox');
   };
 
   const handleUpdateProfile = async (updates: {
@@ -185,14 +229,24 @@ export default function App() {
     currentPassword?: string;
     password?: string;
   }) => {
-    const { merchant: updated } = await updateProfile(updates);
-    setMerchant(updated);
-    syncProfileToLocalStorage(updated);
+    const result = await updateProfile(updates);
+    setMerchant(result.merchant);
+    syncProfileToLocalStorage(result.merchant);
+    if (typeof result.profileComplete === 'boolean') {
+      profileCompleteRef.current = result.profileComplete;
+      setProfileComplete(result.profileComplete);
+      if (!result.profileComplete) navigateTo('onboarding');
+    }
   };
 
   const handleUpdateStore = async (updates: Partial<PublicStore>) => {
-    const { store: updated } = await updateStoreProfile(updates);
-    setStore(updated);
+    const result = await updateStoreProfile(updates);
+    setStore(result.store);
+    if (typeof result.profileComplete === 'boolean') {
+      profileCompleteRef.current = result.profileComplete;
+      setProfileComplete(result.profileComplete);
+      if (!result.profileComplete) navigateTo('onboarding');
+    }
   };
 
   const handleUploadAvatar = async (file: File) => {
@@ -224,27 +278,28 @@ export default function App() {
       .catch((err) => console.error('Failed to load channels:', err));
   };
 
-  // Load real catalog + persona + conversations from the backend once we know who's logged in
+  // Load real catalog + persona + conversations from the backend once we know who's logged in.
+  // Skip all dashboard fetches until onboarding is complete — they would all 403 anyway.
   useEffect(() => {
-    if (!merchant) return;
+    if (!merchant || !profileComplete) return;
     listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
     getPersona()
       .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways }))
       .catch((err) => console.error('Failed to load persona:', err));
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
     refreshChannels();
-  }, [merchant]);
+  }, [merchant, profileComplete]);
 
   // Poll for new conversations/messages (e.g. real incoming Facebook messages) and channel
   // connection state so the Inbox reflects them without requiring a manual page refresh.
   useEffect(() => {
-    if (!merchant) return;
+    if (!merchant || !profileComplete) return;
     const interval = setInterval(() => {
       listConversations().then(setConversations).catch((err) => console.error('Failed to refresh conversations:', err));
       refreshChannels();
     }, 5000);
     return () => clearInterval(interval);
-  }, [merchant]);
+  }, [merchant, profileComplete]);
 
   // Conversations belonging to a channel that isn't currently connected shouldn't appear
   // in the Inbox — connection state (Integrations Hub) is the source of truth for whether
@@ -259,8 +314,11 @@ export default function App() {
 
   const handleLogout = async () => {
     await logout();
+    isAuthenticatedRef.current = false;
+    profileCompleteRef.current = false;
     setMerchant(null);
     setStore(null);
+    setProfileComplete(false);
     navigateTo('landing');
     setIsSidebarOpen(false);
   };
@@ -392,7 +450,13 @@ export default function App() {
       }
     }
 
-    // Authenticated views
+    // Authenticated but profile incomplete — mandatory onboarding gate.
+    // Render the onboarding page outside the sidebar layout below.
+    if (!profileComplete) {
+      return null; // rendered separately in the layout below
+    }
+
+    // Authenticated + complete views
     switch (activeTab) {
       case 'inbox':
         return renderInbox();
@@ -442,13 +506,25 @@ export default function App() {
     );
   }
 
+  // Authenticated but profile incomplete: render onboarding without Sidebar chrome
+  if (isAuthenticated && !profileComplete && merchant && store) {
+    return (
+      <OnboardingPage
+        merchant={merchant}
+        store={store}
+        onComplete={handleOnboardingComplete}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="app-bg-gradient min-h-screen text-on-surface w-full relative">
       {/* Ambient bloom effects */}
       <div className="ambient-bloom-tl" />
       <div className="ambient-bloom-br" />
 
-      {/* If authenticated, wrap in persistent Sidebar layout */}
+      {/* If authenticated and profile complete, wrap in persistent Sidebar layout */}
       {isAuthenticated ? (
         <div className="flex w-full min-h-screen">
           {/* Sidebar Left Navigation */}

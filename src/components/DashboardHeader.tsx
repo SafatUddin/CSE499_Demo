@@ -10,6 +10,50 @@ interface DashboardHeaderProps {
   onSearchChange?: (val: string) => void;
 }
 
+interface HeaderProfile {
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+}
+
+function getInitials(name: string): string {
+  if (!name.trim()) return 'M';
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function HeaderAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | null }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const initials = getInitials(name);
+  const showImage = Boolean(avatarUrl) && !imageFailed;
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
+  return (
+    <div className="w-7 h-7 rounded-full border border-blue-400/40 shrink-0 overflow-hidden bg-gradient-to-br from-[#2757d8] to-[#14307c]">
+      {showImage ? (
+        <img
+          src={avatarUrl!}
+          alt=""
+          className="w-full h-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+          {initials}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return '';
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -58,20 +102,40 @@ export default function DashboardHeader({
 
   const unreadCount = visibleNotifications.length;
 
-  const [profile, setProfile] = useState(() => {
+  const [profile, setProfile] = useState<HeaderProfile>(() => {
     const saved = localStorage.getItem('shopmate_user_profile');
-    return saved ? JSON.parse(saved) : {
-      name: "Mara K.",
-      email: "merchant@shopmate.ai",
-      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80"
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as Partial<HeaderProfile>;
+        return {
+          name: parsed.name || 'Merchant',
+          email: parsed.email || '',
+          avatarUrl: typeof parsed.avatarUrl === 'string' ? parsed.avatarUrl : null,
+        };
+      } catch {
+        // fall through to defaults below
+      }
+    }
+    return {
+      name: 'Merchant',
+      email: '',
+      avatarUrl: null,
     };
   });
 
   useEffect(() => {
     const handleUpdate = () => {
       const saved = localStorage.getItem('shopmate_user_profile');
-      if (saved) {
-        setProfile(JSON.parse(saved));
+      if (!saved) return;
+      try {
+        const parsed = JSON.parse(saved) as Partial<HeaderProfile>;
+        setProfile({
+          name: parsed.name || 'Merchant',
+          email: parsed.email || '',
+          avatarUrl: typeof parsed.avatarUrl === 'string' ? parsed.avatarUrl : null,
+        });
+      } catch {
+        // ignore malformed cache
       }
     };
     window.addEventListener('shopmate_profile_updated', handleUpdate);
@@ -216,9 +280,7 @@ export default function DashboardHeader({
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-2 pl-1 pr-3 py-1 btn-glass rounded-[99px] focus:outline-none cursor-pointer group"
           >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#2757d8] to-[#14307c] border border-blue-400/40 text-white text-xs font-bold flex items-center justify-center shrink-0">
-              {profile.name ? profile.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() : 'M'}
-            </div>
+            <HeaderAvatar name={profile.name} avatarUrl={profile.avatarUrl} />
             <span className="font-sans text-xs text-white/90 font-medium hidden sm:inline">{profile.name}</span>
             <ChevronDown className="h-3.5 w-3.5 text-white/50 group-hover:text-white transition-colors" />
           </button>

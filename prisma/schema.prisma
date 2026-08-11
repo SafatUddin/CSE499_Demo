@@ -46,8 +46,9 @@ model Merchant {
   passwordHash String?
   googleId     String?  @unique
   name         String
+  phone        String?
   avatarUrl    String?
-  // Incremented on logout so previously issued session JWTs fail requireAuth.
+  // Incremented on logout (and password change) so previously issued session JWTs fail requireAuth.
   tokenVersion Int      @default(0)
   store        Store?
   createdAt    DateTime @default(now())
@@ -67,6 +68,14 @@ model Store {
   // already works for replies — a merchant must explicitly opt in to full automation.
   autoFinalizeOrdersAlways Boolean @default(false)
   widgetKey     String         @unique @default(cuid())
+  // Business contact & address fields (all optional; set via merchant settings)
+  businessPhone String?
+  website       String?
+  streetAddress String?
+  city          String?
+  province      String?
+  postalCode    String?
+  country       String?
   products      Product[]
   channels      Channel[]
   conversations Conversation[]

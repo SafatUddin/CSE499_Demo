@@ -1,5 +1,5 @@
 /**
- * Server-side input validation helpers (Security Phase 7).
+ * Server-side input validation helpers (Security Phase 7 + Settings).
  * Small, reusable checks — no external validation framework.
  */
 
@@ -17,6 +17,15 @@ export const MAX_AVATAR_URL_LENGTH = 2048;
 export const MAX_PERSONA_TONE_LENGTH = 500;
 export const MAX_PERSONA_STYLE_LENGTH = 50;
 export const MAX_PERSONA_INSTRUCTIONS_LENGTH = 10_000;
+
+// Profile / merchant settings limits
+export const MAX_MERCHANT_NAME_LENGTH = 200;
+export const MAX_PHONE_LENGTH = 30;
+export const MAX_STORE_NAME_LENGTH = 200;
+export const MAX_WEBSITE_LENGTH = 2048;
+export const MAX_ADDRESS_FIELD_LENGTH = 200;
+export const MAX_POSTAL_CODE_LENGTH = 20;
+export const MAX_COUNTRY_LENGTH = 100;
 
 const CART_ITEM_KEYS = new Set(['sku', 'quantity']);
 
@@ -132,10 +141,16 @@ export function conversationPatchHasOnlyAllowedKeys(body: unknown): boolean {
   return Object.keys(body).every((k) => ALLOWED_CONVERSATION_PATCH_KEYS.has(k));
 }
 
+/** Regex for local avatar paths: /uploads/avatars/{merchantId}/{filename} — no traversal. */
+const LOCAL_AVATAR_PATH_RE = /^\/uploads\/avatars\/[a-z0-9_-]+\/[a-z0-9_-]+\.[a-z]+$/i;
+
 export function validateAvatarUrl(url: string, options?: { allowHttp?: boolean }): boolean {
   if (typeof url !== 'string' || url.length === 0) return true;
   if (url.length > MAX_AVATAR_URL_LENGTH) return false;
   if (DANGEROUS_URL_SCHEMES.test(url.trim())) return false;
+
+  // Accept same-origin local upload paths (set by the server itself via POST /api/me/avatar)
+  if (LOCAL_AVATAR_PATH_RE.test(url)) return true;
 
   let parsed: URL;
   try {
@@ -147,6 +162,114 @@ export function validateAvatarUrl(url: string, options?: { allowHttp?: boolean }
   if (parsed.protocol === 'https:') return true;
   if (options?.allowHttp && parsed.protocol === 'http:') return true;
   return false;
+}
+
+// ── Control-char regex (used in profile text fields) ────────────────────────
+const CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+
+function hasControlChars(s: string): boolean {
+  return CONTROL_CHARS_RE.test(s);
+}
+
+/** Validate an optional phone/fax string (E.164-ish or local). */
+export function validatePhone(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return '';
+  if (trimmed.length > MAX_PHONE_LENGTH) return null;
+  if (hasControlChars(trimmed)) return null;
+  // Allow digits, spaces, +, -, (, ), .
+  if (!/^[0-9+\-()./ ]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/** Validate a merchant name (required, non-empty). */
+export function validateMerchantName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_MERCHANT_NAME_LENGTH) return null;
+  if (hasControlChars(trimmed)) return null;
+  return trimmed;
+}
+
+export type ValidatedStoreBusinessInput = {
+  name?: string;
+  businessPhone?: string;
+  website?: string;
+  streetAddress?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+};
+
+/** Validate the business-information PATCH body. Returns null on any invalid field. */
+export function validateStoreBusinessInput(
+  body: unknown,
+  options?: { allowHttp?: boolean },
+): ValidatedStoreBusinessInput | null {
+  if (!isPlainObject(body)) return null;
+
+  const allowed = new Set(['name', 'businessPhone', 'website', 'streetAddress', 'city', 'province', 'postalCode', 'country']);
+  for (const key of Object.keys(body)) {
+    if (!allowed.has(key)) return null; // reject mass-assignment
+  }
+
+  const result: ValidatedStoreBusinessInput = {};
+
+  if (body.name !== undefined) {
+    const name = nonEmptyString(body.name, MAX_STORE_NAME_LENGTH);
+    if (name === null) return null;
+    result.name = name;
+  }
+
+  if (body.businessPhone !== undefined) {
+    const phone = validatePhone(body.businessPhone);
+    if (phone === null) return null;
+    if (phone !== undefined) result.businessPhone = phone;
+  }
+
+  if (body.website !== undefined) {
+    const ws = body.website;
+    if (typeof ws !== 'string') return null;
+    const trimmed = ws.trim();
+    if (trimmed === '') {
+      result.website = '';
+    } else {
+      if (trimmed.length > MAX_WEBSITE_LENGTH) return null;
+      if (DANGEROUS_URL_SCHEMES.test(trimmed)) return null;
+      let parsed: URL;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        return null;
+      }
+      if (parsed.protocol !== 'https:' && !(options?.allowHttp && parsed.protocol === 'http:')) return null;
+      result.website = trimmed;
+    }
+  }
+
+  const simpleFields: Array<[string, number]> = [
+    ['streetAddress', MAX_ADDRESS_FIELD_LENGTH],
+    ['city', MAX_ADDRESS_FIELD_LENGTH],
+    ['province', MAX_ADDRESS_FIELD_LENGTH],
+    ['postalCode', MAX_POSTAL_CODE_LENGTH],
+    ['country', MAX_COUNTRY_LENGTH],
+  ];
+
+  for (const [field, maxLen] of simpleFields) {
+    const raw = body[field];
+    if (raw !== undefined) {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (trimmed.length > maxLen) return null;
+      if (hasControlChars(trimmed)) return null;
+      (result as Record<string, string>)[field] = trimmed;
+    }
+  }
+
+  return result;
 }
 
 export type ValidatedPersonaInput = {

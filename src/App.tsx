@@ -10,6 +10,9 @@ import {
   logout,
   fetchMe,
   updateProfile,
+  updateStoreProfile,
+  uploadAvatar,
+  deleteAvatar,
   listProducts,
   createProduct,
   deleteProduct,
@@ -88,7 +91,7 @@ export default function App() {
     const profile = {
       name: m.name,
       email: m.email,
-      avatarUrl: m.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80',
+      avatarUrl: m.avatarUrl,
     };
     localStorage.setItem('shopmate_user_profile', JSON.stringify(profile));
     window.dispatchEvent(new Event('shopmate_profile_updated'));
@@ -175,8 +178,31 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleUpdateProfile = async (updates: Partial<PublicMerchant> & { currentPassword?: string; password?: string }) => {
+  const handleUpdateProfile = async (updates: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    currentPassword?: string;
+    password?: string;
+  }) => {
     const { merchant: updated } = await updateProfile(updates);
+    setMerchant(updated);
+    syncProfileToLocalStorage(updated);
+  };
+
+  const handleUpdateStore = async (updates: Partial<PublicStore>) => {
+    const { store: updated } = await updateStoreProfile(updates);
+    setStore(updated);
+  };
+
+  const handleUploadAvatar = async (file: File) => {
+    const { merchant: updated } = await uploadAvatar(file);
+    setMerchant(updated);
+    syncProfileToLocalStorage(updated);
+  };
+
+  const handleDeleteAvatar = async () => {
+    const { merchant: updated } = await deleteAvatar();
     setMerchant(updated);
     syncProfileToLocalStorage(updated);
   };
@@ -395,12 +421,12 @@ export default function App() {
       case 'settings':
         return (
           <SettingsPage
-            userProfile={{
-              name: merchant?.name || '',
-              email: merchant?.email || '',
-              avatarUrl: merchant?.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80',
-            }}
+            merchant={merchant}
+            store={store}
             onUpdateProfile={handleUpdateProfile}
+            onUpdateStore={handleUpdateStore}
+            onUploadAvatar={handleUploadAvatar}
+            onDeleteAvatar={handleDeleteAvatar}
           />
         );
       default:

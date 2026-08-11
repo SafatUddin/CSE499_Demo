@@ -17,12 +17,20 @@ export interface PublicMerchant {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   avatarUrl: string | null;
 }
 
 export interface PublicStore {
   id: string;
   name: string;
+  businessPhone: string | null;
+  website: string | null;
+  streetAddress: string | null;
+  city: string | null;
+  province: string | null;
+  postalCode: string | null;
+  country: string | null;
 }
 
 export interface AuthResponse {
@@ -74,12 +82,52 @@ export function fetchMe() {
 
 export function updateProfile(input: {
   name?: string;
+  phone?: string;
   email?: string;
-  avatarUrl?: string;
   currentPassword?: string;
   password?: string;
 }) {
   return request<{ merchant: PublicMerchant }>('/api/me', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export function updateStoreProfile(input: {
+  name?: string;
+  businessPhone?: string;
+  website?: string;
+  streetAddress?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+}) {
+  return request<{ store: PublicStore }>('/api/me/store', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** Upload a new profile picture. Never uses base64 — sends multipart FormData. */
+export async function uploadAvatar(file: File): Promise<{ merchant: PublicMerchant }> {
+  const formData = new FormData();
+  formData.append('avatar', file);
+  const res = await fetch('/api/me/avatar', {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+    // Do NOT set Content-Type; browser sets it automatically with correct boundary
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to upload avatar');
+  return data as { merchant: PublicMerchant };
+}
+
+/** Remove the current profile picture. */
+export async function deleteAvatar(): Promise<{ merchant: PublicMerchant }> {
+  const res = await fetch('/api/me/avatar', {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to remove avatar');
+  return data as { merchant: PublicMerchant };
 }
 
 export interface ApiProduct {

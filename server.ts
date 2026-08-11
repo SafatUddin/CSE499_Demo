@@ -76,7 +76,16 @@ import {
   conversationPatchHasOnlyAllowedKeys,
   validateAvatarUrl,
   validatePersonaInput,
+  validateStoreBusinessInput,
+  validatePhone,
+  validateMerchantName,
 } from './server/inputValidation';
+import {
+  avatarUpload,
+  saveAvatarFile,
+  deleteLocalAvatarFile,
+  MAX_AVATAR_BYTES,
+} from './server/avatarStorage';
 
 dotenv.config();
 
@@ -130,16 +139,45 @@ async function startServer() {
 
   const PORT = Number(process.env.PORT) || 3000;
 
-  const toPublicMerchant = (merchant: { id: string; name: string; email: string; avatarUrl: string | null }) => ({
+  const toPublicMerchant = (merchant: {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string | null;
+    avatarUrl: string | null;
+  }) => ({
     id: merchant.id,
     name: merchant.name,
     email: merchant.email,
+    phone: merchant.phone ?? null,
     avatarUrl: merchant.avatarUrl,
+  });
+
+  const toPublicStore = (store: {
+    id: string;
+    name: string;
+    businessPhone?: string | null;
+    website?: string | null;
+    streetAddress?: string | null;
+    city?: string | null;
+    province?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+  }) => ({
+    id: store.id,
+    name: store.name,
+    businessPhone: store.businessPhone ?? null,
+    website: store.website ?? null,
+    streetAddress: store.streetAddress ?? null,
+    city: store.city ?? null,
+    province: store.province ?? null,
+    postalCode: store.postalCode ?? null,
+    country: store.country ?? null,
   });
 
   function sendAuthSuccess(
     res: express.Response,
-    merchant: { id: string; name: string; email: string; avatarUrl: string | null; tokenVersion: number },
+    merchant: { id: string; name: string; email: string; phone?: string | null; avatarUrl: string | null; tokenVersion: number },
     store: { id: string; name: string },
   ) {
     establishMerchantSession(res, {
@@ -149,7 +187,7 @@ async function startServer() {
     });
     res.json({
       merchant: toPublicMerchant(merchant),
-      store: { id: store.id, name: store.name },
+      store: toPublicStore(store),
     });
   }
 
@@ -367,7 +405,7 @@ async function startServer() {
       }
       res.json({
         merchant: toPublicMerchant(merchant),
-        store: { id: merchant.store.id, name: merchant.store.name },
+        store: toPublicStore(merchant.store),
       });
     } catch (err: any) {
       console.error('Fetch profile error:', err);
@@ -375,34 +413,54 @@ async function startServer() {
     }
   });
 
-  // Update profile: name, avatar, and/or password (requires current password to change it)
+  // Update personal profile: name, phone, email, and/or password (requires current password to change it)
   app.patch('/api/me', requireAuth, async (req: AuthedRequest, res) => {
     try {
-      const { name, email, avatarUrl, currentPassword, password } = req.body;
+      const { name, phone, email, avatarUrl, currentPassword, password } = req.body;
       const merchant = await prisma.merchant.findUnique({ where: { id: req.auth!.merchantId } });
       if (!merchant) {
         return res.status(404).json({ error: 'Account not found' });
       }
 
-      const data: { name?: string; email?: string; avatarUrl?: string; passwordHash?: string } = {};
-      if (typeof name === 'string' && name.trim()) data.name = name.trim();
+      const data: {
+        name?: string;
+        phone?: string | null;
+        email?: string;
+        avatarUrl?: string | null;
+        passwordHash?: string;
+        tokenVersion?: { increment: number };
+      } = {};
+
+      if (name !== undefined) {
+        const validName = validateMerchantName(name);
+        if (validName === null) return res.status(400).json({ error: 'Invalid name.' });
+        data.name = validName;
+      }
+
+      if (phone !== undefined) {
+        const validPhone = validatePhone(phone);
+        if (validPhone === null) return res.status(400).json({ error: 'Invalid phone number.' });
+        data.phone = validPhone === '' ? null : validPhone;
+      }
+
       if (typeof avatarUrl === 'string') {
         if (avatarUrl === merchant.avatarUrl) {
-          data.avatarUrl = avatarUrl;
+          // no-op
         } else if (avatarUrl === '') {
-          data.avatarUrl = avatarUrl;
+          data.avatarUrl = null;
         } else if (!validateAvatarUrl(avatarUrl, { allowHttp: !isProduction })) {
           return res.status(400).json({ error: 'Invalid avatar URL.' });
         } else {
           data.avatarUrl = avatarUrl;
         }
       }
-      if (typeof email === 'string' && email.trim() && email !== merchant.email) {
-        const emailTaken = await prisma.merchant.findUnique({ where: { email } });
+
+      if (typeof email === 'string' && email.trim() && email.trim() !== merchant.email) {
+        const emailTaken = await prisma.merchant.findUnique({ where: { email: email.trim() } });
         if (emailTaken) {
           return res.status(409).json({ error: 'An account with this email already exists' });
         }
-        data.email = email;
+        data.email = email.trim();
       }
 
       if (password) {
@@ -420,13 +478,117 @@ async function startServer() {
           return res.status(400).json({ error: 'Invalid request.' });
         }
         data.passwordHash = await bcrypt.hash(password, 12);
+        // Bump tokenVersion so all other sessions are invalidated after password change
+        data.tokenVersion = { increment: 1 };
       }
 
       const updated = await prisma.merchant.update({ where: { id: merchant.id }, data });
+
+      // Re-issue session cookie with the new tokenVersion so the current browser stays logged in
+      if (data.tokenVersion) {
+        establishMerchantSession(res, {
+          merchantId: updated.id,
+          storeId: req.auth!.storeId,
+          tv: updated.tokenVersion,
+        });
+      }
+
       res.json({ merchant: toPublicMerchant(updated) });
     } catch (err: any) {
       console.error('Update profile error');
       res.status(500).json({ error: 'Failed to update profile' });
+    }
+  });
+
+  // Upload a new avatar image (multipart/form-data, field: "avatar")
+  app.post('/api/me/avatar', requireAuth, avatarUpload.single('avatar'), async (req: AuthedRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image file provided.' });
+      }
+      if (req.file.size > MAX_AVATAR_BYTES) {
+        return res.status(400).json({ error: 'Image must be 2 MB or smaller.' });
+      }
+
+      const merchantId = req.auth!.merchantId;
+      const merchant = await prisma.merchant.findUnique({ where: { id: merchantId } });
+      if (!merchant) return res.status(404).json({ error: 'Account not found' });
+
+      const previousAvatarUrl = merchant.avatarUrl;
+
+      let publicUrl: string;
+      try {
+        publicUrl = saveAvatarFile(merchantId, req.file.buffer);
+      } catch {
+        return res.status(400).json({ error: 'Unsupported image format. Use JPEG, PNG, WebP, or GIF.' });
+      }
+
+      const updated = await prisma.merchant.update({
+        where: { id: merchantId },
+        data: { avatarUrl: publicUrl },
+      });
+
+      // Delete the old local file after successful DB update
+      deleteLocalAvatarFile(merchantId, previousAvatarUrl);
+
+      res.json({ merchant: toPublicMerchant(updated) });
+    } catch (err: any) {
+      console.error('Avatar upload error');
+      res.status(500).json({ error: 'Failed to upload avatar' });
+    }
+  });
+
+  // Remove the avatar (clears DB field and deletes any local file)
+  app.delete('/api/me/avatar', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const merchantId = req.auth!.merchantId;
+      const merchant = await prisma.merchant.findUnique({ where: { id: merchantId } });
+      if (!merchant) return res.status(404).json({ error: 'Account not found' });
+
+      const previousAvatarUrl = merchant.avatarUrl;
+      const updated = await prisma.merchant.update({
+        where: { id: merchantId },
+        data: { avatarUrl: null },
+      });
+
+      deleteLocalAvatarFile(merchantId, previousAvatarUrl);
+
+      res.json({ merchant: toPublicMerchant(updated) });
+    } catch (err: any) {
+      console.error('Avatar delete error');
+      res.status(500).json({ error: 'Failed to remove avatar' });
+    }
+  });
+
+  // Update business / store information
+  app.patch('/api/me/store', requireAuth, async (req: AuthedRequest, res) => {
+    try {
+      const merchantId = req.auth!.merchantId;
+      const store = await prisma.store.findUnique({ where: { merchantId } });
+      if (!store) return res.status(404).json({ error: 'Store not found' });
+
+      const validated = validateStoreBusinessInput(req.body, { allowHttp: !isProduction });
+      if (validated === null) {
+        return res.status(400).json({ error: 'Invalid store information.' });
+      }
+
+      // Normalize empty strings to null for optional fields
+      const data: Record<string, string | null> = {};
+      for (const [key, val] of Object.entries(validated)) {
+        if (val !== undefined) {
+          data[key] = val === '' ? null : val;
+        }
+      }
+
+      const updated = await prisma.store.update({
+        where: { merchantId },
+        data,
+      });
+
+      res.json({ store: toPublicStore(updated) });
+    } catch (err: any) {
+      console.error('Update store error');
+      res.status(500).json({ error: 'Failed to update business information' });
     }
   });
 
@@ -2868,6 +3030,9 @@ async function startServer() {
 </body>
 </html>`);
   });
+
+  // Serve uploaded avatars (public read-only, before SPA fallback)
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {

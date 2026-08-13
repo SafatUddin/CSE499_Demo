@@ -543,7 +543,7 @@ async function startServer() {
 
       let publicUrl: string;
       try {
-        publicUrl = saveAvatarFile(merchantId, req.file.buffer);
+        publicUrl = await saveAvatarFile(merchantId, req.file.buffer);
       } catch {
         return res.status(400).json({ error: 'Unsupported image format. Use JPEG, PNG, WebP, or GIF.' });
       }
@@ -553,8 +553,8 @@ async function startServer() {
         data: { avatarUrl: publicUrl },
       });
 
-      // Delete the old local file after successful DB update
-      deleteLocalAvatarFile(merchantId, previousAvatarUrl);
+      // Delete the old stored file after successful DB update
+      await deleteLocalAvatarFile(merchantId, previousAvatarUrl);
 
       res.json({ merchant: toPublicMerchant(updated) });
     } catch (err: any) {
@@ -576,7 +576,7 @@ async function startServer() {
         data: { avatarUrl: null },
       });
 
-      deleteLocalAvatarFile(merchantId, previousAvatarUrl);
+      await deleteLocalAvatarFile(merchantId, previousAvatarUrl);
 
       res.json({ merchant: toPublicMerchant(updated) });
     } catch (err: any) {
@@ -3116,9 +3116,6 @@ async function startServer() {
 </body>
 </html>`);
   });
-
-  // Serve uploaded avatars (public read-only, before SPA fallback)
-  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {

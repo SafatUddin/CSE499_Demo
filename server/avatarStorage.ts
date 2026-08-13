@@ -1,34 +1,51 @@
 /**
- * Local-disk avatar storage for merchant profile pictures.
+ * Avatar storage for merchant profile pictures, backed by Supabase Storage (object
+ * storage) rather than local disk — local disk on Railway gets wiped on every
+ * redeploy, silently breaking every merchant's avatar URL.
  *
- * Stores files at:  uploads/avatars/{merchantId}/{uuid}.{ext}
- * Public URL:       /uploads/avatars/{merchantId}/{uuid}.{ext}
+ * Stores files at:  avatars/{merchantId}/{uuid}.{ext}  (bucket: "avatars", public)
+ * Public URL:        {SUPABASE_URL}/storage/v1/object/public/avatars/{merchantId}/{uuid}.{ext}
  *
  * Security notes:
  * - Filenames are random UUIDs; never derived from user input.
- * - Directories are scoped per-merchant; path traversal is blocked at read time.
+ * - Objects are scoped per-merchant by path prefix.
  * - Only JPEG, PNG, WebP, and GIF are accepted; verified by magic bytes, not just MIME header.
- * - Files above MAX_AVATAR_BYTES are rejected before writing.
- * - On avatar replace / remove, the old local file is deleted (external HTTPS URLs are never touched).
+ * - Files above MAX_AVATAR_BYTES are rejected before uploading.
+ * - On avatar replace / remove, the old Supabase object is deleted (external HTTPS URLs, e.g.
+ *   from Google sign-in, are never touched).
  */
 
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import multer from 'multer';
+import { createClient } from '@supabase/supabase-js';
 
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
 
-const UPLOADS_ROOT = path.join(process.cwd(), 'uploads', 'avatars');
+const BUCKET = 'avatars';
 
-/** URL path prefix where avatar files are served. */
-export const AVATAR_URL_PREFIX = '/uploads/avatars/';
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY environment variables are required');
+  }
+  return createClient(url, key);
+}
 
-/** Regex that a stored local avatar URL must match (no .. allowed). */
-const LOCAL_AVATAR_PATH_RE = /^\/uploads\/avatars\/[a-z0-9_-]+\/[a-z0-9_-]+\.[a-z]+$/i;
+/** Public URL prefix for objects in the avatars bucket. */
+function publicUrlPrefix(): string {
+  return `${process.env.SUPABASE_URL}/storage/v1/object/public/${BUCKET}/`;
+}
+
+/** Regex a stored avatar URL must match (no path traversal, scoped to our own bucket). */
+function avatarPathRegex(): RegExp {
+  const prefix = publicUrlPrefix().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${prefix}[a-z0-9_-]+/[a-z0-9_-]+\\.[a-z]+$`, 'i');
+}
 
 export function isLocalAvatarUrl(url: string): boolean {
-  return LOCAL_AVATAR_PATH_RE.test(url);
+  if (!process.env.SUPABASE_URL) return false;
+  return avatarPathRegex().test(url);
 }
 
 /** Map MIME type → file extension (server-decided; never trusts client Content-Type). */
@@ -56,45 +73,41 @@ export function detectImageType(buf: Buffer): { mime: string; ext: string } | nu
   return null;
 }
 
-/** Ensure the merchant's upload directory exists. */
-function ensureMerchantDir(merchantId: string): string {
-  // Reject any merchantId that looks like a traversal attempt (only allow cuid chars)
+function assertValidMerchantId(merchantId: string) {
   if (!/^[a-z0-9_-]+$/i.test(merchantId)) {
     throw new Error('Invalid merchantId');
   }
-  const dir = path.join(UPLOADS_ROOT, merchantId);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
 }
 
-/** Save avatar buffer to disk. Returns the public URL path. */
-export function saveAvatarFile(merchantId: string, buffer: Buffer): string {
+/** Upload an avatar buffer to Supabase Storage. Returns the public URL. */
+export async function saveAvatarFile(merchantId: string, buffer: Buffer): Promise<string> {
   const imgType = detectImageType(buffer);
   if (!imgType) throw new Error('Unsupported image format');
+  assertValidMerchantId(merchantId);
 
-  const dir = ensureMerchantDir(merchantId);
   const filename = `${crypto.randomUUID()}.${imgType.ext}`;
-  const filepath = path.join(dir, filename);
-  fs.writeFileSync(filepath, buffer);
-  return `${AVATAR_URL_PREFIX}${merchantId}/${filename}`;
+  const objectPath = `${merchantId}/${filename}`;
+
+  const { error } = await getSupabase().storage.from(BUCKET).upload(objectPath, buffer, {
+    contentType: imgType.mime,
+    upsert: false,
+  });
+  if (error) throw new Error(`Avatar upload failed: ${error.message}`);
+
+  return `${publicUrlPrefix()}${objectPath}`;
 }
 
 /**
- * Delete a local avatar file if it belongs to this merchant's upload directory.
- * Silently ignores missing files or external HTTPS URLs.
+ * Delete an avatar object if it belongs to this merchant's own storage path.
+ * Silently ignores missing files or external HTTPS URLs (e.g. Google-provided avatars).
  */
-export function deleteLocalAvatarFile(merchantId: string, avatarUrl: string | null | undefined): void {
+export async function deleteLocalAvatarFile(merchantId: string, avatarUrl: string | null | undefined): Promise<void> {
   if (!avatarUrl || !isLocalAvatarUrl(avatarUrl)) return;
   try {
-    // Resolve the absolute path and verify it sits inside the merchant's own folder
-    const expectedDir = path.resolve(UPLOADS_ROOT, merchantId);
-    const filename = path.basename(avatarUrl);
-    const fullPath = path.join(expectedDir, filename);
-    // Guard against traversal: resolved path must start with the expected dir
-    if (!fullPath.startsWith(expectedDir + path.sep) && fullPath !== expectedDir) return;
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-    }
+    const objectPath = avatarUrl.slice(publicUrlPrefix().length);
+    // Guard: the object path must actually be scoped under this merchant's own folder.
+    if (!objectPath.startsWith(`${merchantId}/`)) return;
+    await getSupabase().storage.from(BUCKET).remove([objectPath]);
   } catch {
     // Best-effort deletion; never throw
   }
@@ -102,7 +115,7 @@ export function deleteLocalAvatarFile(merchantId: string, avatarUrl: string | nu
 
 /**
  * Multer instance for avatar uploads.
- * memoryStorage so we can inspect magic bytes before writing.
+ * memoryStorage so we can inspect magic bytes before uploading to Supabase.
  * The route handler is responsible for size enforcement (fileSize option as belt-and-suspenders).
  */
 export const avatarUpload = multer({

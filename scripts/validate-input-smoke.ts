@@ -6,11 +6,10 @@ import {
   validateProductInput,
   sanitizeCartInput,
   validateCartSkusInStore,
-  validateAvatarUrl,
   conversationPatchHasOnlyAllowedKeys,
-  MAX_PASSWORD_LENGTH,
 } from '../server/inputValidation';
-import { isPasswordStrongEnough, MIN_PASSWORD_LENGTH } from '../server/auth';
+import { isPasswordStrongEnough, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../server/auth';
+import { isLocalAvatarUrl } from '../server/avatarStorage';
 
 let passed = 0;
 let failed = 0;
@@ -65,12 +64,15 @@ assert(isPasswordStrongEnough('12345678') === true, 'password min length ok');
 assert(isPasswordStrongEnough('x'.repeat(MAX_PASSWORD_LENGTH + 1)) === false, 'password too long');
 assert(isPasswordStrongEnough(12345678) === false, 'non-string password');
 
-// Avatar URL validation
-assert(validateAvatarUrl('https://example.com/a.png') === true, 'valid https URL');
-assert(validateAvatarUrl('javascript:alert(1)') === false, 'javascript URL rejected');
-assert(validateAvatarUrl('data:image/png;base64,abc') === false, 'data URL rejected');
-assert(validateAvatarUrl('file:///etc/passwd') === false, 'file URL rejected');
-assert(validateAvatarUrl('https://example.com/' + 'a'.repeat(3000)) === false, 'oversized URL rejected');
+// Avatar URL validation — only our own uploaded-avatar paths are accepted; arbitrary
+// external URLs (including well-formed https:// ones) are rejected outright, since
+// PATCH /api/me no longer accepts anything but a path from POST /api/me/avatar.
+assert(isLocalAvatarUrl('/uploads/avatars/abc123/def456.png') === true, 'valid local avatar path');
+assert(isLocalAvatarUrl('https://example.com/a.png') === false, 'external https URL rejected');
+assert(isLocalAvatarUrl('javascript:alert(1)') === false, 'javascript URL rejected');
+assert(isLocalAvatarUrl('data:image/png;base64,abc') === false, 'data URL rejected');
+assert(isLocalAvatarUrl('file:///etc/passwd') === false, 'file URL rejected');
+assert(isLocalAvatarUrl('/uploads/avatars/../../etc/passwd') === false, 'traversal rejected');
 
 console.log(`\nValidation smoke tests: ${passed} passed, ${failed} failed (min password length: ${MIN_PASSWORD_LENGTH})`);
 process.exit(failed > 0 ? 1 : 0);

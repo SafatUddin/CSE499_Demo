@@ -5,7 +5,6 @@
 
 export const JSON_BODY_LIMIT = '1mb';
 
-export const MAX_PASSWORD_LENGTH = 128;
 export const MAX_PRODUCT_NAME_LENGTH = 200;
 export const MAX_PRODUCT_DESCRIPTION_LENGTH = 5000;
 export const MAX_SKU_LENGTH = 100;
@@ -13,7 +12,6 @@ export const MAX_PRODUCT_PRICE = 1_000_000;
 export const MAX_PRODUCT_INVENTORY = 1_000_000;
 export const MAX_CART_QUANTITY = 10_000;
 export const MAX_CART_ITEMS = 50;
-export const MAX_AVATAR_URL_LENGTH = 2048;
 export const MAX_PERSONA_TONE_LENGTH = 500;
 export const MAX_PERSONA_STYLE_LENGTH = 50;
 export const MAX_PERSONA_INSTRUCTIONS_LENGTH = 10_000;
@@ -141,28 +139,6 @@ export function conversationPatchHasOnlyAllowedKeys(body: unknown): boolean {
   return Object.keys(body).every((k) => ALLOWED_CONVERSATION_PATCH_KEYS.has(k));
 }
 
-/** Regex for local avatar paths: /uploads/avatars/{merchantId}/{filename} — no traversal. */
-const LOCAL_AVATAR_PATH_RE = /^\/uploads\/avatars\/[a-z0-9_-]+\/[a-z0-9_-]+\.[a-z]+$/i;
-
-export function validateAvatarUrl(url: string, options?: { allowHttp?: boolean }): boolean {
-  if (typeof url !== 'string' || url.length === 0) return true;
-  if (url.length > MAX_AVATAR_URL_LENGTH) return false;
-  if (DANGEROUS_URL_SCHEMES.test(url.trim())) return false;
-
-  // Accept same-origin local upload paths (set by the server itself via POST /api/me/avatar)
-  if (LOCAL_AVATAR_PATH_RE.test(url)) return true;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  if (parsed.protocol === 'https:') return true;
-  if (options?.allowHttp && parsed.protocol === 'http:') return true;
-  return false;
-}
 
 // ── Control-char regex (used in profile text fields) ────────────────────────
 const CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;

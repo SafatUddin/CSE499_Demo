@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { MulterError } from 'multer';
 import { prisma } from './server/db';
 import {
   requireAuth,
@@ -74,7 +75,6 @@ import {
   sanitizeCartInput,
   validateCartSkusInStore,
   conversationPatchHasOnlyAllowedKeys,
-  validateAvatarUrl,
   validatePersonaInput,
   validateStoreBusinessInput,
   validatePhone,
@@ -89,6 +89,7 @@ import {
   avatarUpload,
   saveAvatarFile,
   deleteLocalAvatarFile,
+  isLocalAvatarUrl,
   MAX_AVATAR_BYTES,
 } from './server/avatarStorage';
 
@@ -459,7 +460,12 @@ async function startServer() {
           // no-op
         } else if (avatarUrl === '') {
           data.avatarUrl = null;
-        } else if (!validateAvatarUrl(avatarUrl, { allowHttp: !isProduction })) {
+        } else if (!isLocalAvatarUrl(avatarUrl)) {
+          // Only a path produced by our own POST /api/me/avatar upload is accepted here —
+          // arbitrary external URLs are rejected outright, not just shape-validated. That
+          // upload endpoint is the only legitimate way to set an avatar; letting this PATCH
+          // accept any https:// URL would let a merchant's own browser be pointed at an
+          // attacker-chosen tracking pixel every time their dashboard header renders it.
           return res.status(400).json({ error: 'Invalid avatar URL.' });
         } else {
           data.avatarUrl = avatarUrl;
@@ -1122,10 +1128,13 @@ async function startServer() {
     try {
       const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
       const { phoneNumberId } = req.body;
-      const handoff = await consumeOAuthHandoff(pendingCode, 'whatsapp_pending');
-      if (handoff.storeId !== req.auth!.storeId) {
+      // Verify ownership before consuming — otherwise a mismatched-store request burns
+      // another store's still-valid pending selection (a one-shot DoS against it).
+      const peeked = await peekOAuthHandoff(pendingCode, 'whatsapp_pending');
+      if (peeked.storeId !== req.auth!.storeId) {
         return res.status(403).json({ error: 'Unable to process request' });
       }
+      const handoff = await consumeOAuthHandoff(pendingCode, 'whatsapp_pending');
       const numbers = ((handoff.payload as { numbers?: any[] } | null)?.numbers) || [];
       const num = numbers.find((n) => n.id === phoneNumberId);
       if (!num) {
@@ -1162,10 +1171,13 @@ async function startServer() {
     try {
       const pendingCode = (req.body.pendingCode || req.body.pendingToken) as string;
       const { pageId } = req.body;
-      const handoff = await consumeOAuthHandoff(pendingCode, 'facebook_pending');
-      if (handoff.storeId !== req.auth!.storeId) {
+      // Verify ownership before consuming — otherwise a mismatched-store request burns
+      // another store's still-valid pending selection (a one-shot DoS against it).
+      const peeked = await peekOAuthHandoff(pendingCode, 'facebook_pending');
+      if (peeked.storeId !== req.auth!.storeId) {
         return res.status(403).json({ error: 'Unable to process request' });
       }
+      const handoff = await consumeOAuthHandoff(pendingCode, 'facebook_pending');
       const pages = ((handoff.payload as { pages?: ManagedPage[] } | null)?.pages) || [];
       const page = pages.find((p) => p.id === pageId);
       if (!page) {
@@ -3122,6 +3134,26 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Global error handler — catches errors passed via next(err) that no route's own
+  // try/catch handled, most notably Multer's upload rejections (oversized file, wrong
+  // MIME type), which otherwise bypass every route's JSON error contract and fall
+  // through to Express's default HTML error page.
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    if (err instanceof MulterError) {
+      const message =
+        err.code === 'LIMIT_FILE_SIZE'
+          ? `Image must be ${Math.floor(MAX_AVATAR_BYTES / (1024 * 1024))} MB or smaller`
+          : 'Invalid file upload';
+      return res.status(400).json({ error: message });
+    }
+    if (err?.message === 'Only image files are accepted') {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('Unhandled request error:', err?.message);
+    res.status(500).json({ error: 'Something went wrong' });
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);

@@ -22,8 +22,11 @@ import { generateAgentReply, isQuestionOrPriceInquiry } from './server/agent';
 import {
   verifyMetaSignature,
   sendMessengerMessage,
+  sendMessengerImage,
   sendWhatsAppMessage,
+  sendWhatsAppImage,
   sendInstagramMessage,
+  sendInstagramImage,
   fetchMessengerProfileName,
   fetchInstagramProfileName,
   replyToFacebookComment,
@@ -91,7 +94,15 @@ import {
   deleteLocalAvatarFile,
   isLocalAvatarUrl,
   MAX_AVATAR_BYTES,
-} from './server/avatarStorage';
+  productImageUpload,
+  saveProductImageFile,
+  deleteProductImageFile,
+  MAX_PRODUCT_IMAGE_BYTES,
+  openingImageUpload,
+  saveOpeningImageFile,
+  deleteOpeningImageFile,
+  MAX_OPENING_IMAGE_BYTES,
+} from './server/mediaStorage';
 
 dotenv.config();
 
@@ -1194,13 +1205,14 @@ async function startServer() {
     }
   });
 
-  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string }) => ({
+  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; imageUrl?: string | null }) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
     price: Number(p.price),
     inventory: p.inventory,
     status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+    imageUrl: p.imageUrl || undefined,
   });
 
   // List this merchant's products
@@ -1250,6 +1262,61 @@ async function startServer() {
     }
   });
 
+  // Upload a product photo (multipart/form-data, field: "image")
+  app.post('/api/products/:id/image', requireAuth, requireProfileComplete, productImageUpload.single('image'), async (req: AuthedRequest, res) => {
+    try {
+      const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+      if (!product || product.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image file provided.' });
+      }
+
+      const storeId = req.auth!.storeId;
+      const previousImageUrl = product.imageUrl;
+
+      let publicUrl: string;
+      try {
+        publicUrl = await saveProductImageFile(storeId, req.file.buffer);
+      } catch {
+        return res.status(400).json({ error: 'Unsupported image format. Use JPEG, PNG, WebP, or GIF.' });
+      }
+
+      const updated = await prisma.product.update({
+        where: { id: product.id },
+        data: { imageUrl: publicUrl },
+      });
+
+      await deleteProductImageFile(storeId, previousImageUrl);
+
+      res.json(toPublicProduct(updated));
+    } catch (err: any) {
+      console.error('Product image upload error');
+      res.status(500).json({ error: 'Failed to upload product image' });
+    }
+  });
+
+  // Remove a product's photo
+  app.delete('/api/products/:id/image', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+      if (!product || product.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+      const previousImageUrl = product.imageUrl;
+      const updated = await prisma.product.update({
+        where: { id: product.id },
+        data: { imageUrl: null },
+      });
+      await deleteProductImageFile(req.auth!.storeId, previousImageUrl);
+      res.json(toPublicProduct(updated));
+    } catch (err: any) {
+      console.error('Product image delete error');
+      res.status(500).json({ error: 'Failed to remove product image' });
+    }
+  });
+
   // Remove a product from this merchant's catalog
   app.delete('/api/products/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
@@ -1258,6 +1325,7 @@ async function startServer() {
         return res.status(404).json({ error: 'Product not found' });
       }
       await prisma.product.delete({ where: { id: product.id } });
+      await deleteProductImageFile(req.auth!.storeId, product.imageUrl);
       res.status(204).end();
     } catch (err: any) {
       console.error('Delete product error:', err);
@@ -1718,6 +1786,8 @@ async function startServer() {
         style: store.style,
         customInstructions: store.customInstructions,
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
+        openingText: store.openingText || '',
+        openingImageUrl: store.openingImageUrl || undefined,
       });
     } catch (err: any) {
       console.error('Fetch persona error:', err);
@@ -1739,6 +1809,7 @@ async function startServer() {
           style: validated.style,
           customInstructions: validated.customInstructions,
           autoFinalizeOrdersAlways: validated.autoFinalizeOrdersAlways,
+          openingText: validated.openingText,
         },
       });
       res.json({
@@ -1746,10 +1817,57 @@ async function startServer() {
         style: store.style,
         customInstructions: store.customInstructions,
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
+        openingText: store.openingText || '',
+        openingImageUrl: store.openingImageUrl || undefined,
       });
     } catch (err: any) {
       console.error('Update persona error:', err);
       res.status(500).json({ error: 'Failed to update persona' });
+    }
+  });
+
+  // Upload the opening-greeting photo (multipart/form-data, field: "image")
+  app.post('/api/persona/opening-image', requireAuth, requireProfileComplete, openingImageUpload.single('image'), async (req: AuthedRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image file provided.' });
+      }
+      const storeId = req.auth!.storeId;
+      const store = await prisma.store.findUnique({ where: { id: storeId } });
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+      const previousImageUrl = store.openingImageUrl;
+      let publicUrl: string;
+      try {
+        publicUrl = await saveOpeningImageFile(storeId, req.file.buffer);
+      } catch {
+        return res.status(400).json({ error: 'Unsupported image format. Use JPEG, PNG, WebP, or GIF.' });
+      }
+      const updated = await prisma.store.update({ where: { id: storeId }, data: { openingImageUrl: publicUrl } });
+      await deleteOpeningImageFile(storeId, previousImageUrl);
+      res.json({ openingImageUrl: updated.openingImageUrl || undefined });
+    } catch (err: any) {
+      console.error('Opening image upload error');
+      res.status(500).json({ error: 'Failed to upload greeting image' });
+    }
+  });
+
+  // Remove the opening-greeting photo
+  app.delete('/api/persona/opening-image', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const storeId = req.auth!.storeId;
+      const store = await prisma.store.findUnique({ where: { id: storeId } });
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+      const previousImageUrl = store.openingImageUrl;
+      await prisma.store.update({ where: { id: storeId }, data: { openingImageUrl: null } });
+      await deleteOpeningImageFile(storeId, previousImageUrl);
+      res.json({ openingImageUrl: undefined });
+    } catch (err: any) {
+      console.error('Opening image delete error');
+      res.status(500).json({ error: 'Failed to remove greeting image' });
     }
   });
 
@@ -1780,6 +1898,7 @@ async function startServer() {
       id: m.id,
       sender: SENDER_TO_FRONTEND[m.sender] || 'customer',
       text: m.text,
+      imageUrl: m.imageUrl || undefined,
       time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       pending: !!m.pending,
     }));
@@ -1873,6 +1992,7 @@ async function startServer() {
       price: Number(p.price),
       inventory: p.inventory,
       status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+      imageUrl: p.imageUrl || undefined,
     }));
     // Cap history sent to the model — an unbounded prompt grows with every message in a
     // long-running conversation, which slows down local LLM inference noticeably.
@@ -2002,8 +2122,11 @@ async function startServer() {
       }
     }
 
+    const imageProduct = result.showImageForSku ? products.find((p) => p.sku === result.showImageForSku) : undefined;
+    const resolvedImageUrl = imageProduct?.imageUrl || undefined;
+
     await prisma.message.create({
-      data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, meta: result as any, pending: !isAutopilot },
+      data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, imageUrl: resolvedImageUrl, meta: result as any, pending: !isAutopilot },
     });
 
     // Build the cart from the AI's detected intent — only ever adds a real, in-stock
@@ -2333,6 +2456,7 @@ async function startServer() {
       if (pageAccessToken) {
         try {
           await sendMessengerMessage(pageAccessToken, conversation.externalUserId, result.replyText);
+          if (resolvedImageUrl) await sendMessengerImage(pageAccessToken, conversation.externalUserId, resolvedImageUrl);
         } catch (err) {
           console.error('Failed to deliver AI reply to Messenger:', err);
         }
@@ -2344,6 +2468,7 @@ async function startServer() {
       if (waCreds) {
         try {
           await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, result.replyText);
+          if (resolvedImageUrl) await sendWhatsAppImage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, resolvedImageUrl);
         } catch (err) {
           console.error('Failed to deliver AI reply to WhatsApp:', err);
         }
@@ -2355,6 +2480,7 @@ async function startServer() {
       if (igCreds) {
         try {
           await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, result.replyText);
+          if (resolvedImageUrl) await sendInstagramImage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, resolvedImageUrl);
         } catch (err) {
           console.error('Failed to deliver AI reply to Instagram:', err);
         }
@@ -2620,6 +2746,7 @@ async function startServer() {
         if (pageAccessToken) {
           try {
             await sendMessengerMessage(pageAccessToken, conversation.externalUserId, message.text);
+            if (message.imageUrl) await sendMessengerImage(pageAccessToken, conversation.externalUserId, message.imageUrl);
           } catch (err) {
             console.error('Failed to deliver approved draft to Messenger:', err);
           }
@@ -2631,6 +2758,7 @@ async function startServer() {
         if (waCreds) {
           try {
             await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, message.text);
+            if (message.imageUrl) await sendWhatsAppImage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, message.imageUrl);
           } catch (err) {
             console.error('Failed to deliver approved draft to WhatsApp:', err);
           }
@@ -2642,6 +2770,7 @@ async function startServer() {
         if (igCreds) {
           try {
             await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, message.text);
+            if (message.imageUrl) await sendInstagramImage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, message.imageUrl);
           } catch (err) {
             console.error('Failed to deliver approved draft to Instagram:', err);
           }
@@ -2727,6 +2856,55 @@ async function startServer() {
     }
   });
 
+  // Sends the merchant's configured opening greeting (text + optional image) the very
+  // first time a customer messages the business on a real channel — fires once per brand
+  // new Conversation, before the AI's actual reply to their message.
+  async function sendOpeningGreetingIfNew(
+    isNewConversation: boolean,
+    conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null }
+  ) {
+    if (!isNewConversation) return;
+    const store = await prisma.store.findUnique({ where: { id: conversation.storeId } });
+    if (!store || !store.openingText) return;
+
+    const isAutopilot = conversation.status === 'AI_MANAGED';
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        sender: 'AI',
+        text: store.openingText,
+        imageUrl: store.openingImageUrl || undefined,
+        pending: !isAutopilot,
+      },
+    });
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+    if (!isAutopilot || !conversation.externalUserId) return;
+    try {
+      if (conversation.channelType === 'FACEBOOK') {
+        const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
+        if (pageAccessToken) {
+          await sendMessengerMessage(pageAccessToken, conversation.externalUserId, store.openingText);
+          if (store.openingImageUrl) await sendMessengerImage(pageAccessToken, conversation.externalUserId, store.openingImageUrl);
+        }
+      } else if (conversation.channelType === 'WHATSAPP') {
+        const waCreds = await getWhatsAppCredentialsForStore(conversation.storeId);
+        if (waCreds) {
+          await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, store.openingText);
+          if (store.openingImageUrl) await sendWhatsAppImage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, store.openingImageUrl);
+        }
+      } else if (conversation.channelType === 'INSTAGRAM') {
+        const igCreds = await getInstagramCredentialsForStore(conversation.storeId);
+        if (igCreds) {
+          await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, store.openingText);
+          if (store.openingImageUrl) await sendInstagramImage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, store.openingImageUrl);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to deliver opening greeting to ${conversation.channelType}:`, err);
+    }
+  }
+
   async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
     if (!isProduction) {
       console.log('[WEBHOOK] handleIncomingMessengerMessage — messageId:', externalMessageId);
@@ -2753,6 +2931,7 @@ async function startServer() {
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid },
     });
+    const isNewConversation = !conversation;
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid, lastMessageAt: new Date() },
@@ -2782,6 +2961,7 @@ async function startServer() {
       throw err;
     }
 
+    await sendOpeningGreetingIfNew(isNewConversation, conversation);
     await generateAndStoreAgentReply(conversation, messageText);
   }
 
@@ -2802,6 +2982,7 @@ async function startServer() {
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'WHATSAPP', externalUserId: senderWaId },
     });
+    const isNewConversation = !conversation;
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: {
@@ -2831,6 +3012,7 @@ async function startServer() {
       throw err;
     }
 
+    await sendOpeningGreetingIfNew(isNewConversation, conversation);
     await generateAndStoreAgentReply(conversation, messageText);
   }
 
@@ -2851,6 +3033,7 @@ async function startServer() {
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'INSTAGRAM', externalUserId: senderIgUserId },
     });
+    const isNewConversation = !conversation;
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: { storeId, channelType: 'INSTAGRAM', externalUserId: senderIgUserId, lastMessageAt: new Date() },
@@ -2877,6 +3060,7 @@ async function startServer() {
       throw err;
     }
 
+    await sendOpeningGreetingIfNew(isNewConversation, conversation);
     await generateAndStoreAgentReply(conversation, messageText);
   }
 
@@ -3139,9 +3323,14 @@ async function startServer() {
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
     if (err instanceof MulterError) {
+      const maxBytes = req.path.includes('/products/')
+        ? MAX_PRODUCT_IMAGE_BYTES
+        : req.path.includes('/persona/')
+          ? MAX_OPENING_IMAGE_BYTES
+          : MAX_AVATAR_BYTES;
       const message =
         err.code === 'LIMIT_FILE_SIZE'
-          ? `Image must be ${Math.floor(MAX_AVATAR_BYTES / (1024 * 1024))} MB or smaller`
+          ? `Image must be ${Math.floor(maxBytes / (1024 * 1024))} MB or smaller`
           : 'Invalid file upload';
       return res.status(400).json({ error: message });
     }

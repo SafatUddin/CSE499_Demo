@@ -13,6 +13,7 @@ export interface AgentCatalogItem {
   price: number;
   inventory: number;
   status: string;
+  imageUrl?: string;
 }
 
 export interface AgentHistoryItem {
@@ -30,6 +31,8 @@ export interface AgentReply {
   orderConfirmationRequested: boolean;
   orderConfirmed: boolean;
   orderCancelled: boolean;
+  /** SKU of a product to send a photo of, set by the AI when a picture would help (product shown/asked about). Empty if none. */
+  showImageForSku?: string;
 }
 
 // Current order-flow state for this conversation, so the model knows whether it's mid
@@ -64,7 +67,7 @@ export async function generateAgentReply({
   const catalogText = catalog
     .map(
       (p) =>
-        `- Name: ${p.name}, SKU: ${p.sku}, Price: $${p.price}, Inventory: ${p.inventory} units, Status: ${p.status}`
+        `- Name: ${p.name}, SKU: ${p.sku}, Price: $${p.price}, Inventory: ${p.inventory} units, Status: ${p.status}, Photo available: ${p.imageUrl ? 'yes' : 'no'}`
     )
     .join('\n');
 
@@ -121,6 +124,7 @@ Mandatory Interaction Rules:
 4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → DETAILS CAPTURED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply that their details were received and their order request is being processed. Set orderConfirmed=true. cartAction = none. Do NOT invent order IDs. Do NOT claim payment was taken.
 5. CANCEL AN EXISTING ORDER: If the customer asks to cancel an already-placed ongoing order, DO NOT cancel it in one step. Ask them to confirm which order / that they want to cancel. Only set orderCancelled=true when they clearly confirm after you asked. Never cancel from a single ambiguous "cancel". Never invent cancellations.
 6. ONGOING ORDERS INQUIRIES: Use the Ongoing Orders context to answer questions like "Where is my order?", "What did I order?", "How many items?", "What's the status?", "Can I cancel?", "When was it placed?". Order status must always be one of: Processing, On the Way, Delivered, Cancelled.
+7. SHOWING A PRODUCT PHOTO: If the customer asks to see a product, asks what it looks like, or you are introducing/recommending a specific product and it has "Photo available: yes" in the catalog, set showImageForSku to that product's exact SKU so its photo is sent alongside your reply. Only ever set this to a SKU with "Photo available: yes" — never a SKU with no photo, and never invent one. Leave showImageForSku empty ('') on every other turn.
 
 FORBIDDEN:
 - Do not invent products, SKUs, prices, or inventory that are not in the catalog.
@@ -195,17 +199,26 @@ ${catalogText || 'No products registered in catalog.'}`;
               orderConfirmationRequested: { type: Type.BOOLEAN },
               orderConfirmed: { type: Type.BOOLEAN },
               orderCancelled: { type: Type.BOOLEAN },
+              showImageForSku: { type: Type.STRING },
             },
             required: [
               'replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs',
               'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled',
+              'showImageForSku',
             ],
           },
         },
       });
 
       if (response.text) {
-        return JSON.parse(response.text.trim()) as AgentReply;
+        const parsed = JSON.parse(response.text.trim()) as AgentReply;
+        // Never trust the model's SKU blindly — only forward it if that exact product
+        // actually has a photo on file, otherwise a hallucinated/stale SKU would silently
+        // fail to attach an image or point at the wrong product's photo downstream.
+        if (parsed.showImageForSku && !catalog.find((p) => p.sku === parsed.showImageForSku && p.imageUrl)) {
+          parsed.showImageForSku = '';
+        }
+        return parsed;
       }
     } catch (geminiError: any) {
       console.error('Gemini call failed, falling back to simulated logic');

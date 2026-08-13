@@ -5,6 +5,7 @@ export type Tab =
   | 'onboarding'
   | 'inbox'
   | 'catalog'
+  | 'persona'
   | 'orders'
   | 'analytics'
   | 'integrations'
@@ -18,6 +19,7 @@ export interface Product {
   price: number;
   inventory: number;
   status: 'Trained' | 'Pending';
+  imageUrl?: string;
 }
 
 export interface ChatMessage {
@@ -64,6 +66,8 @@ export interface AIPersona {
   style: 'bullets' | 'narrative';
   customInstructions: string;
   autoFinalizeOrdersAlways?: boolean;
+  openingText?: string;
+  openingImageUrl?: string;
 }
 
 export interface DailyMetric {

@@ -179,6 +179,7 @@ export interface ApiProduct {
   price: number;
   inventory: number;
   status: 'Trained' | 'Pending';
+  imageUrl?: string;
 }
 
 export function listProducts() {
@@ -193,25 +194,77 @@ export function deleteProduct(id: string) {
   return request<void>(`/api/products/${id}`, { method: 'DELETE' });
 }
 
+/** Upload a product photo. Field name must be "image" to match the backend's multer config. */
+export async function uploadProductImage(productId: string, file: File): Promise<ApiProduct> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch(`/api/products/${productId}/image`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+    // Do NOT set Content-Type; browser sets it automatically with correct boundary
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to upload product image');
+  return data as ApiProduct;
+}
+
+export async function deleteProductImage(productId: string): Promise<ApiProduct> {
+  const res = await fetch(`/api/products/${productId}/image`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to remove product image');
+  return data as ApiProduct;
+}
+
 export interface ApiPersona {
   tone: string;
   style: string;
   customInstructions: string;
   autoFinalizeOrdersAlways: boolean;
+  openingText?: string;
+  openingImageUrl?: string;
 }
 
 export function getPersona() {
   return request<ApiPersona>('/api/persona');
 }
 
-export function updatePersona(input: { tone: string; style: string; customInstructions: string; autoFinalizeOrdersAlways?: boolean }) {
+export function updatePersona(input: { tone: string; style: string; customInstructions: string; autoFinalizeOrdersAlways?: boolean; openingText?: string }) {
   return request<ApiPersona>('/api/persona', { method: 'PUT', body: JSON.stringify(input) });
+}
+
+/** Upload the opening-greeting photo. Field name must be "image" to match the backend's multer config. */
+export async function uploadOpeningImage(file: File): Promise<{ openingImageUrl?: string }> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch('/api/persona/opening-image', {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to upload greeting image');
+  return data;
+}
+
+export async function deleteOpeningImage(): Promise<{ openingImageUrl?: string }> {
+  const res = await fetch('/api/persona/opening-image', {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to remove greeting image');
+  return data;
 }
 
 export interface ApiChatMessage {
   id: string;
   sender: 'customer' | 'ai' | 'merchant';
   text: string;
+  imageUrl?: string;
   time: string;
   pending?: boolean;
 }

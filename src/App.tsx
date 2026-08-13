@@ -16,8 +16,12 @@ import {
   listProducts,
   createProduct,
   deleteProduct,
+  uploadProductImage,
+  deleteProductImage,
   getPersona,
   updatePersona,
+  uploadOpeningImage,
+  deleteOpeningImage,
   listConversations,
   updateConversationStatus,
   deleteConversation,
@@ -37,6 +41,7 @@ import OnboardingPage from './components/OnboardingPage';
 import Sidebar from './components/Sidebar';
 import InboxConsole from './components/InboxConsole';
 import ProductCatalog from './components/ProductCatalog';
+import AgentPersona from './components/AgentPersona';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IntegrationsHub from './components/IntegrationsHub';
 import OrdersPage from './components/OrdersPage';
@@ -61,7 +66,7 @@ export default function App() {
   const isAuthenticatedRef = useRef(false);
 
   const navigateTo = (tab: Tab, replace = false) => {
-    const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+    const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'analytics', 'integrations', 'settings', 'support'];
     const effectiveTab: Tab =
       isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(tab)
         ? 'onboarding'
@@ -84,7 +89,7 @@ export default function App() {
     }
     const handlePopState = (e: PopStateEvent) => {
       const requested = (e.state?.tab as Tab) || 'landing';
-      const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+      const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'analytics', 'integrations', 'settings', 'support'];
       const tab: Tab =
         isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(requested)
           ? 'onboarding'
@@ -284,7 +289,7 @@ export default function App() {
     if (!merchant || !profileComplete) return;
     listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
     getPersona()
-      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways }))
+      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways, openingText: p.openingText, openingImageUrl: p.openingImageUrl }))
       .catch((err) => console.error('Failed to load persona:', err));
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
     refreshChannels();
@@ -327,11 +332,22 @@ export default function App() {
   const handleAddProduct = async (newProduct: Omit<Product, 'id'>) => {
     const created = await createProduct(newProduct);
     setProducts((prev) => [created, ...prev]);
+    return created;
   };
 
   const handleDeleteProduct = async (id: string) => {
     await deleteProduct(id);
     setProducts((prev) => prev.filter(p => p.id !== id));
+  };
+
+  const handleUploadProductImage = async (id: string, file: File) => {
+    const updated = await uploadProductImage(id, file);
+    setProducts((prev) => prev.map((p) => (p.id === id ? updated : p)));
+  };
+
+  const handleDeleteProductImage = async (id: string) => {
+    const updated = await deleteProductImage(id);
+    setProducts((prev) => prev.map((p) => (p.id === id ? updated : p)));
   };
 
   // Integration mutations
@@ -365,7 +381,24 @@ export default function App() {
   // Persona save
   const handleSavePersona = async (newPersona: AIPersona) => {
     const saved = await updatePersona(newPersona);
-    setPersona({ tone: saved.tone, style: saved.style as AIPersona['style'], customInstructions: saved.customInstructions, autoFinalizeOrdersAlways: saved.autoFinalizeOrdersAlways });
+    setPersona((prev) => ({
+      tone: saved.tone,
+      style: saved.style as AIPersona['style'],
+      customInstructions: saved.customInstructions,
+      autoFinalizeOrdersAlways: saved.autoFinalizeOrdersAlways,
+      openingText: saved.openingText,
+      openingImageUrl: saved.openingImageUrl ?? prev.openingImageUrl,
+    }));
+  };
+
+  const handleUploadOpeningImage = async (file: File) => {
+    const { openingImageUrl } = await uploadOpeningImage(file);
+    setPersona((prev) => ({ ...prev, openingImageUrl }));
+  };
+
+  const handleDeleteOpeningImage = async () => {
+    await deleteOpeningImage();
+    setPersona((prev) => ({ ...prev, openingImageUrl: undefined }));
   };
 
   // Conversations updating
@@ -464,10 +497,19 @@ export default function App() {
         return (
           <ProductCatalog
             products={products}
-            persona={persona}
             onAddProduct={handleAddProduct}
             onDeleteProduct={handleDeleteProduct}
+            onUploadProductImage={handleUploadProductImage}
+            onDeleteProductImage={handleDeleteProductImage}
+          />
+        );
+      case 'persona':
+        return (
+          <AgentPersona
+            persona={persona}
             onSavePersona={handleSavePersona}
+            onUploadOpeningImage={handleUploadOpeningImage}
+            onDeleteOpeningImage={handleDeleteOpeningImage}
           />
         );
       case 'orders':

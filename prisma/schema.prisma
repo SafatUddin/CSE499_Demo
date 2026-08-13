@@ -67,6 +67,10 @@ model Store {
   // auto-finalize only applies in AI Managed (autopilot) mode, mirroring how auto-send
   // already works for replies — a merchant must explicitly opt in to full automation.
   autoFinalizeOrdersAlways Boolean @default(false)
+  // Greeting the AI leads with on a customer's very first message in a brand-new
+  // conversation on a real channel (Messenger/WhatsApp/Instagram). Null/empty = no greeting.
+  openingText     String?
+  openingImageUrl String?
   widgetKey     String         @unique @default(cuid())
   // Business contact & address fields (all optional; set via merchant settings)
   businessPhone String?
@@ -168,6 +172,8 @@ model Message {
   conversationId String
   sender         Sender
   text           String
+  // Set when this message includes a product photo (AI-sent or merchant-sent).
+  imageUrl       String?
   // True for an AI-drafted reply awaiting merchant approval (Copilot off / manual mode) —
   // not yet delivered to the real customer. False for anything already sent/delivered.
   pending        Boolean      @default(false)

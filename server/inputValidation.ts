@@ -15,6 +15,7 @@ export const MAX_CART_ITEMS = 50;
 export const MAX_PERSONA_TONE_LENGTH = 500;
 export const MAX_PERSONA_STYLE_LENGTH = 50;
 export const MAX_PERSONA_INSTRUCTIONS_LENGTH = 10_000;
+export const MAX_OPENING_TEXT_LENGTH = 2000;
 
 // Profile / merchant settings limits
 export const MAX_MERCHANT_NAME_LENGTH = 200;
@@ -391,6 +392,7 @@ export type ValidatedPersonaInput = {
   style: string;
   customInstructions: string;
   autoFinalizeOrdersAlways: boolean;
+  openingText: string;
 };
 
 export function validatePersonaInput(body: unknown): ValidatedPersonaInput | null {
@@ -407,10 +409,17 @@ export function validatePersonaInput(body: unknown): ValidatedPersonaInput | nul
       : optionalString(body.customInstructions, MAX_PERSONA_INSTRUCTIONS_LENGTH);
   if (customInstructions === null) return null;
 
+  const openingText =
+    body.openingText === undefined || body.openingText === null
+      ? ''
+      : optionalString(body.openingText, MAX_OPENING_TEXT_LENGTH);
+  if (openingText === null) return null;
+
   return {
     tone,
     style,
     customInstructions: customInstructions ?? '',
     autoFinalizeOrdersAlways: !!body.autoFinalizeOrdersAlways,
+    openingText: openingText ?? '',
   };
 }

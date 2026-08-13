@@ -683,6 +683,9 @@ export default function InboxConsole({
                           <span className="font-sans text-[10.5px] text-white/50">{m.time}</span>
                         </div>
                         <p className="text-[13.5px] text-white leading-relaxed">{m.text.replace(/<[^>]+>/g, '').trim()}</p>
+                        {m.imageUrl && (
+                          <img src={m.imageUrl} alt="" className="rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
+                        )}
 
                         <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
                           <button
@@ -718,6 +721,9 @@ export default function InboxConsole({
                             </div>
                           )}
                           <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
+                          {m.imageUrl && (
+                            <img src={m.imageUrl} alt="" className="mt-2 rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
+                          )}
                         </div>
                         <span className="text-[10.5px] text-white/40 mt-1 px-1">{m.time}</span>
                       </div>

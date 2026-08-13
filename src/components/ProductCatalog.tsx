@@ -1,54 +1,48 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Package, 
-  Sparkles, 
-  Plus, 
-  Trash2, 
-  Save, 
-  CheckCircle, 
+import {
+  Package,
+  Plus,
+  Trash2,
+  CheckCircle,
   AlertCircle,
-  List,
-  MessageCircle,
-  X
+  X,
+  ImagePlus,
+  ImageOff
 } from 'lucide-react';
-import { Product, AIPersona } from '../types';
+import { Product } from '../types';
 import DashboardHeader from './DashboardHeader';
 
 interface ProductCatalogProps {
   products: Product[];
-  persona: AIPersona;
-  onAddProduct: (product: Omit<Product, 'id'>) => Promise<void>;
+  onAddProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
   onDeleteProduct: (id: string) => Promise<void>;
-  onSavePersona: (newPersona: AIPersona) => Promise<void>;
+  onUploadProductImage: (id: string, file: File) => Promise<void>;
+  onDeleteProductImage: (id: string) => Promise<void>;
 }
 
-export default function ProductCatalog({ 
-  products, 
-  persona, 
-  onAddProduct, 
-  onDeleteProduct, 
-  onSavePersona 
+export default function ProductCatalog({
+  products,
+  onAddProduct,
+  onDeleteProduct,
+  onUploadProductImage,
+  onDeleteProductImage
 }: ProductCatalogProps) {
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [newProductName, setNewProductName] = useState('');
   const [newProductSku, setNewProductSku] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductInventory, setNewProductInventory] = useState('');
+  const [newProductImageFile, setNewProductImageFile] = useState<File | null>(null);
+  const [newProductImagePreview, setNewProductImagePreview] = useState<string | null>(null);
 
-  const [personaTone, setPersonaTone] = useState(persona.tone);
-  const [personaStyle, setPersonaStyle] = useState<'bullets' | 'narrative'>(persona.style);
-  const [personaInstructions, setPersonaInstructions] = useState(persona.customInstructions);
-  const [autoFinalizeOrdersAlways, setAutoFinalizeOrdersAlways] = useState(!!persona.autoFinalizeOrdersAlways);
-
-  const [isSavingPersona, setIsSavingPersona] = useState(false);
-  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [addProductError, setAddProductError] = useState('');
   const [isAddingProduct, setIsAddingProduct] = useState(false);
-  const [personaError, setPersonaError] = useState('');
   const [deleteError, setDeleteError] = useState('');
+  const [uploadingImageId, setUploadingImageId] = useState<string | null>(null);
+  const [imageError, setImageError] = useState('');
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -62,7 +56,7 @@ export default function ProductCatalog({
     setAddProductError('');
     setIsAddingProduct(true);
     try {
-      await onAddProduct({
+      const created = await onAddProduct({
         name: newProductName,
         sku: newProductSku,
         price: parseFloat(newProductPrice) || 0.0,
@@ -70,16 +64,31 @@ export default function ProductCatalog({
         status: 'Trained'
       });
 
+      if (newProductImageFile) {
+        try {
+          await onUploadProductImage(created.id, newProductImageFile);
+        } catch (err: any) {
+          setImageError(err.message || 'Product was created, but the photo failed to upload.');
+        }
+      }
+
       setNewProductName('');
       setNewProductSku('');
       setNewProductPrice('');
       setNewProductInventory('');
+      setNewProductImageFile(null);
+      setNewProductImagePreview(null);
       setShowAddForm(false);
     } catch (err: any) {
       setAddProductError(err.message || 'Failed to add product.');
     } finally {
       setIsAddingProduct(false);
     }
+  };
+
+  const handleNewProductImageSelect = (file: File | undefined) => {
+    setNewProductImageFile(file || null);
+    setNewProductImagePreview(file ? URL.createObjectURL(file) : null);
   };
 
   const handleDeleteClick = async (id: string) => {
@@ -91,40 +100,44 @@ export default function ProductCatalog({
     }
   };
 
-  const handleSavePersonaClick = async () => {
-    setPersonaError('');
-    setIsSavingPersona(true);
+  const handleImageSelect = async (id: string, file: File | undefined) => {
+    if (!file) return;
+    setImageError('');
+    setUploadingImageId(id);
     try {
-      await onSavePersona({
-        tone: personaTone,
-        style: personaStyle,
-        customInstructions: personaInstructions,
-        autoFinalizeOrdersAlways
-      });
-      setShowSaveSuccess(true);
-      setTimeout(() => {
-        setShowSaveSuccess(false);
-      }, 3000);
+      await onUploadProductImage(id, file);
     } catch (err: any) {
-      setPersonaError(err.message || 'Failed to save persona.');
+      setImageError(err.message || 'Failed to upload product image.');
     } finally {
-      setIsSavingPersona(false);
+      setUploadingImageId(null);
+    }
+  };
+
+  const handleImageRemove = async (id: string) => {
+    setImageError('');
+    setUploadingImageId(id);
+    try {
+      await onDeleteProductImage(id);
+    } catch (err: any) {
+      setImageError(err.message || 'Failed to remove product image.');
+    } finally {
+      setUploadingImageId(null);
     }
   };
 
   return (
     <div className="w-full flex-grow flex flex-col text-left">
-      <DashboardHeader 
-        searchPlaceholder="Search catalog…" 
+      <DashboardHeader
+        searchPlaceholder="Search catalog…"
         searchValue={searchTerm}
         onSearchChange={setSearchTerm}
       />
 
       <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
+        <div className="grid grid-cols-1 gap-6 items-start">
+
           {/* Left column: Neural indexed products (Grey 2: 7 Cols) */}
-          <div className="lg:col-span-7 zone-b-grey2 p-6 space-y-5">
+          <div className="zone-b-grey2 p-6 space-y-5">
             <div className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
               <div>
                 <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Neural indexed products</h3>
@@ -161,6 +174,40 @@ export default function ProductCatalog({
                       {addProductError}
                     </div>
                   )}
+
+                  <div className="flex items-center gap-3">
+                    <label
+                      className="relative w-16 h-16 rounded-xl overflow-hidden bg-white/[0.06] border border-white/[0.08] flex items-center justify-center flex-shrink-0 cursor-pointer group/thumb"
+                      title="Add product photo"
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleNewProductImageSelect(e.target.files?.[0])}
+                      />
+                      {newProductImagePreview ? (
+                        <img src={newProductImagePreview} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImagePlus className="h-5 w-5 text-white/30" />
+                      )}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center">
+                        <ImagePlus className="h-4 w-4 text-white" />
+                      </div>
+                    </label>
+                    <div className="space-y-1">
+                      <p className="text-[12px] text-white/60">Optional product photo</p>
+                      {newProductImagePreview && (
+                        <button
+                          type="button"
+                          onClick={() => handleNewProductImageSelect(undefined)}
+                          className="text-[11px] text-white/40 hover:text-[#ff9d92] transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <ImageOff className="h-3 w-3" /> Remove photo
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
@@ -229,6 +276,12 @@ export default function ProductCatalog({
               </div>
             )}
 
+            {imageError && (
+              <div className="status-danger text-xs p-3 rounded-xl text-center font-sans">
+                {imageError}
+              </div>
+            )}
+
             {/* Table */}
             <div className="border border-white/[0.07] rounded-2xl overflow-hidden bg-black/30 w-full">
               <div className="max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 w-full">
@@ -253,7 +306,46 @@ export default function ProductCatalog({
                   ) : (
                     filteredProducts.map((p) => (
                       <tr key={p.id} className="hover:bg-white/[0.03] transition-colors group">
-                        <td className="p-4 font-sans font-bold text-white">{p.name}</td>
+                        <td className="p-4 font-sans font-bold text-white">
+                          <div className="flex items-center gap-3">
+                            <label
+                              className="relative w-9 h-9 rounded-lg overflow-hidden bg-white/[0.06] border border-white/[0.08] flex items-center justify-center flex-shrink-0 cursor-pointer group/thumb"
+                              title={p.imageUrl ? 'Change product photo' : 'Add product photo'}
+                            >
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={uploadingImageId === p.id}
+                                onChange={(e) => handleImageSelect(p.id, e.target.files?.[0])}
+                              />
+                              {p.imageUrl ? (
+                                <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <ImagePlus className="h-4 w-4 text-white/30" />
+                              )}
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center">
+                                {uploadingImageId === p.id ? (
+                                  <span className="text-[8px] text-white font-bold">...</span>
+                                ) : (
+                                  <ImagePlus className="h-3.5 w-3.5 text-white" />
+                                )}
+                              </div>
+                            </label>
+                            {p.imageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => handleImageRemove(p.id)}
+                                disabled={uploadingImageId === p.id}
+                                className="text-white/20 hover:text-[#ff9d92] transition-colors cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                                title="Remove product photo"
+                              >
+                                <ImageOff className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            <span>{p.name}</span>
+                          </div>
+                        </td>
                         <td className="p-4 font-mono text-[12px] text-white/50">{p.sku}</td>
                         <td className="p-4 font-sans text-white font-bold">${p.price.toFixed(2)}</td>
                         <td className="p-4 font-sans text-white/60">{p.inventory} units</td>
@@ -285,158 +377,7 @@ export default function ProductCatalog({
             </div>
           </div>
         </div>
-
-          {/* Right column: AI Agent Persona (Grey 3: 5 Cols / ~420px) */}
-          <div className="lg:col-span-5 zone-b-grey3 p-6 space-y-5">
-            <div className="pb-4 border-b border-white/[0.07]">
-              <h3 className="font-sans font-bold text-[19px] text-white flex items-center gap-2 tracking-tight">
-                <Sparkles className="text-[#7aa8ff] h-5 w-5" />
-                AI agent persona
-              </h3>
-              <p className="text-[13px] text-white/55 mt-0.5">
-                Parameters guiding real-time automated merchant responses
-              </p>
-            </div>
-
-            {/* Tone of voice */}
-            <div className="space-y-2 text-left">
-              <label className="text-[11px] text-white/60 font-bold tracking-[0.10em] block">
-                Tone-of-voice guidelines
-              </label>
-              <textarea
-                rows={3}
-                value={personaTone}
-                onChange={(e) => setPersonaTone(e.target.value)}
-                className="w-full zone-b-input p-3 font-sans text-xs outline-none resize-none"
-                placeholder="e.g. Professional, high-end, elegant"
-              />
-            </div>
-
-            {/* Response layout style (§5.8 Segmented Control) */}
-            <div className="space-y-2 text-left">
-              <label className="text-[11px] text-white/60 font-bold tracking-[0.10em] block">
-                Response layout style
-              </label>
-              <div className="grid grid-cols-2 bg-black/45 border border-white/10 p-1 rounded-[13px]">
-                <button
-                  type="button"
-                  onClick={() => setPersonaStyle('bullets')}
-                  className={`py-2 rounded-lg font-sans text-[12px] font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                    personaStyle === 'bullets'
-                      ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md'
-                      : 'text-white/55 hover:text-white'
-                  }`}
-                >
-                  <List className="h-4 w-4" />
-                  Bullet points
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPersonaStyle('narrative')}
-                  className={`py-2 rounded-lg font-sans text-[12px] font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                    personaStyle === 'narrative'
-                      ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md'
-                      : 'text-white/55 hover:text-white'
-                  }`}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  Conversational
-                </button>
-              </div>
-            </div>
-
-            {/* Custom sales rules */}
-            <div className="space-y-2 text-left">
-              <label className="text-[11px] text-white/60 font-bold tracking-[0.10em] block">
-                Direct sales rules & guardrails
-              </label>
-              <textarea
-                rows={4}
-                value={personaInstructions}
-                onChange={(e) => setPersonaInstructions(e.target.value)}
-                className="w-full zone-b-input p-3 font-sans text-xs outline-none resize-none"
-                placeholder="e.g. Free shipping on orders over $150. Suggest adding complementary accessories."
-              />
-            </div>
-
-            {/* Order auto-finalization segmented control */}
-            <div className="space-y-2 text-left">
-              <label className="text-[11px] text-white/60 font-bold tracking-[0.10em] block">
-                Order auto-finalization
-              </label>
-              <p className="text-[12px] text-white/50 leading-relaxed">
-                When a customer explicitly confirms their order details, should the AI place the order automatically?
-              </p>
-              <div className="grid grid-cols-2 bg-black/45 border border-white/10 p-1 rounded-[13px]">
-                <button
-                  type="button"
-                  onClick={() => setAutoFinalizeOrdersAlways(false)}
-                  className={`py-2 rounded-lg font-sans text-[12px] font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                    !autoFinalizeOrdersAlways
-                      ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md'
-                      : 'text-white/55 hover:text-white'
-                  }`}
-                >
-                  AI managed only
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAutoFinalizeOrdersAlways(true)}
-                  className={`py-2 rounded-lg font-sans text-[12px] font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                    autoFinalizeOrdersAlways
-                      ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md'
-                      : 'text-white/55 hover:text-white'
-                  }`}
-                >
-                  Always
-                </button>
-              </div>
-              <p className="text-[11px] status-warning p-2.5 rounded-xl leading-relaxed mt-2">
-                {autoFinalizeOrdersAlways
-                  ? 'The AI can finalize a confirmed order even when Copilot is set to Manual.'
-                  : 'The AI auto-finalizes orders only when Copilot is set to AI managed.'}
-              </p>
-            </div>
-
-            {/* Model redeployment button */}
-            <div className="pt-4 border-t border-white/[0.07] space-y-3">
-              <button
-                onClick={handleSavePersonaClick}
-                disabled={isSavingPersona}
-                className="w-full btn-light-primary py-3 rounded-xl font-sans font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <Save className="h-4 w-4" />
-                {isSavingPersona ? 'Redeploying model…' : 'Redeploy persona model'}
-              </button>
-
-              <AnimatePresence>
-                {personaError && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    className="status-danger p-3 rounded-xl text-center font-sans text-xs flex items-center justify-center gap-2"
-                  >
-                    <AlertCircle className="h-4 w-4" /> {personaError}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <AnimatePresence>
-                {showSaveSuccess && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    className="status-success p-3 rounded-xl text-center font-sans text-xs flex items-center justify-center gap-2"
-                  >
-                    <CheckCircle className="h-4 w-4" /> Model redeployed successfully!
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
+      </div>
       </div>
     </div>
   );

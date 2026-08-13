@@ -27,6 +27,22 @@ export async function sendMessengerMessage(pageAccessToken: string, recipientPsi
   }
 }
 
+export async function sendMessengerImage(pageAccessToken: string, recipientPsid: string, imageUrl: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipient: { id: recipientPsid },
+      message: { attachment: { type: 'image', payload: { url: imageUrl, is_reusable: true } } },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Messenger image send failed: ${res.status} ${body}`);
+  }
+}
+
 export async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, recipientWaId: string, text: string): Promise<void> {
   const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`, {
     method: 'POST',
@@ -49,6 +65,28 @@ export async function sendWhatsAppMessage(phoneNumberId: string, accessToken: st
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`WhatsApp send failed: ${res.status} ${body}`);
+  }
+}
+
+export async function sendWhatsAppImage(phoneNumberId: string, accessToken: string, recipientWaId: string, imageUrl: string): Promise<void> {
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(phoneNumberId)}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipientWaId,
+      type: 'image',
+      image: { link: imageUrl },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`WhatsApp image send failed: ${res.status} ${body}`);
   }
 }
 
@@ -99,6 +137,38 @@ export async function sendInstagramMessage(igAccountId: string, accessToken: str
       throw new Error(`Instagram send failed (fallback): ${fallbackRes.status} ${fallbackBody}`);
     }
     throw new Error(`Instagram send failed: ${res.status} ${body}`);
+  }
+}
+
+export async function sendInstagramImage(igAccountId: string, accessToken: string, recipientIgUserId: string, imageUrl: string): Promise<void> {
+  let res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(igAccountId)}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientIgUserId },
+      message: { attachment: { type: 'image', payload: { url: imageUrl, is_reusable: true } } },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    if (body.includes('"code":3') || body.includes('capability')) {
+      const fallbackRes = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(accessToken)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientIgUserId },
+          message: { attachment: { type: 'image', payload: { url: imageUrl, is_reusable: true } } },
+        }),
+      });
+      if (fallbackRes.ok) return;
+      const fallbackBody = await fallbackRes.text();
+      throw new Error(`Instagram image send failed (fallback): ${fallbackRes.status} ${fallbackBody}`);
+    }
+    throw new Error(`Instagram image send failed: ${res.status} ${body}`);
   }
 }
 

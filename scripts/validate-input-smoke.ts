@@ -9,7 +9,7 @@ import {
   conversationPatchHasOnlyAllowedKeys,
 } from '../server/inputValidation';
 import { isPasswordStrongEnough, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../server/auth';
-import { isLocalAvatarUrl } from '../server/avatarStorage';
+import { isLocalAvatarUrl } from '../server/mediaStorage';
 
 let passed = 0;
 let failed = 0;

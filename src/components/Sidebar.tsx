@@ -38,7 +38,7 @@ export default function Sidebar({
   const menuItems = [
     { id: 'inbox', label: 'Unified inbox', icon: MessageSquare },
     { id: 'catalog', label: 'Product catalog', icon: Package },
-    { id: 'persona', label: 'Agent Persona', icon: Bot },
+    { id: 'persona', label: 'AI Persona', icon: Bot },
     { id: 'orders', label: 'Orders', icon: ClipboardList },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'integrations', label: 'Integrations', icon: Grid },

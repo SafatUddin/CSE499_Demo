@@ -140,7 +140,7 @@ export default function ProductCatalog({
           <div className="zone-b-grey2 p-6 space-y-5">
             <div className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
               <div>
-                <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Neural indexed products</h3>
+                <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Product Catalog</h3>
                 <p className="text-[13px] text-white/55 mt-0.5">
                   {filteredProducts.length} items verified inside model context
                 </p>

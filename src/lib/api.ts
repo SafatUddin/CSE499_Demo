@@ -183,8 +183,18 @@ export interface ApiProduct {
   imageUrl?: string;
 }
 
-export function listProducts() {
-  return request<ApiProduct[]>('/api/products');
+export interface ProductsResponse {
+  products: ApiProduct[];
+  isWebsiteConnected?: boolean;
+  connectedChannels?: string[];
+}
+
+export async function listProducts(): Promise<ProductsResponse> {
+  const res = await request<ApiProduct[] | ProductsResponse>('/api/products');
+  if (Array.isArray(res)) {
+    return { products: res, isWebsiteConnected: false };
+  }
+  return res;
 }
 
 export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending' }) {

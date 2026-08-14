@@ -283,11 +283,18 @@ export default function App() {
       .catch((err) => console.error('Failed to load channels:', err));
   };
 
+  const [isWebsiteConnected, setIsWebsiteConnected] = useState(false);
+
   // Load real catalog + persona + conversations from the backend once we know who's logged in.
   // Skip all dashboard fetches until onboarding is complete — they would all 403 anyway.
   useEffect(() => {
     if (!merchant || !profileComplete) return;
-    listProducts().then(setProducts).catch((err) => console.error('Failed to load products:', err));
+    listProducts()
+      .then((res) => {
+        setProducts(res.products);
+        setIsWebsiteConnected(!!res.isWebsiteConnected);
+      })
+      .catch((err) => console.error('Failed to load products:', err));
     getPersona()
       .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways, openingText: p.openingText, openingImageUrl: p.openingImageUrl }))
       .catch((err) => console.error('Failed to load persona:', err));
@@ -497,6 +504,7 @@ export default function App() {
         return (
           <ProductCatalog
             products={products}
+            isWebsiteConnected={isWebsiteConnected}
             onAddProduct={handleAddProduct}
             onDeleteProduct={handleDeleteProduct}
             onUploadProductImage={handleUploadProductImage}

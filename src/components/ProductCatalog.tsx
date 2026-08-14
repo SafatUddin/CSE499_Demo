@@ -15,6 +15,7 @@ import DashboardHeader from './DashboardHeader';
 
 interface ProductCatalogProps {
   products: Product[];
+  isWebsiteConnected?: boolean;
   onAddProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
   onDeleteProduct: (id: string) => Promise<void>;
   onUploadProductImage: (id: string, file: File) => Promise<void>;
@@ -23,6 +24,7 @@ interface ProductCatalogProps {
 
 export default function ProductCatalog({
   products,
+  isWebsiteConnected = false,
   onAddProduct,
   onDeleteProduct,
   onUploadProductImage,
@@ -150,13 +152,19 @@ export default function ProductCatalog({
                 </p>
               </div>
 
-              <button
-                onClick={() => setShowAddForm(!showAddForm)}
-                className="btn-accent px-4 py-2 font-sans font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                {showAddForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                {showAddForm ? 'Cancel' : 'Add product'}
-              </button>
+              {isWebsiteConnected ? (
+                <div className="status-success px-3 py-1.5 rounded-full text-xs font-bold font-sans flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4" /> Live Website Sync Active
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddForm(!showAddForm)}
+                  className="btn-accent px-4 py-2 font-sans font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  {showAddForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  {showAddForm ? 'Cancel' : 'Add product'}
+                </button>
+              )}
             </div>
 
             {/* Add product modal panel */}

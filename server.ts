@@ -885,7 +885,14 @@ async function startServer() {
         if (existing) {
           await prisma.product.update({
             where: { id: existing.id },
-            data: { name: p.name, price: p.price, inventory: p.inventory, externalId: p.externalId },
+            data: {
+              name: p.name,
+              price: p.price,
+              inventory: p.inventory,
+              externalId: p.externalId,
+              ...(p.description !== undefined ? { description: p.description } : {}),
+              ...(p.imageUrl !== undefined ? { imageUrl: p.imageUrl } : {}),
+            },
           });
           updated++;
         } else {
@@ -897,6 +904,8 @@ async function startServer() {
               price: p.price,
               inventory: p.inventory,
               externalId: p.externalId,
+              description: p.description || null,
+              imageUrl: p.imageUrl || null,
               status: 'TRAINED',
             },
           });
@@ -1216,14 +1225,28 @@ async function startServer() {
     imageUrl: p.imageUrl || undefined,
   });
 
-  // List this merchant's products
+  // List this merchant's products & catalog source info
   app.get('/api/products', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
-      const products = await prisma.product.findMany({
-        where: { storeId: req.auth!.storeId },
-        orderBy: { createdAt: 'desc' },
+      const [products, channels] = await Promise.all([
+        prisma.product.findMany({
+          where: { storeId: req.auth!.storeId },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.channel.findMany({
+          where: { storeId: req.auth!.storeId, connected: true },
+          select: { type: true },
+        }),
+      ]);
+
+      const connectedTypes = channels.map(c => c.type);
+      const isWebsiteConnected = connectedTypes.includes('SHOPIFY');
+
+      res.json({
+        products: products.map(toPublicProduct),
+        isWebsiteConnected,
+        connectedChannels: connectedTypes,
       });
-      res.json(products.map(toPublicProduct));
     } catch (err: any) {
       console.error('List products error:', err);
       res.status(500).json({ error: 'Failed to load products' });

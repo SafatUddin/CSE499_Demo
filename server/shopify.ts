@@ -89,6 +89,8 @@ export interface ShopifyProduct {
   sku: string;
   price: number;
   inventory: number;
+  description?: string;
+  imageUrl?: string;
 }
 
 // Pulls all products (paginated via Shopify's Link header, 250 per page max) and
@@ -112,12 +114,19 @@ export async function fetchShopifyProducts(domain: string, accessToken: string):
       // Many Shopify products (gift cards, sample data) ship with no SKU set. Fall back
       // to a stable ID-derived SKU instead of dropping them, so nothing silently skips.
       const sku = variant.sku && variant.sku.trim() ? variant.sku.trim() : `SHOPIFY-${variant.id}`;
+      // Clean HTML tags from body_html description if present
+      const rawDesc = p.body_html || '';
+      const cleanDesc = rawDesc.replace(/<[^>]*>?/gm, '').trim();
+      const imageUrl = p.image?.src || p.images?.[0]?.src || undefined;
+
       products.push({
         externalId: String(variant.id),
         name: p.title,
         sku,
         price: parseFloat(variant.price) || 0,
         inventory: variant.inventory_quantity ?? 0,
+        description: cleanDesc || undefined,
+        imageUrl: imageUrl || undefined,
       });
     }
 

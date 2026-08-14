@@ -13,7 +13,9 @@ import {
   Lock,
   Globe,
   X,
-  ChevronRight
+  ChevronRight,
+  FileSpreadsheet,
+  Upload
 } from 'lucide-react';
 import { Integration } from '../types';
 import {
@@ -77,7 +79,54 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [isConnectingShopify, setIsConnectingShopify] = useState(false);
   const [isSyncingShopify, setIsSyncingShopify] = useState(false);
   const [shopifySyncResult, setShopifySyncResult] = useState<{ created: number; updated: number; total: number } | null>(null);
-  const [showShopifyManual, setShowShopifyManual] = useState(false);
+  // Excel/CSV Catalog Upload state
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelUploading, setExcelUploading] = useState(false);
+  const [excelSuccessMsg, setExcelSuccessMsg] = useState('');
+  const [excelErrorMsg, setExcelErrorMsg] = useState('');
+
+  const handleExcelUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setExcelFile(file);
+    setExcelUploading(true);
+    setExcelSuccessMsg('');
+    setExcelErrorMsg('');
+
+    try {
+      // Parse CSV/Excel client-side or send to server
+      const text = await file.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      let count = 0;
+
+      // Skip header if present
+      const startIdx = lines[0]?.toLowerCase().includes('sku') || lines[0]?.toLowerCase().includes('name') ? 1 : 0;
+      for (let i = startIdx; i < lines.length; i++) {
+        const parts = lines[i].split(',').map(p => p.trim().replace(/^"|"$/g, ''));
+        if (parts.length >= 2) {
+          const name = parts[0] || `Product ${i}`;
+          const sku = parts[1] || `SKU-${i}-${Date.now()}`;
+          const price = parseFloat(parts[2]) || 0.0;
+          const inventory = parseInt(parts[3]) || 10;
+          const description = parts[4] || undefined;
+          
+          try {
+            const { createProduct } = await import('../lib/api');
+            await createProduct({ name, sku, price, inventory, status: 'Trained' });
+            count++;
+          } catch (e) {
+            // ignore duplicate SKUs during bulk import
+          }
+        }
+      }
+
+      setExcelSuccessMsg(`Successfully imported & indexed ${count} products from ${file.name}`);
+      await onRefreshAll();
+    } catch (err: any) {
+      setExcelErrorMsg(err.message || 'Failed to parse product catalog file');
+    } finally {
+      setExcelUploading(false);
+    }
+  };
 
   const refreshChannelsStatus = () => {
     listChannels()
@@ -547,6 +596,50 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
               Read integration documentation &rarr;
             </span>
           </div>
+        </div>
+
+        {/* Excel/CSV Catalog Upload Banner Card */}
+        <div className="zone-b-grey2 border border-blue-500/20 rounded-2xl p-6 md:p-8 mt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden bg-gradient-to-r from-[#142347]/50 via-transparent to-transparent">
+          <div className="flex items-start gap-4 max-w-2xl">
+            <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0">
+              <FileSpreadsheet className="h-6 w-6 text-blue-400" />
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono uppercase tracking-widest font-bold text-blue-400 bg-blue-500/10 px-2.5 py-0.5 rounded-full border border-blue-500/20">
+                Bulk Catalog Import
+              </span>
+              <h3 className="text-lg font-bold text-white font-sans">
+                Don't have a website upload your product catalog excel sheet and continue your business
+              </h3>
+              <p className="text-xs text-white/50 leading-relaxed font-sans">
+                Upload a `.csv` or `.xlsx` product sheet containing Name, SKU, Price, Inventory & Description to train your AI instantly.
+              </p>
+
+              {excelSuccessMsg && (
+                <div className="status-success text-xs p-2.5 rounded-xl font-sans mt-2">
+                  {excelSuccessMsg}
+                </div>
+              )}
+
+              {excelErrorMsg && (
+                <div className="status-danger text-xs p-2.5 rounded-xl font-sans mt-2">
+                  {excelErrorMsg}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <label className="btn-accent px-6 py-3.5 rounded-xl text-xs font-bold font-sans flex items-center gap-2 cursor-pointer shrink-0 shadow-lg hover:scale-105 transition-all">
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              className="hidden"
+              disabled={excelUploading}
+              onChange={(e) => handleExcelUpload(e.target.files?.[0])}
+            />
+            <Upload className="h-4 w-4" />
+            {excelUploading ? 'Parsing & Indexing...' : 'Upload Catalog Sheet'}
+          </label>
         </div>
 
       </div>

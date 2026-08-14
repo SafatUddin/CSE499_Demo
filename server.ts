@@ -1205,13 +1205,14 @@ async function startServer() {
     }
   });
 
-  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; imageUrl?: string | null }) => ({
+  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; description?: string | null; imageUrl?: string | null }) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
     price: Number(p.price),
     inventory: p.inventory,
     status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
+    description: p.description || undefined,
     imageUrl: p.imageUrl || undefined,
   });
 

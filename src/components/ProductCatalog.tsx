@@ -35,6 +35,7 @@ export default function ProductCatalog({
   const [newProductSku, setNewProductSku] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductInventory, setNewProductInventory] = useState('');
+  const [newProductDescription, setNewProductDescription] = useState('');
   const [newProductImageFile, setNewProductImageFile] = useState<File | null>(null);
   const [newProductImagePreview, setNewProductImagePreview] = useState<string | null>(null);
 
@@ -46,7 +47,8 @@ export default function ProductCatalog({
 
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.description && p.description.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const handleAddProductSubmit = async (e: React.FormEvent) => {
@@ -61,6 +63,7 @@ export default function ProductCatalog({
         sku: newProductSku,
         price: parseFloat(newProductPrice) || 0.0,
         inventory: parseInt(newProductInventory) || 0,
+        description: newProductDescription.trim() || undefined,
         status: 'Trained'
       });
 
@@ -76,6 +79,7 @@ export default function ProductCatalog({
       setNewProductSku('');
       setNewProductPrice('');
       setNewProductInventory('');
+      setNewProductDescription('');
       setNewProductImageFile(null);
       setNewProductImagePreview(null);
       setShowAddForm(false);
@@ -259,6 +263,17 @@ export default function ProductCatalog({
                     </div>
                   </div>
 
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-white/60 font-semibold block">Product description & details</label>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Crafted from 100% mulberry silk with notch lapels and padded shoulders."
+                      value={newProductDescription}
+                      onChange={(e) => setNewProductDescription(e.target.value)}
+                      className="w-full zone-b-input px-3 py-2 text-xs outline-none resize-none"
+                    />
+                  </div>
+
                   <button
                     type="submit"
                     disabled={isAddingProduct}
@@ -284,15 +299,15 @@ export default function ProductCatalog({
 
             {/* Table */}
             <div className="border border-white/[0.07] rounded-2xl overflow-hidden bg-black/30 w-full">
-              <div className="max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 w-full">
+              <div className="max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 w-full">
                 <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white/[0.05] border-b border-white/[0.07] text-[11px] font-sans text-white/50 tracking-[0.11em] font-bold">
-                    <th className="p-4">Product</th>
+                    <th className="p-4">Product & Info</th>
                     <th className="p-4">SKU</th>
                     <th className="p-4">Price</th>
                     <th className="p-4">Inventory</th>
-                    <th className="p-4">AI status</th>
+                    <th className="p-4">AI Status</th>
                     <th className="p-4 text-right">Action</th>
                   </tr>
                 </thead>
@@ -300,16 +315,16 @@ export default function ProductCatalog({
                   {filteredProducts.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="p-8 text-center text-white/40 font-sans text-xs">
-                        No matching products indexed in neural context.
+                        No matching products indexed in catalog. Connect Shopify or add products to populate.
                       </td>
                     </tr>
                   ) : (
                     filteredProducts.map((p) => (
                       <tr key={p.id} className="hover:bg-white/[0.03] transition-colors group">
                         <td className="p-4 font-sans font-bold text-white">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-start gap-3">
                             <label
-                              className="relative w-9 h-9 rounded-lg overflow-hidden bg-white/[0.06] border border-white/[0.08] flex items-center justify-center flex-shrink-0 cursor-pointer group/thumb"
+                              className="relative w-12 h-12 rounded-xl overflow-hidden bg-white/[0.06] border border-white/[0.08] flex items-center justify-center flex-shrink-0 cursor-pointer group/thumb shadow-sm"
                               title={p.imageUrl ? 'Change product photo' : 'Add product photo'}
                             >
                               <input
@@ -320,39 +335,56 @@ export default function ProductCatalog({
                                 onChange={(e) => handleImageSelect(p.id, e.target.files?.[0])}
                               />
                               {p.imageUrl ? (
-                                <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                                <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
                               ) : (
-                                <ImagePlus className="h-4 w-4 text-white/30" />
+                                <ImagePlus className="h-5 w-5 text-white/30" />
                               )}
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center">
                                 {uploadingImageId === p.id ? (
                                   <span className="text-[8px] text-white font-bold">...</span>
                                 ) : (
-                                  <ImagePlus className="h-3.5 w-3.5 text-white" />
+                                  <ImagePlus className="h-4 w-4 text-white" />
                                 )}
                               </div>
                             </label>
+
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-bold text-white text-[14px] leading-snug">{p.name}</span>
+                              {p.description ? (
+                                <p className="text-[11.5px] text-white/50 font-normal line-clamp-2 max-w-sm leading-relaxed">
+                                  {p.description}
+                                </p>
+                              ) : (
+                                <span className="text-[11px] text-white/30 italic font-normal">No detailed description provided</span>
+                              )}
+                            </div>
+
                             {p.imageUrl && (
                               <button
                                 type="button"
                                 onClick={() => handleImageRemove(p.id)}
                                 disabled={uploadingImageId === p.id}
-                                className="text-white/20 hover:text-[#ff9d92] transition-colors cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-40"
+                                className="text-white/20 hover:text-[#ff9d92] transition-colors cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-40 ml-1 mt-0.5"
                                 title="Remove product photo"
                               >
                                 <ImageOff className="h-3.5 w-3.5" />
                               </button>
                             )}
-                            <span>{p.name}</span>
                           </div>
                         </td>
-                        <td className="p-4 font-mono text-[12px] text-white/50">{p.sku}</td>
+                        <td className="p-4 font-mono text-[12px] text-white/60 font-semibold">{p.sku}</td>
                         <td className="p-4 font-sans text-white font-bold">${p.price.toFixed(2)}</td>
-                        <td className="p-4 font-sans text-white/60">{p.inventory} units</td>
+                        <td className="p-4 font-sans">
+                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                            p.inventory > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                          }`}>
+                            {p.inventory > 0 ? `${p.inventory} units in stock` : 'Out of Stock'}
+                          </span>
+                        </td>
                         <td className="p-4">
                           {p.status === 'Trained' ? (
                             <span className="status-success px-2.5 py-1 text-[11px] font-bold rounded-full inline-flex items-center gap-1.5">
-                              <CheckCircle className="h-3 w-3" /> Trained
+                              <CheckCircle className="h-3 w-3" /> Indexed & Trained
                             </span>
                           ) : (
                             <span className="status-warning px-2.5 py-1 text-[11px] font-bold rounded-full inline-flex items-center gap-1.5">
@@ -363,7 +395,7 @@ export default function ProductCatalog({
                         <td className="p-4 text-right">
                           <button
                             onClick={() => handleDeleteClick(p.id)}
-                            className="text-white/30 hover:text-[#ff9d92] p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                            className="text-white/30 hover:text-[#ff9d92] p-2 rounded-lg hover:bg-white/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
                             title="Delete product"
                           >
                             <Trash2 className="h-4 w-4" />

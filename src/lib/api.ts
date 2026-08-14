@@ -179,6 +179,7 @@ export interface ApiProduct {
   price: number;
   inventory: number;
   status: 'Trained' | 'Pending';
+  description?: string;
   imageUrl?: string;
 }
 

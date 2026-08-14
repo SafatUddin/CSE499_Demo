@@ -580,66 +580,58 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
           );
         })}
 
-        {/* System Insight Card (§8) */}
-        <div className="zone-b-grey2 border border-dashed border-white/16 rounded-2xl p-6 flex flex-col justify-between h-[260px] relative overflow-hidden group">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#3ddc84] shadow-[0_0_8px_rgba(61,220,132,0.9)] animate-pulse-dot" />
-            <span className="text-xs font-sans font-bold text-white/50 tracking-[0.10em]">System insight</span>
+        {/* Excel/CSV Catalog Upload Card matching other cards */}
+        <div className="zone-b-grey2 border border-dashed border-white/20 hover:border-white/35 p-6 rounded-2xl flex flex-col justify-between h-[260px] transition-all duration-300 relative group overflow-hidden">
+          <div>
+            <div className="flex justify-between items-start">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center transition-transform group-hover:scale-105 duration-300">
+                <FileSpreadsheet className="h-6 w-6" />
+              </div>
+              <div>
+                <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                  CSV / Excel
+                </span>
+              </div>
+            </div>
+
+            <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
+              Upload Excel/CSV product sheet
+            </h3>
+            
+            <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
+              Don't have a website? Upload your product catalog excel/csv file and continue your business
+            </p>
+
+            {excelSuccessMsg && (
+              <div className="status-success text-[11px] p-2 rounded-xl font-sans mt-2">
+                {excelSuccessMsg}
+              </div>
+            )}
+
+            {excelErrorMsg && (
+              <div className="status-danger text-[11px] p-2 rounded-xl font-sans mt-2">
+                {excelErrorMsg}
+              </div>
+            )}
           </div>
 
-          <p className="text-xs text-white/60 leading-relaxed font-sans">
-            Webhooks are continuously monitored. Channel events automatically reflect inside your ShopMate AI Inbox thread within milliseconds.
-          </p>
-
-          <div className="border-t border-white/[0.07] pt-3">
-            <span className="text-xs font-sans text-[#7aa8ff] hover:underline cursor-pointer flex items-center gap-1.5">
-              Read integration documentation &rarr;
+          <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
+            <span className="font-sans text-xs text-white/50">
+              Bulk SKU import
             </span>
+
+            <label className="btn-accent font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md hover:scale-105">
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                disabled={excelUploading}
+                onChange={(e) => handleExcelUpload(e.target.files?.[0])}
+              />
+              <Upload className="h-3.5 w-3.5" />
+              {excelUploading ? 'Uploading…' : 'Upload'}
+            </label>
           </div>
-        </div>
-
-        {/* Excel/CSV Catalog Upload Banner Card */}
-        <div className="zone-b-grey2 border border-blue-500/20 rounded-2xl p-6 md:p-8 mt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden bg-gradient-to-r from-[#142347]/50 via-transparent to-transparent">
-          <div className="flex items-start gap-4 max-w-2xl">
-            <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0">
-              <FileSpreadsheet className="h-6 w-6 text-blue-400" />
-            </div>
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-mono uppercase tracking-widest font-bold text-blue-400 bg-blue-500/10 px-2.5 py-0.5 rounded-full border border-blue-500/20">
-                Bulk Catalog Import
-              </span>
-              <h3 className="text-lg font-bold text-white font-sans">
-                Don't have a website upload your product catalog excel sheet and continue your business
-              </h3>
-              <p className="text-xs text-white/50 leading-relaxed font-sans">
-                Upload a `.csv` or `.xlsx` product sheet containing Name, SKU, Price, Inventory & Description to train your AI instantly.
-              </p>
-
-              {excelSuccessMsg && (
-                <div className="status-success text-xs p-2.5 rounded-xl font-sans mt-2">
-                  {excelSuccessMsg}
-                </div>
-              )}
-
-              {excelErrorMsg && (
-                <div className="status-danger text-xs p-2.5 rounded-xl font-sans mt-2">
-                  {excelErrorMsg}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <label className="btn-accent px-6 py-3.5 rounded-xl text-xs font-bold font-sans flex items-center gap-2 cursor-pointer shrink-0 shadow-lg hover:scale-105 transition-all">
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              className="hidden"
-              disabled={excelUploading}
-              onChange={(e) => handleExcelUpload(e.target.files?.[0])}
-            />
-            <Upload className="h-4 w-4" />
-            {excelUploading ? 'Parsing & Indexing...' : 'Upload Catalog Sheet'}
-          </label>
         </div>
 
       </div>

@@ -181,6 +181,7 @@ export interface ApiProduct {
   status: 'Trained' | 'Pending';
   description?: string;
   imageUrl?: string;
+  rawAttributes?: Record<string, any>;
 }
 
 export interface ProductsResponse {
@@ -197,7 +198,7 @@ export async function listProducts(): Promise<ProductsResponse> {
   return res;
 }
 
-export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending' }) {
+export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending'; description?: string; rawAttributes?: Record<string, any> }) {
   return request<ApiProduct>('/api/products', { method: 'POST', body: JSON.stringify(input) });
 }
 

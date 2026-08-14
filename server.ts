@@ -892,6 +892,7 @@ async function startServer() {
               externalId: p.externalId,
               ...(p.description !== undefined ? { description: p.description } : {}),
               ...(p.imageUrl !== undefined ? { imageUrl: p.imageUrl } : {}),
+              ...(p.rawAttributes !== undefined ? { rawAttributes: p.rawAttributes } : {}),
             },
           });
           updated++;
@@ -906,6 +907,7 @@ async function startServer() {
               externalId: p.externalId,
               description: p.description || null,
               imageUrl: p.imageUrl || null,
+              rawAttributes: p.rawAttributes || null,
               status: 'TRAINED',
             },
           });
@@ -1214,7 +1216,7 @@ async function startServer() {
     }
   });
 
-  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; description?: string | null; imageUrl?: string | null }) => ({
+  const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; description?: string | null; imageUrl?: string | null; rawAttributes?: any }) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
@@ -1223,6 +1225,7 @@ async function startServer() {
     status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
     description: p.description || undefined,
     imageUrl: p.imageUrl || undefined,
+    rawAttributes: (p.rawAttributes && typeof p.rawAttributes === 'object') ? p.rawAttributes : undefined,
   });
 
   // List this merchant's products & catalog source info
@@ -1268,6 +1271,8 @@ async function startServer() {
         return res.status(409).json({ error: 'A product with this SKU already exists' });
       }
 
+      const rawAttributes = req.body.rawAttributes && typeof req.body.rawAttributes === 'object' ? req.body.rawAttributes : undefined;
+
       const product = await prisma.product.create({
         data: {
           storeId: req.auth!.storeId,
@@ -1277,6 +1282,7 @@ async function startServer() {
           inventory: validated.inventory,
           status: validated.status,
           ...(validated.description !== undefined ? { description: validated.description } : {}),
+          ...(rawAttributes !== undefined ? { rawAttributes } : {}),
         },
       });
       res.status(201).json(toPublicProduct(product));

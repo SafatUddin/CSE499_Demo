@@ -88,20 +88,21 @@ model Store {
 }
 
 model Product {
-  id          String        @id @default(cuid())
-  store       Store         @relation(fields: [storeId], references: [id])
-  storeId     String
-  name        String
-  sku         String
-  price       Decimal
-  inventory   Int
-  description String?
-  imageUrl    String?
-  status      ProductStatus @default(PENDING)
-  createdAt   DateTime      @default(now())
+  id            String        @id @default(cuid())
+  store         Store         @relation(fields: [storeId], references: [id])
+  storeId       String
+  name          String
+  sku           String
+  price         Decimal
+  inventory     Int
+  description   String?
+  imageUrl      String?
+  rawAttributes Json?
+  status        ProductStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
   // Shopify's variant ID, when this product was synced from a connected Shopify store.
   // Null for manually-entered products. Lets a re-sync detect renames without duplicating.
-  externalId  String?
+  externalId    String?
 
   @@unique([storeId, sku])
 }

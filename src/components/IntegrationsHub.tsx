@@ -93,29 +93,84 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     setExcelErrorMsg('');
 
     try {
-      // Parse CSV/Excel client-side or send to server
       const text = await file.text();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (rawLines.length === 0) throw new Error('File is empty');
+
+      // Helper to parse CSV line handling quotes
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim().replace(/^"|"$/g, ''));
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim().replace(/^"|"$/g, ''));
+        return result;
+      };
+
+      const headers = parseCSVLine(rawLines[0]);
       let count = 0;
 
-      // Skip header if present
-      const startIdx = lines[0]?.toLowerCase().includes('sku') || lines[0]?.toLowerCase().includes('name') ? 1 : 0;
-      for (let i = startIdx; i < lines.length; i++) {
-        const parts = lines[i].split(',').map(p => p.trim().replace(/^"|"$/g, ''));
-        if (parts.length >= 2) {
-          const name = parts[0] || `Product ${i}`;
-          const sku = parts[1] || `SKU-${i}-${Date.now()}`;
-          const price = parseFloat(parts[2]) || 0.0;
-          const inventory = parseInt(parts[3]) || 10;
-          const description = parts[4] || undefined;
-          
-          try {
-            const { createProduct } = await import('../lib/api');
-            await createProduct({ name, sku, price, inventory, status: 'Trained' });
-            count++;
-          } catch (e) {
-            // ignore duplicate SKUs during bulk import
+      for (let i = 1; i < rawLines.length; i++) {
+        const values = parseCSVLine(rawLines[i]);
+        if (values.length === 0) continue;
+
+        const rowMap: Record<string, string> = {};
+        headers.forEach((h, idx) => {
+          if (h && values[idx] !== undefined && values[idx] !== '') {
+            rowMap[h] = values[idx];
           }
+        });
+
+        // Smart field matching (case insensitive)
+        const findVal = (...keys: string[]) => {
+          const matchedKey = Object.keys(rowMap).find(k => keys.some(key => k.toLowerCase().includes(key.toLowerCase())));
+          return matchedKey ? rowMap[matchedKey] : undefined;
+        };
+
+        const name = findVal('title', 'name', 'product') || values[0] || `Product ${i}`;
+        const sku = findVal('sku', 'code', 'id') || `SKU-${i}-${Date.now()}`;
+        const priceStr = findVal('price', 'cost', 'msrp', 'amount') || '0';
+        const price = parseFloat(priceStr.replace(/[^0-9.]/g, '')) || 0.0;
+        const invStr = findVal('inventory', 'stock', 'quantity', 'qty', 'unit') || '0';
+        const inventory = parseInt(invStr.replace(/[^0-9]/g, '')) || 0;
+        const description = findVal('description', 'desc', 'details', 'body') || undefined;
+
+        // Collect all remaining columns into dynamic rawAttributes
+        const rawAttributes: Record<string, any> = {};
+        headers.forEach((h, idx) => {
+          const val = values[idx];
+          if (h && val !== undefined && val !== '') {
+            const hLower = h.toLowerCase();
+            if (!['title', 'name', 'sku', 'price', 'inventory', 'stock', 'quantity', 'description', 'desc'].some(k => hLower === k)) {
+              rawAttributes[h] = val;
+            }
+          }
+        });
+
+        try {
+          const { createProduct } = await import('../lib/api');
+          await createProduct({
+            name,
+            sku,
+            price,
+            inventory,
+            description,
+            rawAttributes: Object.keys(rawAttributes).length > 0 ? rawAttributes : undefined,
+            status: 'Trained',
+          });
+          count++;
+        } catch (e) {
+          // ignore duplicate SKUs during bulk import
         }
       }
 

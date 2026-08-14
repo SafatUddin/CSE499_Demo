@@ -21,6 +21,7 @@ export interface Product {
   status: 'Trained' | 'Pending';
   description?: string;
   imageUrl?: string;
+  rawAttributes?: Record<string, any>;
 }
 
 export interface ChatMessage {

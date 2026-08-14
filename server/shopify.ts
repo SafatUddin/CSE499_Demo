@@ -91,6 +91,7 @@ export interface ShopifyProduct {
   inventory: number;
   description?: string;
   imageUrl?: string;
+  rawAttributes?: Record<string, any>;
 }
 
 // Pulls all products (paginated via Shopify's Link header, 250 per page max) and
@@ -119,6 +120,29 @@ export async function fetchShopifyProducts(domain: string, accessToken: string):
       const cleanDesc = rawDesc.replace(/<[^>]*>?/gm, '').trim();
       const imageUrl = p.image?.src || p.images?.[0]?.src || undefined;
 
+      // Capture all raw store attributes (Vendor, Product Type, Tags, Weight, Color, Option Names/Values, etc.)
+      const rawAttrs: Record<string, any> = {
+        'Product Type': p.product_type || undefined,
+        'Vendor': p.vendor || undefined,
+        'Tags': p.tags ? (Array.isArray(p.tags) ? p.tags.join(', ') : p.tags) : undefined,
+        'Weight': variant.weight ? `${variant.weight} ${variant.weight_unit || 'g'}` : undefined,
+      };
+
+      if (p.options && Array.isArray(p.options)) {
+        p.options.forEach((opt: any) => {
+          if (opt.name && opt.values) {
+            rawAttrs[opt.name] = Array.isArray(opt.values) ? opt.values.join(', ') : String(opt.values);
+          }
+        });
+      }
+
+      // Clean up undefined keys
+      Object.keys(rawAttrs).forEach((key) => {
+        if (rawAttrs[key] === undefined || rawAttrs[key] === null || rawAttrs[key] === '') {
+          delete rawAttrs[key];
+        }
+      });
+
       products.push({
         externalId: String(variant.id),
         name: p.title,
@@ -127,6 +151,7 @@ export async function fetchShopifyProducts(domain: string, accessToken: string):
         inventory: variant.inventory_quantity ?? 0,
         description: cleanDesc || undefined,
         imageUrl: imageUrl || undefined,
+        rawAttributes: Object.keys(rawAttrs).length > 0 ? rawAttrs : undefined,
       });
     }
 

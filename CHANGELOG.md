@@ -2,6 +2,13 @@
 
 Plain-language history of work on ShopMate AI, for humans (not git blame). See `CLAUDE.md` for current project state and `PLANNING.md` for the roadmap.
 
+## 2026-08-14 — Rebrand to Remlin, Railway project renamed
+
+- App rebranded from "ShopMate AI" to "Remlin" (new logo, sidebar/header text).
+- Railway project/service renamed `shopmateAI` → `Remlin`, moving the public URL from `shopmateai-production.up.railway.app` to `remlin.up.railway.app`.
+- Fixed a bug introduced by the rename: Railway's `APP_URL` env var ended up with a stray backslash (`remlin\.up.railway.app`), which made `new URL(APP_URL).origin` resolve to just `https://remlin` — silently breaking the CSRF origin check (`requireTrustedOrigin`) and would have broken Google OAuth's callback redirect too. Corrected via `railway variables --set`.
+- Still needs manual updates in external dashboards (not something code/CLI can fix): Meta app's Messenger webhook Callback URL, Facebook Login's Valid OAuth Redirect URIs, App Domains, Privacy Policy URL; Google Cloud Console's Authorized redirect URIs/JS origins if Google sign-in is used; Shopify Partner Dashboard's redirect URI if a store is connected.
+
 ## 2026-07-30/31 — Customer-driven order confirmation (admin-independent)
 
 - The AI can now finalize a real order entirely from the conversation, with no merchant click required: once a customer's cart and shipping address are both known, the AI presents a summary and asks them to confirm; an explicit "yes" auto-creates a real `Order` and clears the cart.

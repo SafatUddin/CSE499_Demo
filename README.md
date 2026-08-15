@@ -1,6 +1,6 @@
 ## Live Site
 
-The deployed app is live on Railway: [shopmateai-production.up.railway.app](https://shopmateai-production.up.railway.app)
+The deployed app is live on Railway: [remlin.up.railway.app](https://remlin.up.railway.app)
 
 Demo login: `merchant@shopmate.ai` / `password1234`
 

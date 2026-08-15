@@ -3297,14 +3297,28 @@ async function startServer() {
 <title>Privacy Policy — Remlin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  body { background:#070708; color:#e2e2e2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
-  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100vh;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-color: #050506;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 26px 26px;
+    background-attachment: fixed;
+  }
+  .legal-content { max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; color: #fff; }
   h2 { font-size: 1.15rem; margin-top: 2rem; color: #fff; }
   p, li { color: #b8b8bc; font-size: 0.95rem; }
-  a { color: #e2e2e2; }
+  a { color: #a9c6ff; }
 </style>
 </head>
 <body>
+<div class="legal-content">
   <h1>Privacy Policy</h1>
   <p>Remlin is a student capstone project (CSE499) that lets a merchant connect a Facebook Page, Instagram account, or WhatsApp number so an AI assistant can help answer customer messages using the merchant's own product catalog.</p>
 
@@ -3330,6 +3344,7 @@ async function startServer() {
 
   <h2>Contact</h2>
   <p>Questions about this policy can be directed to the project maintainers via the contact email on file with this app's Meta Developer account.</p>
+</div>
 </body>
 </html>`);
   });
@@ -3344,14 +3359,28 @@ async function startServer() {
 <title>Terms of Service — Remlin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  body { background:#070708; color:#e2e2e2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
-  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100vh;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-color: #050506;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 26px 26px;
+    background-attachment: fixed;
+  }
+  .legal-content { max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; color: #fff; }
   h2 { font-size: 1.15rem; margin-top: 2rem; color: #fff; }
   p, li { color: #b8b8bc; font-size: 0.95rem; }
-  a { color: #e2e2e2; }
+  a { color: #a9c6ff; }
 </style>
 </head>
 <body>
+<div class="legal-content">
   <h1>Terms of Service</h1>
   <p>Remlin is a student capstone project (CSE499). By creating an account or connecting a messaging channel, you agree to the terms below.</p>
 
@@ -3372,6 +3401,7 @@ async function startServer() {
 
   <h2>Contact</h2>
   <p>Questions about these terms can be directed to the project maintainers via the contact email on file with this app's Meta Developer account.</p>
+</div>
 </body>
 </html>`);
   });
@@ -3386,14 +3416,28 @@ async function startServer() {
 <title>Data Deletion Instructions — Remlin</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
-  body { background:#070708; color:#e2e2e2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
-  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100vh;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-color: #050506;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+    background-size: 26px 26px;
+    background-attachment: fixed;
+  }
+  .legal-content { max-width: 720px; margin: 0 auto; padding: 48px 24px; line-height: 1.6; }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; color: #fff; }
   h2 { font-size: 1.15rem; margin-top: 2rem; color: #fff; }
   p, li { color: #b8b8bc; font-size: 0.95rem; }
-  a { color: #e2e2e2; }
+  a { color: #a9c6ff; }
 </style>
 </head>
 <body>
+<div class="legal-content">
   <h1>Data Deletion Instructions</h1>
   <p>You can request deletion of your Remlin account and all associated data (merchant profile, product catalog, conversation history, and any connected-channel access tokens) at any time.</p>
 
@@ -3408,6 +3452,7 @@ async function startServer() {
 
   <h2>Disconnecting a channel without full deletion</h2>
   <p>If you only want to disconnect a Facebook Page, Instagram account, or WhatsApp number (revoking Remlin's access token for it) without deleting your whole account, use the Integrations page in the app, or revoke access directly from your Facebook Business settings.</p>
+</div>
 </body>
 </html>`);
   });

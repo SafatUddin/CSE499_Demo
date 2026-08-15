@@ -482,8 +482,9 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
             <div className="min-w-0">
               <div className="text-[10px] font-bold tracking-[0.19em] uppercase text-white/45">Legal</div>
               <div className="mt-4.5 flex flex-col gap-3 items-start">
-                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Privacy policy</a>
-                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Terms of service</a>
+                <a href="/privacy" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Privacy policy</a>
+                <a href="/terms" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Terms of service</a>
+                <a href="/data-deletion" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Data deletion</a>
               </div>
             </div>
 

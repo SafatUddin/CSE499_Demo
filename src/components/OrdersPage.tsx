@@ -41,7 +41,7 @@ export default function OrdersPage() {
         onSearchChange={setSearchTerm}
       />
 
-      <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
+      <div className="w-full flex-grow space-y-6 p-6 md:p-8">
         <div className="zone-b-grey2 p-6 space-y-5">
           <div className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
             <div>

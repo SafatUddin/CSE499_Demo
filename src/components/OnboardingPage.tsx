@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { User, Building2, Phone, Globe, MapPin, LogOut, ArrowRight } from 'lucide-react';
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 import { completeProfile } from '../lib/api';
 import type { PublicMerchant, PublicStore, OnboardingResponse } from '../lib/api';
 import {
@@ -89,7 +89,7 @@ export default function OnboardingPage({
   };
 
   return (
-    <div className="min-h-screen app-bg-gradient text-[#e2e2e2] font-sans flex flex-col overflow-x-hidden selection:bg-white/10 selection:text-white relative">
+    <div className="min-h-screen app-bg-gradient text-[#e2e2e2] font-sans flex flex-col selection:bg-white/10 selection:text-white relative">
       {/* Ambient blooms */}
       <div className="ambient-bloom-tl" />
       <div className="ambient-bloom-br" />
@@ -97,8 +97,8 @@ export default function OnboardingPage({
       {/* Minimal top bar */}
       <header className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-white/[0.07] zone-b-black">
         <div className="flex items-center gap-3">
-          <ShopMateLogo size={20} className="w-8 h-8" />
-          <span className="font-extrabold text-[15px] text-white tracking-tight">ShopMate AI</span>
+          <RemlinLogo size={20} className="w-8 h-8" />
+          <span className="font-extrabold text-[15px] text-white tracking-tight">Remlin</span>
         </div>
         <button
           type="button"
@@ -124,7 +124,7 @@ export default function OnboardingPage({
             Complete your business profile
           </h1>
           <p className="text-[13px] text-white/50 leading-relaxed">
-            Before you can start using ShopMate AI, we need a few details about you and your
+            Before you can start using Remlin, we need a few details about you and your
             business. This information helps us personalise your experience.
           </p>
         </div>

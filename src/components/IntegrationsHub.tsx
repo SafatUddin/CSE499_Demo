@@ -517,7 +517,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         onSearchChange={setSearchTerm}
       />
 
-      <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
+      <div className="w-full flex-grow space-y-6 p-6 md:p-8">
         {fbError && (
           <div className="status-danger text-xs p-3.5 rounded-xl flex items-center justify-between font-sans">
             <span>{fbError}</span>
@@ -539,7 +539,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         </h2>
 
         <p className="text-sm text-white/60 max-w-2xl leading-relaxed font-sans">
-          Connect your social messaging pages and store platforms directly into ShopMate AI. Automate replies, sync product catalogs, and finalize orders from a single interface.
+          Connect your social messaging pages and store platforms directly into Remlin. Automate replies, sync product catalogs, and finalize orders from a single interface.
         </p>
       </div>
 
@@ -739,7 +739,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                         Indexing data structures…
                       </p>
                       <p className="text-xs text-white/50 font-sans max-w-sm mx-auto leading-relaxed">
-                        Establishing webhook endpoint connection and indexing store data into ShopMate AI context…
+                        Establishing webhook endpoint connection and indexing store data into Remlin context…
                       </p>
                     </div>
                   </div>
@@ -768,7 +768,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                         <div className="space-y-1.5">
                           <h5 className="text-sm font-bold text-white font-sans">OAuth authentication</h5>
                           <p className="text-xs text-white/60 max-w-md mx-auto leading-relaxed font-sans">
-                            Sign in with your Facebook account to grant ShopMate AI access to process incoming Instagram messages.
+                            Sign in with your Facebook account to grant Remlin access to process incoming Instagram messages.
                           </p>
                         </div>
                         <button 
@@ -790,7 +790,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               </div>
                               <h5 className="text-base font-bold text-white font-sans">Connect WhatsApp Business</h5>
                               <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto font-sans">
-                                Link your WhatsApp Business account so ShopMate AI can automate customer responses.
+                                Link your WhatsApp Business account so Remlin can automate customer responses.
                               </p>
                             </div>
 
@@ -873,7 +873,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                             <div className="space-y-1.5">
                               <h5 className="text-base font-bold text-white font-sans">WhatsApp Business connected</h5>
                               <p className="text-xs text-white/60 max-w-sm mx-auto leading-relaxed font-sans">
-                                Your WhatsApp channel is live. ShopMate AI will process incoming inquiries automatically.
+                                Your WhatsApp channel is live. Remlin will process incoming inquiries automatically.
                               </p>
                             </div>
                             <button
@@ -1111,7 +1111,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
               <div className="p-6 space-y-3">
                 <p className="text-xs text-white/60 leading-relaxed font-sans">
-                  Choose which Facebook page ShopMate AI should connect to:
+                  Choose which Facebook page Remlin should connect to:
                 </p>
                 {fbPendingPages.map((page) => (
                   <button
@@ -1168,7 +1168,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
               <div className="p-6 space-y-3">
                 <p className="text-xs text-white/60 leading-relaxed font-sans">
-                  Choose which WhatsApp Business number ShopMate AI should connect to:
+                  Choose which WhatsApp Business number Remlin should connect to:
                 </p>
                 {waError && (
                   <div className="status-danger text-xs p-3 rounded-xl font-sans">

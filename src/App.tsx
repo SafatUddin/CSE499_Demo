@@ -444,7 +444,7 @@ export default function App() {
   const renderInbox = () => {
     if (connectedPlatforms.size === 0) {
       return (
-        <div className="w-full flex-grow flex flex-col items-center justify-center text-center px-6 h-full">
+        <div className="w-full flex-grow flex flex-col items-center justify-center text-center px-6 h-full overflow-x-hidden">
           <h3 className="font-sans font-bold text-sm text-white uppercase tracking-wider">No Channels Connected</h3>
           <p className="font-sans text-xs text-white/40 max-w-xs mt-2 leading-relaxed">
             Connect a channel like Facebook Messenger to start receiving and replying to real customer conversations here.
@@ -569,7 +569,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-bg-gradient min-h-screen text-on-surface w-full relative">
+    <div className="app-bg-gradient min-h-screen text-on-surface w-full relative overflow-x-hidden">
       {/* Ambient bloom effects */}
       <div className="ambient-bloom-tl" />
       <div className="ambient-bloom-br" />

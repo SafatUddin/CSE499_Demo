@@ -1,20 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
-  Sparkles, 
-  PlayCircle, 
-  CheckCircle, 
-  Languages, 
-  ShoppingCart, 
-  LayoutDashboard, 
+  ArrowRight, 
+  Play, 
+  Clock, 
+  Zap, 
   Eye, 
-  Globe,
-  Grid,
-  Image,
-  Clock,
-  ChevronRight
+  Check, 
+  ChevronRight 
 } from 'lucide-react';
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 import { Tab } from '../types';
 
 interface LandingPageProps {
@@ -23,407 +18,494 @@ interface LandingPageProps {
 
 export default function LandingPage({ onNavigate }: LandingPageProps) {
   const [activeLink, setActiveLink] = useState<'product' | 'features' | 'pricing'>('product');
-  // We will display all messages in a beautiful static or staggered visual flow to match the exact mockup in the image.
-  return (
-    <div className="app-bg-gradient text-[#e2e2e2] font-sans min-h-screen flex flex-col overflow-x-hidden selection:bg-white/10 selection:text-white relative">
-      {/* Background gradients according to DESIGN.md */}
-      <div className="ambient-bloom-tl" />
-      <div className="ambient-bloom-br" />
 
-      {/* Top Navigation */}
-      <header className="fixed top-0 w-full zone-a-topbar backdrop-blur-md border-b border-white/10 z-50">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-5 flex justify-between items-center">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate('landing')}>
-            <ShopMateLogo size={18} className="w-7 h-7 !rounded-lg" />
-            <span className="font-sans font-bold text-lg text-white tracking-tight">ShopMate AI</span>
+  const heroAvatars = [
+    { initials: 'JD', style: 'w-[34px] h-[34px] rounded-full border-2 border-[#0b0b0c] bg-gradient-to-br from-white/30 to-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] flex items-center justify-center text-[11px] font-bold text-white' },
+    { initials: 'AK', style: 'w-[34px] h-[34px] -ml-[11px] rounded-full border-2 border-[#0b0b0c] bg-gradient-to-br from-white/30 to-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] flex items-center justify-center text-[11px] font-bold text-white' },
+    { initials: 'RS', style: 'w-[34px] h-[34px] -ml-[11px] rounded-full border-2 border-[#0b0b0c] bg-gradient-to-br from-white/30 to-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] flex items-center justify-center text-[11px] font-bold text-white' },
+  ];
+
+  const heroChat = [
+    { text: '"I love this dress! How much is it?"', me: false },
+    { text: '"Hello! That’s our Summer Breeze Maxi. It’s $45. Would you like to see the size chart?"', me: true },
+    { text: '"Is this available in Blue?"', me: false },
+    { text: '"Yes! We have 4 units left in Ocean Blue. Click below to secure yours!"', me: true }
+  ];
+
+  const stats = [
+    { value: '98%', label: 'Inquiry accuracy' },
+    { value: '3.2x', label: 'Sales conversion' },
+    { value: '24/7', label: 'Always online' },
+    { value: 'Bangla & English', label: 'Language support' }
+  ];
+
+  const channels = [
+    { mark: 'f', name: 'Facebook page' },
+    { mark: '◎', name: 'Instagram chat' },
+    { mark: '✆', name: 'WhatsApp API' }
+  ];
+
+  const brands = ['Glamour BD', 'Techno Shop', 'Kids Planet', 'Silk Road', 'Urban Vibe'];
+  const brandsLoop = [...brands, ...brands];
+
+  // Generate SVG curve points
+  const SAMPLES = 240;
+  const pts: [number, number][] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    const t = i / (SAMPLES - 1);
+    const wave = 0.50 * Math.sin(t * 31 + 0.9) + 0.28 * Math.sin(t * 14.5 + 2.1) + 0.14 * Math.sin(t * 58) + 0.08 * Math.sin(t * 92 + 1.4);
+    const val = 140 + 520 * t + 92 * wave * (0.45 + 0.55 * t);
+    pts.push([t * 900, 300 - Math.max(0, Math.min(800, val)) / 800 * 300]);
+  }
+
+  const smooth = (p: [number, number][]) => {
+    let d = 'M' + p[0][0].toFixed(1) + ',' + p[0][1].toFixed(1);
+    for (let i = 0; i < p.length - 1; i++) {
+      const p0 = p[i === 0 ? 0 : i - 1], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2;
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ' C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ',' + p2[1].toFixed(1);
+    }
+    return d;
+  };
+
+  const demandPath = smooth(pts);
+  const demandArea = demandPath + ' L900,300 L0,300 Z';
+  const mk = pts[Math.round(SAMPLES * 0.6)];
+  const leftPct = (mk[0] / 900 * 100).toFixed(2);
+  const topPct = (mk[1] / 300 * 100).toFixed(2);
+
+  return (
+    <div className="relative min-h-screen w-full overflow-x-hidden bg-[#050506] text-white font-sans selection:bg-white/10 selection:text-white">
+      
+      {/* Moving Ambient Glow Field */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:26px_26px] opacity-55" />
+        <div className="absolute -top-[24%] -left-[10%] w-[60vw] h-[60vw] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.17)_0%,rgba(255,255,255,0.05)_38%,transparent_68%)] blur-[70px] animate-[driftA_26s_ease-in-out_infinite]" />
+        <div className="absolute top-[24%] -right-[14%] w-[52vw] h-[52vw] rounded-full bg-[radial-gradient(circle,rgba(215,225,245,0.12)_0%,rgba(255,255,255,0.03)_42%,transparent_70%)] blur-[80px] animate-[driftB_32s_ease-in-out_infinite]" />
+        <div className="absolute -bottom-[26%] left-[18%] w-[48vw] h-[48vw] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.10)_0%,transparent_66%)] blur-[90px] animate-[driftC_38s_ease-in-out_infinite]" />
+        <div className="absolute inset-0 bg-[radial-gradient(130%_60%_at_50%_-10%,rgba(255,255,255,0.08)_0%,transparent_58%)]" />
+      </div>
+
+      <div className="relative z-10">
+
+        {/* NAVIGATION HEADER */}
+        <header className="sticky top-0 z-20 flex flex-wrap items-center gap-4 lg:gap-8 px-5 lg:px-12 py-4 border-b border-white/[0.07] bg-gradient-to-b from-[#0a0a0b]/70 to-[#060607]/40 backdrop-blur-[26px] backdrop-saturate-[150%]">
+          <div className="flex items-center cursor-pointer" onClick={() => onNavigate('landing')}>
+            <RemlinLogo className="h-10 w-auto" />
           </div>
 
-          <div className="hidden md:flex items-center gap-8 text-[11px] uppercase tracking-[0.2em] font-medium text-white/50">
+          <nav className="flex items-center gap-7 ml-4">
             <a 
-              href="#features" 
+              href="#suite" 
               onClick={() => setActiveLink('product')}
-              className={`${
-                activeLink === 'product' 
-                  ? 'text-white border-b-2 border-white pb-1 font-semibold' 
-                  : 'hover:text-white transition-colors pb-1 border-b-2 border-transparent'
-              } tracking-[0.2em] transition-all duration-200`}
+              className={`text-xs font-semibold tracking-[0.14em] uppercase transition-colors ${activeLink === 'product' ? 'text-white' : 'text-white/60 hover:text-white'}`}
             >
               Product
             </a>
             <a 
               href="#suite" 
               onClick={() => setActiveLink('features')}
-              className={`${
-                activeLink === 'features' 
-                  ? 'text-white border-b-2 border-white pb-1 font-semibold' 
-                  : 'hover:text-white transition-colors pb-1 border-b-2 border-transparent'
-              } tracking-[0.2em] transition-all duration-200`}
+              className={`text-xs font-semibold tracking-[0.14em] uppercase transition-colors ${activeLink === 'features' ? 'text-white' : 'text-white/60 hover:text-white'}`}
             >
               Features
             </a>
             <a 
-              href="#giants" 
+              href="#cta" 
               onClick={() => setActiveLink('pricing')}
-              className={`${
-                activeLink === 'pricing' 
-                  ? 'text-white border-b-2 border-white pb-1 font-semibold' 
-                  : 'hover:text-white transition-colors pb-1 border-b-2 border-transparent'
-              } tracking-[0.2em] transition-all duration-200`}
+              className={`text-xs font-semibold tracking-[0.14em] uppercase transition-colors ${activeLink === 'pricing' ? 'text-white' : 'text-white/60 hover:text-white'}`}
             >
               Pricing
             </a>
-          </div>
+          </nav>
 
-          <div className="flex items-center gap-6">
-            <button 
+          <div className="flex-1" />
+
+          <div className="flex items-center gap-4">
+            <button
               onClick={() => onNavigate('login')}
-              className="text-white/70 hover:text-white transition-colors text-[11px] uppercase tracking-[0.2em] font-semibold"
+              className="text-xs font-semibold tracking-[0.14em] uppercase text-white/70 hover:text-white transition-colors cursor-pointer"
             >
-              Sign In
+              Sign in
             </button>
-            <button 
+            <button
               onClick={() => onNavigate('signup')}
-              className="px-4 py-1.5 bg-white text-black text-[11px] uppercase tracking-widest hover:bg-neutral-200 transition-all font-sans font-bold rounded"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-white/25 bg-gradient-to-b from-white to-[#cfd3da] shadow-[0_10px_26px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.9)] text-[#08090b] text-[12.5px] font-extrabold cursor-pointer hover:brightness-105 transition-all"
             >
-              Sign Up
+              Sign up
             </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Hero Section */}
-      <section id="features" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 pt-36 pb-16 relative w-full flex-grow flex items-center">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-24 items-center w-full">
-          {/* Left Hero content */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="inline-block px-3 py-1 bg-white/[0.04] rounded-full border border-white/[0.08]">
-              <span className="font-sans text-[8px] sm:text-[9px] font-bold tracking-[0.18em] text-white/80 uppercase">
-                NEW: VISUAL RECOGNITION
+        {/* HERO SECTION */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-14 items-center px-5 lg:px-12 pt-14 lg:pt-24 pb-20 max-w-[1440px] mx-auto">
+          <div className="min-w-0">
+            <span className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full border border-white/16 bg-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] text-[10.5px] font-bold tracking-[0.16em] uppercase text-white/80">
+              <span className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.9)] animate-pulse-dot" />
+              New: visual recognition
+            </span>
+
+            <h1 className="mt-6.5 text-4xl sm:text-5xl lg:text-[76px] leading-[1.03] font-extrabold tracking-[-0.04em] text-pretty">
+              Turn every message<br />
+              into a{' '}
+              <span className="bg-gradient-to-r from-[#6f747d] via-white via-52% to-[#7d828b] bg-[length:220%_100%] bg-clip-text text-transparent animate-[shimmer_6s_linear_infinite]">
+                sale.
               </span>
-            </div>
-
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-sans font-bold leading-[1.05] text-white tracking-tight">
-              Turn Every Message into a<br />
-              Sale.
             </h1>
 
-            <p className="text-xs sm:text-sm text-white/50 max-w-lg leading-relaxed font-normal">
-              The AI Sales Agent for Facebook, Instagram, and WhatsApp. Multilingual, image-aware, and always active to close deals while you sleep.
+            <p className="mt-6 max-w-[560px] text-base leading-[1.65] text-white/60 text-pretty">
+              The AI sales agent for Facebook, Instagram, and WhatsApp. Multilingual, image-aware, and always active to close deals while you sleep.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-3 pt-3">
-              <button 
+            <div className="flex flex-wrap items-center gap-3.5 mt-9.5">
+              <button
                 onClick={() => onNavigate('signup')}
-                className="px-6 py-3 bg-white text-black font-semibold text-[11px] uppercase tracking-widest hover:bg-neutral-200 transition-all font-sans rounded"
+                className="relative overflow-hidden inline-flex items-center gap-2.5 px-7 py-4 rounded-full border border-white/70 bg-gradient-to-b from-[#2f9dff] via-[#4fb3ff] via-34% to-[#dff4fb] shadow-[0_0_0_4px_rgba(120,180,255,0.16),0_0_36px_rgba(70,160,255,0.55),0_12px_32px_rgba(20,90,200,0.45),inset_0_1px_0_rgba(255,255,255,0.85)] text-white text-[13.5px] font-extrabold tracking-[0.06em] uppercase text-shadow-[0_1px_3px_rgba(10,50,110,0.4)] cursor-pointer hover:brightness-105 transition-all"
               >
-                Start Your Free Trial
+                Start your free trial
+                <ArrowRight className="w-3.7 h-3.7 stroke-[2.4]" />
+                <span className="absolute top-0 bottom-0 w-[34%] bg-gradient-to-r from-transparent via-white/50 to-transparent animate-[sweep_4.4s_ease-in-out_infinite] pointer-events-none" />
               </button>
-              <button 
-                onClick={() => onNavigate('login')}
-                className="px-6 py-3 border border-white/10 text-white hover:border-white/30 font-semibold text-[11px] uppercase tracking-widest hover:bg-white/[0.03] transition-all flex items-center justify-center gap-2 font-sans rounded"
-              >
-                <PlayCircle className="h-4 w-4 text-white" />
-                Watch Demo
+
+              <button className="inline-flex items-center gap-2.5 px-6.5 py-4 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] text-white/85 text-[13.5px] font-bold tracking-[0.06em] uppercase cursor-pointer hover:bg-white/15 hover:text-white transition-all">
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Watch demo
               </button>
             </div>
 
-            <div className="pt-4 flex items-center gap-3">
-              <div className="flex -space-x-1.5">
-                <div className="w-5 h-5 rounded-full border border-white/10 bg-[#161618] flex items-center justify-center text-[7px] font-bold text-white/70">JD</div>
-                <div className="w-5 h-5 rounded-full border border-white/10 bg-[#161618] flex items-center justify-center text-[7px] font-bold text-white/70">AK</div>
-                <div className="w-5 h-5 rounded-full border border-white/10 bg-[#161618] flex items-center justify-center text-[7px] font-bold text-white/70">RS</div>
+            <div className="flex items-center gap-3.5 mt-8.5">
+              <div className="flex">
+                {heroAvatars.map((a, i) => (
+                  <span key={i} className={a.style}>{a.initials}</span>
+                ))}
               </div>
-              <p className="text-[10px] tracking-[0.08em] text-white/40">
-                <span className="text-white font-bold">Over 5,000 Merchants</span> trust ShopMate AI
-              </p>
+              <span className="text-[12.5px] text-white/55">Over 5,000 merchants trust Remlin</span>
             </div>
           </div>
 
-          {/* Right Live Conversation Simulator */}
-          <div className="lg:col-span-5 relative">
-            <div className="zone-b-grey2 border border-white/10 p-6 rounded-2xl shadow-2xl backdrop-blur-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-sans text-[9px] uppercase tracking-[0.2em] text-white/55 font-bold">LIVE CONVERSATION</span>
-                </div>
-                <div className="flex gap-1.5 text-white/30 text-xs font-bold tracking-widest leading-none">
-                  •••
-                </div>
+          {/* LIVE CONVERSATION CARD */}
+          <div className="relative min-w-0 animate-[floaty_9s_ease-in-out_infinite]">
+            <div className="absolute -inset-[14%] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.12),transparent_62%)] blur-[50px] pointer-events-none" />
+            <div className="relative rounded-[26px] border border-white/12 bg-radial-at-tl from-white/10 via-transparent to-transparent bg-gradient-to-br from-[#1a1a1d]/92 via-[#0a0a0b]/95 to-[#030304]/97 shadow-[0_50px_120px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.18)] backdrop-blur-[34px] overflow-hidden">
+              <div className="flex items-center gap-2.5 px-5.5 py-4.5 border-b border-white/[0.08]">
+                <span className="w-1.75 h-1.75 rounded-full bg-[#3ddc84] shadow-[0_0_10px_rgba(61,220,132,0.9)] animate-pulse-dot" />
+                <span className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-white/70">Live conversation</span>
+                <div className="flex-1" />
+                <span className="tracking-[0.2em] text-white/40 text-xs">•••</span>
               </div>
 
-              {/* Chat Content exactly like the screenshot */}
-              <div className="space-y-4 min-h-[340px] flex flex-col justify-end">
-                {/* Customer Msg 1 */}
-                <div className="flex gap-2.5 items-start">
-                  <div className="w-7 h-7 rounded bg-[#1c1c1f] border border-white/[0.05] shrink-0" />
-                  <div className="bg-[#161618] border border-white/[0.04] px-3.5 py-2.5 rounded text-xs text-white/90 max-w-[80%] leading-relaxed">
-                    "I love this dress! How much is it?"
-                  </div>
-                </div>
-
-                {/* AI Response 1 */}
-                <div className="flex justify-end">
-                  <div className="border border-white/10 bg-transparent px-3.5 py-2.5 rounded text-xs text-white/90 max-w-[80%] leading-relaxed">
-                    "Hello! That's our Summer Breeze Maxi. It's $45. Would you like to see the size chart?"
-                  </div>
-                </div>
-
-                {/* Customer Msg 2 */}
-                <div className="flex gap-2.5 items-start">
-                  <div className="w-7 h-7 rounded bg-[#1c1c1f] border border-white/[0.05] shrink-0" />
-                  <div className="bg-[#161618] border border-white/[0.04] px-3.5 py-2.5 rounded text-xs text-white/90 max-w-[80%] space-y-2 leading-relaxed">
-                    <div className="w-24 h-20 rounded bg-[#202024] border border-white/[0.05] flex items-center justify-center">
-                      <Image className="h-5 w-5 text-white/20" />
+              <div className="p-5.5 flex flex-col gap-3.5">
+                {heroChat.map((m, i) => (
+                  <div key={i} className={`flex ${m.me ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`px-4 py-3 rounded-[18px] text-[13.5px] leading-snug text-white ${
+                      m.me 
+                        ? 'max-w-[82%] border border-white/[0.26] bg-gradient-to-br from-white/20 to-white/5 shadow-[0_16px_40px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.4)] rounded-br-[7px]' 
+                        : 'max-w-[70%] border border-white/10 bg-gradient-to-br from-white/[0.055] to-white/[0.02] shadow-[0_12px_30px_rgba(0,0,0,0.5)] rounded-bl-[7px]'
+                    }`}>
+                      {m.text}
                     </div>
-                    <div>"Is this available in Blue?"</div>
                   </div>
+                ))}
+
+                <button 
+                  onClick={() => onNavigate('signup')}
+                  className="mt-1.5 self-end px-6 py-3 rounded-full border border-white/24 bg-gradient-to-b from-white to-[#cfd3da] shadow-[0_10px_26px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.9)] text-[#08090b] text-[11.5px] font-extrabold tracking-[0.12em] uppercase cursor-pointer hover:brightness-105 transition-all"
+                >
+                  Buy now
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* STATS SECTION */}
+        <section className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-24">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px rounded-[22px] overflow-hidden border border-white/10 bg-white/[0.08] shadow-[0_40px_100px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.14)]">
+            {stats.map((s, i) => (
+              <div key={i} className="p-8 bg-gradient-to-br from-[#18181b]/92 to-[#070708]/96 backdrop-blur-[26px]">
+                <div className="text-3xl lg:text-4xl font-extrabold tracking-[-0.03em] text-white text-shadow-[0_4px_40px_rgba(255,255,255,0.22)]">
+                  {s.value}
                 </div>
-
-                {/* AI Response 2 with Buy Button */}
-                <div className="flex justify-end">
-                  <div className="border border-white/10 bg-transparent px-3.5 py-3.5 rounded text-xs text-white/90 max-w-[80%] space-y-3 leading-relaxed">
-                    <div>"Yes! We have 4 units left in Ocean Blue. Click below to secure yours!"</div>
-                    <button 
-                      onClick={() => onNavigate('login')}
-                      className="w-full bg-white text-black font-bold py-2 text-center rounded text-[10px] uppercase tracking-widest font-sans cursor-pointer hover:bg-neutral-200 transition-colors"
-                    >
-                      Buy Now
-                    </button>
-                  </div>
+                <div className="mt-2.5 text-[10.5px] font-bold tracking-[0.17em] uppercase text-white/50">
+                  {s.label}
                 </div>
               </div>
-            </div>
-
-            {/* Backdrop lighting effect */}
-            <div className="absolute -top-10 -right-10 w-72 h-72 bg-white/[0.01] blur-[100px] rounded-full -z-10" />
+            ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* KPI Stats Bar */}
-      <section className="w-full bg-[#0a0a0c] border-y border-white/[0.06] py-12 lg:py-16">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 grid grid-cols-2 md:grid-cols-4 gap-8">
-          <div className="text-center space-y-1">
-            <div className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">98%</div>
-            <div className="font-sans text-[9px] text-white/40 uppercase tracking-[0.2em] font-semibold">Inquiry Accuracy</div>
-          </div>
-          <div className="text-center space-y-1">
-            <div className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">3.2x</div>
-            <div className="font-sans text-[9px] text-white/40 uppercase tracking-[0.2em] font-semibold">Sales Conversion</div>
-          </div>
-          <div className="text-center space-y-1">
-            <div className="text-3xl md:text-4xl font-sans font-bold text-white tracking-tight">24/7</div>
-            <div className="font-sans text-[9px] text-white/40 uppercase tracking-[0.2em] font-semibold">Always Online</div>
-          </div>
-          <div className="text-center space-y-1">
-            <div className="text-lg md:text-xl font-sans font-bold text-white tracking-tight pt-1">Bangla & English</div>
-            <div className="font-sans text-[9px] text-white/40 uppercase tracking-[0.2em] font-semibold">Language Support</div>
-          </div>
-        </div>
-      </section>
+        {/* SUITE SECTION */}
+        <section id="suite" className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-10 text-center">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-[-0.035em] text-shadow-[0_4px_50px_rgba(255,255,255,0.24)]">
+            The elite sales suite
+          </h2>
+          <p className="mt-4 max-w-[660px] mx-auto text-[11px] font-bold tracking-[0.19em] uppercase text-white/50 leading-relaxed">
+            Engineered for high-volume commerce and precision automation.
+          </p>
+        </section>
 
-      {/* Bento Feature Grid Section */}
-      <section id="suite" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-24 lg:py-32 w-full space-y-16">
-        <div className="text-center space-y-2">
-          <h2 className="text-3xl font-sans font-bold text-white tracking-tight">The Elite Sales Suite</h2>
-          <p className="font-sans text-[10px] text-white/40 uppercase tracking-[0.25em]">Engineered for high-volume commerce and precision automation.</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-          {/* Card 1: Visual Intelligence (8 Cols) */}
-          <div className="md:col-span-8 bg-[#0c0c0e] border border-white/[0.06] p-7 rounded-lg flex flex-col justify-between h-[360px] relative overflow-hidden group hover:border-white/20 transition-all">
-            <div className="relative z-10 max-w-md space-y-3">
-              <Eye className="text-white h-6 w-6" />
-              <h3 className="text-xl font-sans font-bold text-white tracking-tight">Visual Intelligence</h3>
-              <p className="text-xs sm:text-sm text-white/50 leading-relaxed font-normal">
-                Our neural engine identifies products from customer photos in real-time. Stop asking for SKUs; ShopMate knows exactly what they want.
-              </p>
-            </div>
-
-            <div className="relative z-10 flex gap-3 mt-6">
-              <div className="bg-[#121215] px-3 py-1.5 rounded border border-white/[0.05] flex items-center gap-1.5">
-                <CheckCircle className="text-white h-3.5 w-3.5" />
-                <span className="font-mono text-[9px] text-white/70 uppercase tracking-[0.15em] font-bold">99% RECOGNITION</span>
-              </div>
-              <div className="bg-[#121215] px-3 py-1.5 rounded border border-white/[0.05] flex items-center gap-1.5">
-                <Clock className="text-white h-3.5 w-3.5" />
-                <span className="font-mono text-[9px] text-white/70 uppercase tracking-[0.15em] font-bold">0.4S LATENCY</span>
-              </div>
-            </div>
-
-            {/* Neural connection network visualization graphic */}
-            <div 
-              className="absolute right-0 bottom-0 w-[45%] h-full opacity-15 group-hover:opacity-30 transition-opacity bg-cover bg-no-repeat bg-right-bottom pointer-events-none"
-              style={{ backgroundImage: `url('https://lh3.googleusercontent.com/aida-public/AB6AXuCFCaEaxbziO70nRktT5RQpZKFj53KtbHIbr1JwbO-bmKyUhsTHNG7tL1Zi6PoBvdq4hypjWuXUCl9NzGjI8DvOac-jXEWPNLRkCyBRtAFc70ZpRP_QZUzTS64Km3G208BlNg6Akacy736HJJzGM51EMfteHdryO5Ve6JZzGsZHrcp4EMMF5N2V95niyGSN_5IN48CgtfDAy0Z8DY4V8ArEEq9wbQ_y5xgcYztxVPN8n8DZOeCBHCte')` }}
-            />
-          </div>
-
-          {/* Card 2: Always On (4 Cols) */}
-          <div className="md:col-span-4 bg-[#0c0c0e] border border-white/[0.06] p-7 rounded-lg flex flex-col justify-between hover:border-white/20 transition-all">
-            <div className="space-y-3">
-              <Globe className="text-white h-6 w-6" />
-              <h3 className="text-xl font-sans font-bold text-white tracking-tight">Always On</h3>
-              <p className="text-xs sm:text-sm text-white/50 leading-relaxed font-normal">
-                Fluent in English, Bangla, and Banglish. Capture the local market with cultural nuance and perfect local grammar.
-              </p>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-1.5">
-              <span className="px-2.5 py-1 bg-[#121215] border border-white/[0.05] text-[10px] text-white/70 font-sans rounded">English</span>
-              <span className="px-2.5 py-1 bg-[#121215] border border-white/[0.05] text-[10px] text-white/70 font-sans rounded">Bangla</span>
-              <span className="px-2.5 py-1 bg-[#121215] border border-white/[0.05] text-[10px] text-white/70 font-sans rounded">Banglish</span>
-            </div>
-          </div>
-
-          {/* Card 3: One-Click Checkout (4 Cols) */}
-          <div className="md:col-span-4 bg-[#0c0c0e] border border-white/[0.06] p-7 rounded-lg flex flex-col justify-between hover:border-white/20 transition-all">
-            <div className="space-y-3">
-              <ShoppingCart className="text-white h-6 w-6" />
-              <h3 className="text-xl font-sans font-bold text-white tracking-tight">One-Click Checkout</h3>
-              <p className="text-xs sm:text-sm text-white/50 leading-relaxed font-normal">
-                Don't lose customers to friction. Generate secure payment links directly within the chat window instantly.
-              </p>
-            </div>
-
-            <div className="mt-6 space-y-1.5">
-              <div className="flex justify-between items-center text-[10px]">
-                <span className="font-sans text-[8px] text-white/40 uppercase tracking-[0.15em] font-bold">ABANDONED CART REDUCTION</span>
-                <span className="text-white font-bold">80%</span>
-              </div>
-              <div className="w-full h-1 bg-[#121215] rounded-full overflow-hidden border border-white/[0.02]">
-                <div className="h-full bg-white w-4/5 rounded-full" />
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Unified Command (8 Cols) */}
-          <div className="md:col-span-8 bg-[#0c0c0e] border border-white/[0.06] p-7 rounded-lg flex flex-col justify-between min-h-[300px] hover:border-white/20 transition-all relative overflow-hidden group">
-            <div className="space-y-3">
-              <Grid className="text-white h-6 w-6" />
-              <h3 className="text-xl font-sans font-bold text-white tracking-tight">Unified Command</h3>
-              <p className="text-xs sm:text-sm text-white/50 leading-relaxed font-normal max-w-lg">
-                One elite dashboard for Facebook, Instagram, and WhatsApp. Centralize your inventory, customer data, and sales analytics into a single source of truth.
-              </p>
-            </div>
-
-            {/* Sync channel states - all connected */}
-            <div className="mt-8 grid grid-cols-3 gap-3 z-10 relative">
-              <div className="bg-[#121215] border border-white/[0.05] p-3.5 rounded flex flex-col items-center justify-center gap-1.5 hover:border-white/10 transition-all text-center">
-                <span className="font-medium text-[10px] text-white/80">Facebook Page</span>
-                <span className="text-[8px] bg-white/[0.05] text-white border border-white/10 px-2 py-0.5 rounded font-sans font-bold tracking-wider">CONNECTED</span>
-              </div>
-              <div className="bg-[#121215] border border-white/[0.05] p-3.5 rounded flex flex-col items-center justify-center gap-1.5 hover:border-white/10 transition-all text-center">
-                <span className="font-medium text-[10px] text-white/80">Instagram Chat</span>
-                <span className="text-[8px] bg-white/[0.05] text-white border border-white/10 px-2 py-0.5 rounded font-sans font-bold tracking-wider">CONNECTED</span>
-              </div>
-              <div className="bg-[#121215] border border-white/[0.05] p-3.5 rounded flex flex-col items-center justify-center gap-1.5 hover:border-white/10 transition-all text-center">
-                <span className="font-medium text-[10px] text-white/80">WhatsApp API</span>
-                <span className="text-[8px] bg-white/[0.05] text-white border border-white/10 px-2 py-0.5 rounded font-sans font-bold tracking-wider">CONNECTED</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* AI Intelligence Report Banner */}
-      <section className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-12 lg:py-16 w-full">
-        <div className="bg-[#0c0c0e] border border-white/[0.07] rounded-lg p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden">
-          <div className="absolute -right-24 -top-24 w-80 h-80 bg-white/[0.01] blur-[120px] rounded-full pointer-events-none" />
-          
-          <div className="md:max-w-xl space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded bg-white/[0.05] border border-white/10 flex items-center justify-center">
-                <Sparkles className="text-white h-3 w-3" />
-              </div>
-              <span className="font-sans text-[9px] text-white/60 uppercase tracking-[0.2em] font-bold">AI INTELLIGENCE REPORT</span>
-            </div>
-            
-            <h2 className="text-2xl font-sans font-bold text-white tracking-tight">Predictive Inventory Management</h2>
-            <p className="text-xs sm:text-sm text-white/50 leading-relaxed font-normal">
-              ShopMate AI doesn't just talk; it thinks. It analyzes chat trends to predict high-demand items before they go out of stock, giving you a competitive edge.
+        <section className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-24 grid grid-cols-1 md:grid-cols-3 gap-5.5">
+          {/* Always On */}
+          <article className="flex flex-col p-7 lg:p-7.5 rounded-[24px] border border-white/11 bg-gradient-to-br from-[#1a1a1d]/90 to-[#060607]/96 shadow-[0_40px_100px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[30px]">
+            <span className="w-11.5 h-11.5 rounded-[14px] border border-white/18 bg-gradient-to-br from-white/20 to-white/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] flex items-center justify-center">
+              <Clock className="w-5.5 h-5.5 text-white stroke-[1.7]" />
+            </span>
+            <h3 className="mt-5.5 text-6xl font-bold tracking-[-0.02em] text-white">Always on</h3>
+            <p className="mt-2.5 text-[13.5px] leading-[1.65] text-white/60 text-pretty">
+              Fluent in English, Bangla, and Banglish. Capture the local market with cultural nuance and perfect local grammar.
             </p>
+            <div className="flex-1 min-h-5" />
+            <div className="flex flex-wrap gap-2 mt-5.5">
+              <span className="inline-flex items-center px-3.5 py-1.75 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] text-[11.5px] font-semibold text-white/80">English</span>
+              <span className="inline-flex items-center px-3.5 py-1.75 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] text-[11.5px] font-semibold text-white/80">Bangla</span>
+              <span className="inline-flex items-center px-3.5 py-1.75 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] text-[11.5px] font-semibold text-white/80">Banglish</span>
+            </div>
+          </article>
+
+          {/* One-Click Checkout */}
+          <article className="flex flex-col p-7 lg:p-7.5 rounded-[24px] border border-white/11 bg-gradient-to-br from-[#1a1a1d]/90 to-[#060607]/96 shadow-[0_40px_100px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[30px]">
+            <span className="w-11.5 h-11.5 rounded-[14px] border border-white/18 bg-gradient-to-br from-white/20 to-white/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] flex items-center justify-center">
+              <Zap className="w-5.5 h-5.5 text-white stroke-[1.7]" />
+            </span>
+            <h3 className="mt-5.5 text-22px font-bold tracking-[-0.02em] text-white">One-click checkout</h3>
+            <p className="mt-2.5 text-[13.5px] leading-[1.65] text-white/60 text-pretty">
+              Don't lose customers to friction. Generate secure payment links directly within the chat window instantly.
+            </p>
+            <div className="flex-1 min-h-5" />
+            <div className="mt-6">
+              <div className="flex items-end justify-between gap-3">
+                <span className="text-[10.5px] font-bold tracking-[0.15em] uppercase text-white/50">Abandoned cart reduction</span>
+                <span className="text-22px font-extrabold tracking-[-0.02em] text-white">80%</span>
+              </div>
+              <div className="mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div className="w-[80%] h-full rounded-full bg-gradient-to-r from-white/40 to-white shadow-[0_0_16px_rgba(255,255,255,0.6)]" />
+              </div>
+            </div>
+          </article>
+
+          {/* Visual Intelligence */}
+          <article className="flex flex-col p-7 lg:p-7.5 rounded-[24px] border border-white/11 bg-gradient-to-br from-[#1a1a1d]/90 to-[#060607]/96 shadow-[0_40px_100px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[30px]">
+            <span className="relative w-11.5 h-11.5 rounded-[14px] border border-white/18 bg-gradient-to-br from-white/20 to-white/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] flex items-center justify-center">
+              <Eye className="w-5.5 h-5.5 text-white stroke-[1.7]" />
+              <span className="absolute -inset-[9px] rounded-[20px] border border-dashed border-white/18 animate-[spinSlow_18s_linear_infinite]" />
+            </span>
+            <h3 className="mt-5.5 text-22px font-bold tracking-[-0.02em] text-white">Visual intelligence</h3>
+            <p className="mt-2.5 text-[13.5px] leading-[1.65] text-white/60 text-pretty">
+              Our neural engine identifies products from customer photos in real-time. Stop asking for SKUs; Remlin knows exactly what they want.
+            </p>
+            <div className="flex-1 min-h-5" />
+            <div className="flex gap-2.5 mt-5.5">
+              <div className="flex-1 p-3.5 lg:p-4 rounded-[14px] border border-white/10 bg-white/[0.05]">
+                <div className="text-xl font-extrabold tracking-[-0.02em] text-white">99%</div>
+                <div className="mt-1.25 text-[9.5px] font-bold tracking-[0.15em] uppercase text-white/50">Recognition</div>
+              </div>
+              <div className="flex-1 p-3.5 lg:p-4 rounded-[14px] border border-white/10 bg-white/[0.05]">
+                <div className="text-xl font-extrabold tracking-[-0.02em] text-white">0.4s</div>
+                <div className="mt-1.25 text-[9.5px] font-bold tracking-[0.15em] uppercase text-white/50">Latency</div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        {/* UNIFIED COMMAND SECTION */}
+        <section className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-24 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-14 items-center">
+          <div className="min-w-0">
+            <h2 className="text-3xl lg:text-4.5xl font-extrabold tracking-[-0.035em] leading-tight text-pretty">
+              Unified command
+            </h2>
+            <p className="mt-4.5 max-w-[520px] text-3.75 font-normal leading-relaxed text-white/60 text-pretty">
+              One elite dashboard for Facebook, Instagram, and WhatsApp. Centralize your inventory, customer data, and sales analytics into a single source of truth.
+            </p>
+            <button
+              onClick={() => onNavigate('login')}
+              className="inline-flex items-center gap-2.5 mt-[30px] px-6 py-3.5 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] text-white text-[12.5px] font-bold tracking-[0.08em] uppercase cursor-pointer hover:bg-white/15 transition-all"
+            >
+              Open the console
+              <ArrowRight className="w-3.5 h-3.5 stroke-[2.2]" />
+            </button>
           </div>
 
-          <button 
-            onClick={() => onNavigate('login')}
-            className="px-6 py-3 bg-white text-black font-semibold text-[11px] uppercase tracking-widest font-sans hover:bg-neutral-200 transition-all rounded shrink-0"
-          >
-            Explore Insights
-          </button>
-        </div>
-      </section>
+          <div className="flex flex-col gap-3.5 min-w-0">
+            {channels.map((c, i) => (
+              <div key={i} className="flex items-center gap-4 p-5 rounded-[20px] border border-white/11 bg-gradient-to-br from-[#1a1a1d]/90 to-[#070708]/96 shadow-[0_26px_70px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[26px]">
+                <span className="w-10.5 h-10.5 shrink-0 rounded-[13px] border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] flex items-center justify-center text-lg font-bold text-white">
+                  {c.mark}
+                </span>
+                <span className="flex-1 min-w-0 text-base font-semibold text-white">{c.name}</span>
+                <span className="inline-flex items-center gap-1.75 px-3 py-1.5 rounded-full border border-[#3ddc84]/42 bg-[#145a37]/32 text-[9.5px] font-extrabold tracking-[0.14em] uppercase text-[#7ff0b0]">
+                  <span className="w-1.25 h-1.25 rounded-full bg-[#3ddc84] shadow-[0_0_8px_rgba(61,220,132,0.9)]" />
+                  Connected
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
 
-      {/* Social Proof Corporate Names */}
-      <section id="giants" className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-16 lg:py-24 border-t border-white/[0.06] text-center space-y-6">
-        <p className="font-sans text-[9px] text-white/40 uppercase tracking-[0.25em] font-bold">Powering Local Retail Giants</p>
-        <div className="flex flex-wrap justify-center items-center gap-x-12 gap-y-6 opacity-40 hover:opacity-60 transition-all duration-300">
-          <span className="font-sans font-bold text-sm tracking-widest text-white">GLAMOUR BD</span>
-          <span className="font-sans font-bold text-sm tracking-widest text-white">TECHNO SHOP</span>
-          <span className="font-sans font-bold text-sm tracking-widest text-white">KIDS PLANET</span>
-          <span className="font-sans font-bold text-sm tracking-widest text-white">SILK ROAD</span>
-          <span className="font-sans font-bold text-sm tracking-widest text-white">URBAN VIBE</span>
-        </div>
-      </section>
+        {/* INTELLIGENCE REPORT SECTION */}
+        <section className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-24">
+          <div className="relative overflow-hidden p-7 lg:p-11 rounded-[26px] border border-white/11 bg-gradient-to-br from-[#18181a]/90 to-black/97 shadow-[0_50px_120px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.16)] backdrop-blur-[30px]">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-2 px-3.75 py-2 rounded-full border border-white/16 bg-white/[0.06] text-[10px] font-bold tracking-[0.17em] uppercase text-white/70">
+                  <span className="text-white">✦</span>AI intelligence report
+                </span>
 
-      {/* Ready to scale final CTA */}
-      <section className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-24 lg:py-32 text-center space-y-6 relative">
-        <h2 className="text-4xl sm:text-5xl font-sans font-bold text-white leading-tight tracking-tight">Ready to Scale Your Sales?</h2>
-        
-        <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-          <button 
-            onClick={() => onNavigate('signup')}
-            className="px-8 py-3.5 bg-white text-black font-semibold text-[11px] uppercase tracking-widest font-sans hover:bg-neutral-200 transition-all rounded"
-          >
-            Get Started for Free
-          </button>
-          <button 
-            onClick={() => onNavigate('support')}
-            className="px-8 py-3.5 border border-white/10 text-white hover:border-white/30 font-semibold text-[11px] uppercase tracking-widest hover:bg-white/[0.03] transition-all font-sans rounded"
-          >
-            Schedule a Consultation
-          </button>
-        </div>
+                <h2 className="mt-5.5 text-2.5xl lg:text-4xl font-extrabold tracking-[-0.03em] leading-tight text-pretty text-white">
+                  Predictive inventory management
+                </h2>
 
-        <p className="font-sans text-[10px] text-white/40 uppercase tracking-[0.15em] pt-1">No credit card required. 14-day free trial.</p>
-      </section>
+                <p className="mt-4 text-[14.5px] leading-relaxed text-white/60 text-pretty">
+                  Remlin doesn't just talk; it thinks. It analyzes chat trends to predict high-demand items before they go out of stock, giving you a competitive edge.
+                </p>
 
-      {/* Footer */}
-      <footer className="w-full bg-[#050506] border-t border-white/[0.06] mt-auto">
-        <div className="max-w-[1440px] mx-auto px-6 lg:px-12 xl:px-16 py-16 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5">
-              <img 
-                className="h-5 w-5 object-contain brightness-100" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLsqDnUHqD8YbYEO3hl_5z6jH3vc2UW1zof-vONlnGyo7aNt-Q2Kd4DI44kdjHpbfZ-7LSwIFER-EhrfmVNe2xvGUpASXXWqG_u-YPfCbtiRyNKkWK7OB-sxZ2_7nYu72ZmGiZdgoPKacOQjz8KkGM9xdb6MLjav2itPZ5OaLiW3xU3d7VL6Nvq_80Um5aMtFHK73yF0E-zTkxLrXHLRoZ4--oa703HZGsl6MhnrGVrPB9LlVrM8L7UC7oY"
-                alt="ShopMate AI Logo"
-              />
-              <span className="font-sans font-bold text-md text-white">ShopMate AI</span>
+                <button
+                  onClick={() => onNavigate('login')}
+                  className="inline-flex items-center gap-2.5 mt-7 px-6 py-3.5 rounded-full border border-white/24 bg-gradient-to-b from-white to-[#cfd3da] shadow-[0_10px_26px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.9)] text-[#08090b] text-[12.5px] font-extrabold tracking-[0.08em] uppercase cursor-pointer hover:brightness-105 transition-all"
+                >
+                  Explore insights
+                  <ArrowRight className="w-3.5 h-3.5 stroke-[2.4]" />
+                </button>
+              </div>
+
+              {/* Chart SVG */}
+              <div className="relative min-w-0">
+                <svg viewBox="0 0 900 300" preserveAspectRatio="none" className="w-full h-[300px] block overflow-visible">
+                  <line x1="0" y1="0.5" x2="900" y2="0.5" stroke="rgba(255,255,255,0.07)" />
+                  <line x1="0" y1="75" x2="900" y2="75" stroke="rgba(255,255,255,0.07)" />
+                  <line x1="0" y1="150" x2="900" y2="150" stroke="rgba(255,255,255,0.07)" />
+                  <line x1="0" y1="225" x2="900" y2="225" stroke="rgba(255,255,255,0.07)" />
+                  <line x1="0" y1="299.5" x2="900" y2="299.5" stroke="rgba(255,255,255,0.25)" />
+                  <defs>
+                    <linearGradient id="landFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+                      <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                    </linearGradient>
+                    <linearGradient id="landStroke" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#8b9099" />
+                      <stop offset="55%" stopColor="#e9ecf1" />
+                      <stop offset="100%" stopColor="#ffffff" />
+                    </linearGradient>
+                  </defs>
+                  <path d={demandArea} fill="url(#landFill)" stroke="none" />
+                  <path d={demandPath} fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className="blur-md" />
+                  <path d={demandPath} fill="none" stroke="url(#landStroke)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                </svg>
+
+                <div 
+                  className="absolute -translate-x-[18px] -translate-y-[14px] min-w-[230px] p-3 lg:p-3.75 rounded-[14px] border border-white/14 bg-gradient-to-br from-[#1e1e21]/86 to-[#080809]/90 shadow-[0_18px_44px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.2)] backdrop-blur-[20px] pointer-events-none"
+                  style={{ right: `${(100 - Number(leftPct)).toFixed(2)}%`, top: `${topPct}%` }}
+                >
+                  <div className="text-[10.5px] text-white/55">Predicted demand spike</div>
+                  <div className="mt-1.25 text-[13.5px] font-bold text-white">Summer Breeze Maxi · restock 40</div>
+                </div>
+
+                <div 
+                  className="absolute w-3.25 h-3.25 -mt-[6.5px] -ml-[6.5px] rounded-full bg-white shadow-[0_0_0_4px_rgba(255,255,255,0.14),0_0_18px_rgba(255,255,255,0.7)] pointer-events-none"
+                  style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+                />
+              </div>
             </div>
-            <p className="text-xs text-white/40 font-normal">Empowering merchants with surgical precision AI.</p>
-            <p className="text-[10px] text-white/30 font-sans tracking-wide">© 2024 ShopMate AI. All rights reserved.</p>
+          </div>
+        </section>
+
+        {/* LOGOS MARQUEE SECTION */}
+        <section id="giants" className="pb-24">
+          <div className="text-center text-[10.5px] font-bold tracking-[0.19em] uppercase text-white/45">
+            Powering local retail giants
+          </div>
+          <div className="relative mt-7.5 overflow-hidden [mask-image:linear-gradient(90deg,transparent,#000_12%,#000_88%,transparent)]">
+            <div className="flex w-max gap-19 pr-19 animate-[marquee_28s_linear_infinite]">
+              {brandsLoop.map((b, i) => (
+                <span key={i} className="text-xl font-bold tracking-[0.06em] text-white/42 whitespace-nowrap">
+                  {b.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* CTA SECTION */}
+        <section id="cta" className="max-w-[1440px] mx-auto px-5 lg:px-12 pb-24">
+          <div className="relative overflow-hidden p-13 lg:p-20 rounded-[30px] border border-white/12 bg-gradient-to-br from-[#1c1c20]/90 to-black/97 shadow-[0_50px_130px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.18)] text-center backdrop-blur-[30px]">
+            <div className="absolute -top-[40%] left-1/2 w-[56vw] h-[56vw] -ml-[28vw] rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.14),transparent_62%)] blur-[80px] animate-[driftC_30s_ease-in-out_infinite] pointer-events-none" />
+            <div className="relative z-10">
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-[-0.04em] text-shadow-[0_4px_60px_rgba(255,255,255,0.3)]">
+                Ready to scale your sales?
+              </h2>
+              <div className="flex flex-wrap items-center justify-center gap-3.5 mt-9">
+                <button
+                  onClick={() => onNavigate('signup')}
+                  className="relative overflow-hidden inline-flex items-center gap-2.5 px-7.5 py-4 rounded-full border border-white/70 bg-gradient-to-b from-[#2f9dff] via-[#4fb3ff] via-34% to-[#dff4fb] shadow-[0_0_0_4px_rgba(120,180,255,0.16),0_0_36px_rgba(70,160,255,0.55),0_12px_32px_rgba(20,90,200,0.45),inset_0_1px_0_rgba(255,255,255,0.85)] text-white text-[13.5px] font-extrabold tracking-[0.06em] uppercase text-shadow-[0_1px_3px_rgba(10,50,110,0.4)] cursor-pointer hover:brightness-105 transition-all"
+                >
+                  Get started for free
+                  <span className="absolute top-0 bottom-0 w-[34%] bg-gradient-to-r from-transparent via-white/50 to-transparent animate-[sweep_4.4s_ease-in-out_infinite] pointer-events-none" />
+                </button>
+                <button className="px-7 py-4 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] text-white/85 text-[13.5px] font-bold tracking-[0.06em] uppercase cursor-pointer hover:bg-white/15 hover:text-white transition-all">
+                  Schedule a consultation
+                </button>
+              </div>
+              <div className="mt-6.5 text-[10px] font-bold tracking-[0.19em] uppercase text-white/45">
+                No credit card required · 14-day free trial
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* FOOTER */}
+        <footer className="relative overflow-hidden border-t border-white/[0.08] bg-gradient-to-b from-white/[0.03] to-transparent">
+          <div className="relative max-w-[1440px] mx-auto px-5 lg:px-12 pt-18 pb-11 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-11">
+            <div className="min-w-0">
+              <div className="flex items-center mb-4 cursor-pointer" onClick={() => onNavigate('landing')}>
+                <RemlinLogo className="h-9 w-auto" />
+              </div>
+              <p className="max-w-[300px] text-sm leading-normal font-semibold text-white/88 text-shadow-[0_1px_12px_rgba(0,0,0,0.6)] text-pretty">
+                Empowering merchants with surgical precision AI.
+              </p>
+              <button
+                onClick={() => onNavigate('login')}
+                className="inline-flex items-center gap-2.25 mt-5.5 px-5 py-3 rounded-full border border-white/16 bg-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.16)] text-white text-xs font-extrabold tracking-[0.08em] uppercase cursor-pointer hover:bg-white/15 transition-all"
+              >
+                Open the console
+                <ArrowRight className="w-3.25 h-3.25 stroke-[2.3]" />
+              </button>
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold tracking-[0.19em] uppercase text-white/45">Product</div>
+              <div className="mt-4.5 flex flex-col gap-3 items-start">
+                <a href="#suite" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Features</a>
+                <a href="#cta" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Pricing</a>
+                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">API documentation</a>
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold tracking-[0.19em] uppercase text-white/45">Legal</div>
+              <div className="mt-4.5 flex flex-col gap-3 items-start">
+                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Privacy policy</a>
+                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Terms of service</a>
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold tracking-[0.19em] uppercase text-white/45">Support</div>
+              <div className="mt-4.5 flex flex-col gap-3 items-start">
+                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Contact support</a>
+                <a href="#" className="text-[13.5px] text-white/66 hover:text-white transition-colors">Community</a>
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-12 gap-y-6">
-            <div className="flex flex-col gap-2">
-              <span className="font-sans text-[9px] text-white/35 uppercase tracking-[0.2em] font-bold">PRODUCT</span>
-              <a href="#features" className="text-white/50 hover:text-white transition-colors text-xs">Features</a>
-              <a href="#suite" className="text-white/50 hover:text-white transition-colors text-xs">Pricing</a>
-              <a href="#" className="text-white/50 hover:text-white transition-colors text-xs">API Documentation</a>
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-sans text-[9px] text-white/35 uppercase tracking-[0.2em] font-bold">LEGAL</span>
-              <a href="#" className="text-white/50 hover:text-white transition-colors text-xs">Privacy Policy</a>
-              <a href="#" className="text-white/50 hover:text-white transition-colors text-xs">Terms of Service</a>
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="font-sans text-[9px] text-white/35 uppercase tracking-[0.2em] font-bold">SUPPORT</span>
-              <a href="#" className="text-white/50 hover:text-white transition-colors text-xs">Contact Support</a>
-              <a href="#" className="text-white/50 hover:text-white transition-colors text-xs">Community</a>
-            </div>
+          <div className="relative max-w-[1440px] mx-auto px-5 lg:px-12 py-6.5 pb-16 flex flex-wrap items-center gap-3.5 border-t border-white/[0.07]">
+            <span className="text-xs text-white/55">© 2024 Remlin. All rights reserved.</span>
+            <div className="flex-1" />
+            <span className="inline-flex items-center gap-2 text-[11px] font-bold tracking-[0.15em] uppercase text-white/45 whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#3ddc84] shadow-[0_0_9px_rgba(61,220,132,0.9)] animate-pulse-dot" />
+              All systems operational
+            </span>
           </div>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, ArrowRight, Check, CreditCard, Zap } from 'lucide-react';
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 import { Tab } from '../types';
 import { signup, getGoogleConnectUrl, AuthResponse } from '../lib/api';
 
@@ -38,7 +38,7 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
   };
 
   return (
-    <div className="min-h-screen app-bg-gradient text-[#e2e2e2] font-sans flex overflow-x-hidden overflow-y-auto selection:bg-white/10 selection:text-white relative">
+    <div className="min-h-screen app-bg-gradient text-[#e2e2e2] font-sans flex overflow-y-auto selection:bg-white/10 selection:text-white relative">
       {/* Background soft blurs according to DESIGN.md */}
       <div className="ambient-bloom-tl" />
       <div className="ambient-bloom-br" />
@@ -53,8 +53,8 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
         <div className="relative z-10 space-y-12">
           {/* Brand Logo Header */}
           <div className="flex items-center gap-2.5 cursor-pointer" onClick={() => onNavigate('landing')}>
-            <ShopMateLogo size={18} className="w-7 h-7 !rounded-lg" />
-            <span className="font-sans font-bold text-md text-white tracking-tight">ShopMate AI</span>
+            <RemlinLogo size={18} className="w-7 h-7 !rounded-lg" />
+            <span className="font-sans font-bold text-md text-white tracking-tight">Remlin</span>
           </div>
 
           {/* Core pitch */}
@@ -102,9 +102,8 @@ export default function SignupPage({ onNavigate, onSignupSuccess }: SignupPagePr
       <main className="w-full lg:w-[60%] bg-[#070708] flex flex-col justify-center items-center px-6 py-12 overflow-y-auto">
         <div className="w-full max-w-[480px]">
           {/* Mobile brand header (shown on small screens) */}
-          <div className="lg:hidden flex flex-col items-center justify-center mb-10">
-            <ShopMateLogo size={20} className="w-8 h-8 mb-2 !rounded-lg" />
-            <span className="font-sans font-bold text-md text-white tracking-tight">ShopMate AI</span>
+          <div className="lg:hidden flex items-center justify-center mb-10 cursor-pointer" onClick={() => onNavigate('landing')}>
+            <RemlinLogo className="h-9 w-auto" />
           </div>
 
           {/* Form Header */}

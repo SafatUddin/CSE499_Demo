@@ -391,7 +391,7 @@ export const INITIAL_INTEGRATIONS: Integration[] = [
   {
     id: 'int-fb',
     name: 'Facebook Page',
-    description: 'Sync product catalogs and automate Messenger inquiries via ShopMate AI training models.',
+    description: 'Sync product catalogs and automate Messenger inquiries via Remlin training models.',
     connected: true,
     statusText: 'Active Sync',
     hasAction: true,

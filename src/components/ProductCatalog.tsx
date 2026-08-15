@@ -171,7 +171,7 @@ export default function ProductCatalog({
         onSearchChange={setSearchTerm}
       />
 
-      <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
+      <div className="w-full flex-grow space-y-6 p-6 md:p-8">
         <div className="grid grid-cols-1 gap-6 items-start">
 
           {/* Product Catalog Box */}

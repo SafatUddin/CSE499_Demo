@@ -85,7 +85,7 @@ export default function AnalyticsDashboard() {
         searchPlaceholder="Search commands…" 
       />
 
-      <div className="w-full flex-grow space-y-6 p-6 md:p-8 pb-16">
+      <div className="w-full flex-grow space-y-6 p-6 md:p-8">
 
         {error && !loading && (
           <div className="flex items-center justify-center h-64 text-white/50 text-sm font-sans">
@@ -333,7 +333,7 @@ export default function AnalyticsDashboard() {
                   <div>
                     <h4 className="font-sans font-bold text-base text-white">AI sales strategy update</h4>
                     <p className="text-xs text-white/60 mt-0.5">
-                      Based on performance trends, ShopMate AI recommends a promotional bundle for high-converting items.
+                      Based on performance trends, Remlin recommends a promotional bundle for high-converting items.
                     </p>
                   </div>
                 </div>

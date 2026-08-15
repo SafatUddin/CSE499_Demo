@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Tab } from '../types';
 
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 
 interface SidebarProps {
   activeTab: Tab;
@@ -63,10 +63,10 @@ export default function Sidebar({
           {/* Brand Block matching Picture 1 */}
           <header className={`p-5 flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between'} border-b border-white/[0.08] relative`}>
             <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-              <ShopMateLogo size={22} className="w-10 h-10" />
+              <RemlinLogo size={22} className="w-10 h-10" />
               {!isCollapsed && (
                 <div>
-                  <span className="font-sans font-extrabold text-[16px] text-white block leading-tight tracking-tight">ShopMate AI</span>
+                  <span className="font-sans font-extrabold text-[16px] text-white block leading-tight tracking-tight">Remlin</span>
                   <span className="font-sans text-[11px] text-blue-200/60 block mt-0.5 leading-tight font-medium">Elite sales command</span>
                 </div>
               )}

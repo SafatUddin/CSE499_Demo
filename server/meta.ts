@@ -90,18 +90,23 @@ export async function sendWhatsAppImage(phoneNumberId: string, accessToken: stri
   }
 }
 
-export async function fetchMessengerProfileName(pageAccessToken: string, psid: string): Promise<string | null> {
+export interface MetaProfile {
+  name: string | null;
+  profilePicUrl: string | null;
+}
+
+export async function fetchMessengerProfile(pageAccessToken: string, psid: string): Promise<MetaProfile> {
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${psid}?fields=first_name,last_name&access_token=${encodeURIComponent(pageAccessToken)}`
+      `https://graph.facebook.com/v21.0/${psid}?fields=first_name,last_name,profile_pic&access_token=${encodeURIComponent(pageAccessToken)}`
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { name: null, profilePicUrl: null };
     const data = await res.json();
     const name = [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
-    return name || null;
+    return { name: name || null, profilePicUrl: data.profile_pic || null };
   } catch (err) {
-    console.error('Failed to fetch Messenger profile name:', err);
-    return null;
+    console.error('Failed to fetch Messenger profile:', err);
+    return { name: null, profilePicUrl: null };
   }
 }
 
@@ -172,17 +177,17 @@ export async function sendInstagramImage(igAccountId: string, accessToken: strin
   }
 }
 
-export async function fetchInstagramProfileName(accessToken: string, igUserId: string): Promise<string | null> {
+export async function fetchInstagramProfile(accessToken: string, igUserId: string): Promise<MetaProfile> {
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${igUserId}?fields=name,username&access_token=${encodeURIComponent(accessToken)}`
+      `https://graph.facebook.com/v21.0/${igUserId}?fields=name,username,profile_pic&access_token=${encodeURIComponent(accessToken)}`
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { name: null, profilePicUrl: null };
     const data = await res.json();
-    return data.username || data.name || null;
+    return { name: data.username || data.name || null, profilePicUrl: data.profile_pic || null };
   } catch (err) {
-    console.error('Failed to fetch Instagram profile name:', err);
-    return null;
+    console.error('Failed to fetch Instagram profile:', err);
+    return { name: null, profilePicUrl: null };
   }
 }
 

@@ -146,6 +146,11 @@ model Conversation {
   channelType    ChannelType
   externalUserId String?
   customerName   String?
+  // Customer's profile photo URL, fetched from Meta's Graph API for Facebook/Instagram
+  // (never available for WhatsApp — the platform doesn't expose it). Meta's returned
+  // URLs are temporary/CDN-backed, so this is refreshed opportunistically alongside
+  // customerName rather than treated as a permanent value.
+  avatarUrl      String?
   status         ConversationStatus @default(AI_MANAGED)
   isComplaint    Boolean            @default(false)
   cart           Json?

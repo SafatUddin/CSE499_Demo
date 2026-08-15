@@ -27,8 +27,8 @@ import {
   sendWhatsAppImage,
   sendInstagramMessage,
   sendInstagramImage,
-  fetchMessengerProfileName,
-  fetchInstagramProfileName,
+  fetchMessengerProfile,
+  fetchInstagramProfile,
   replyToFacebookComment,
   sendFacebookPrivateReply,
   replyToInstagramComment,
@@ -1936,6 +1936,7 @@ async function startServer() {
     return {
       id: c.id,
       customerName: c.customerName || 'New Customer',
+      avatarUrl: c.avatarUrl || undefined,
       platform: CHANNEL_TO_PLATFORM[c.channelType] || 'websocket',
       lastMessage: last?.text || '',
       time: last?.time || '',
@@ -2968,13 +2969,16 @@ async function startServer() {
       });
     }
 
-    // Backfill the customer's real name if we don't have one yet — covers both brand-new
-    // conversations and older ones created before this profile lookup existed.
-    if (!conversation.customerName) {
+    // Backfill the customer's real name/avatar if we don't have both yet — covers both
+    // brand-new conversations and older ones created before this profile lookup existed.
+    if (!conversation.customerName || !conversation.avatarUrl) {
       const pageAccessToken = await getPageAccessTokenForStore(storeId);
-      const customerName = pageAccessToken ? await fetchMessengerProfileName(pageAccessToken, senderPsid) : null;
-      if (customerName) {
-        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { customerName } });
+      const profile = pageAccessToken ? await fetchMessengerProfile(pageAccessToken, senderPsid) : { name: null, profilePicUrl: null };
+      const updateData: any = {};
+      if (profile.name && !conversation.customerName) updateData.customerName = profile.name;
+      if (profile.profilePicUrl && !conversation.avatarUrl) updateData.avatarUrl = profile.profilePicUrl;
+      if (Object.keys(updateData).length > 0) {
+        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
       }
     }
 
@@ -3070,11 +3074,14 @@ async function startServer() {
       });
     }
 
-    if (!conversation.customerName) {
+    if (!conversation.customerName || !conversation.avatarUrl) {
       const igCreds = await getInstagramCredentialsForStore(storeId);
-      const customerName = igCreds ? await fetchInstagramProfileName(igCreds.accessToken, senderIgUserId) : null;
-      if (customerName) {
-        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: { customerName: `@${customerName}` } });
+      const profile = igCreds ? await fetchInstagramProfile(igCreds.accessToken, senderIgUserId) : { name: null, profilePicUrl: null };
+      const updateData: any = {};
+      if (profile.name && !conversation.customerName) updateData.customerName = `@${profile.name}`;
+      if (profile.profilePicUrl && !conversation.avatarUrl) updateData.avatarUrl = profile.profilePicUrl;
+      if (Object.keys(updateData).length > 0) {
+        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
       }
     }
 
@@ -3226,8 +3233,8 @@ async function startServer() {
                   const igCreds = await getInstagramCredentialsForStore(channel.storeId);
                   if (igCreds) {
                     if (senderIgUserId && customerName === 'Customer') {
-                      const fetchedName = await fetchInstagramProfileName(igCreds.accessToken, senderIgUserId);
-                      if (fetchedName) customerName = fetchedName;
+                      const fetchedProfile = await fetchInstagramProfile(igCreds.accessToken, senderIgUserId);
+                      if (fetchedProfile.name) customerName = fetchedProfile.name;
                     }
 
                     // 1. Reply to comment in public comment section: "Check Inbox"

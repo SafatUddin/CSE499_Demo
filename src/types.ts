@@ -37,6 +37,7 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   customerName: string;
+  avatarUrl?: string;
   platform: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
   lastMessage: string;
   time: string;

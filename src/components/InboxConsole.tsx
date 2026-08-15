@@ -23,6 +23,33 @@ import { Conversation, ChatMessage, Product } from '../types';
 import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
+// Shows the customer's real Facebook/Instagram profile photo when we have one (never
+// available for WhatsApp); falls back to initials on load failure or when there's no
+// avatarUrl at all (e.g. website-widget conversations).
+function ChatAvatar({ name, avatarUrl, sizeClass }: { name: string; avatarUrl?: string; sizeClass: string }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(avatarUrl) && !imageFailed;
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [avatarUrl]);
+
+  return (
+    <div className={`${sizeClass} rounded-full bg-gradient-to-b from-white/20 to-white/5 border border-white/20 text-white font-bold flex items-center justify-center font-sans text-[12.5px] uppercase shadow-inner overflow-hidden shrink-0`}>
+      {showImage ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="w-full h-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        name.split(' ').map((n) => n[0]).join('')
+      )}
+    </div>
+  );
+}
+
 interface InboxConsoleProps {
   conversations: Conversation[];
   products: Product[];
@@ -526,9 +553,7 @@ export default function InboxConsole({
                   >
                     {/* Avatar with channel badge */}
                     <div className="relative shrink-0 mt-0.5">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-b from-white/20 to-white/5 border border-white/20 flex items-center justify-center font-sans text-white text-[12.5px] font-bold uppercase shadow-inner">
-                        {getChatDisplayName(chat).split(' ').map(n => n[0]).join('')}
-                      </div>
+                      <ChatAvatar name={getChatDisplayName(chat)} avatarUrl={chat.avatarUrl} sizeClass="w-10 h-10" />
                       <div className="absolute -bottom-1 -right-1 bg-[#09090b] p-0.5 rounded-full border border-white/25 shadow-md">
                         {renderPlatformIcon(chat.platform, 13)}
                       </div>
@@ -589,9 +614,7 @@ export default function InboxConsole({
                   <ChevronLeft className="h-5 w-5" />
                 </button>
 
-                <div className="w-10 h-10 rounded-full bg-gradient-to-b from-white/20 to-white/5 border border-white/20 text-white font-bold flex items-center justify-center font-sans text-[13px] shadow-md">
-                  {activeChat ? getChatDisplayName(activeChat).split(' ').map(n => n[0]).join('') : ''}
-                </div>
+                <ChatAvatar name={activeChat ? getChatDisplayName(activeChat) : ''} avatarUrl={activeChat?.avatarUrl} sizeClass="w-10 h-10" />
                 <div>
                   <h4 className="font-sans text-[15px] font-bold text-white leading-tight">{activeChat ? getChatDisplayName(activeChat) : ''}</h4>
                   <div className="flex items-center gap-2 mt-0.5">

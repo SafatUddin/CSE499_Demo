@@ -284,6 +284,7 @@ export interface ApiChatMessage {
 export interface ApiConversation {
   id: string;
   customerName: string;
+  avatarUrl?: string;
   platform: 'facebook' | 'instagram' | 'whatsapp' | 'websocket';
   lastMessage: string;
   time: string;

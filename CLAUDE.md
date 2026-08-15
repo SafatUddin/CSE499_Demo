@@ -51,6 +51,19 @@ Beta testing is imminent — a handful of testers, days-scale timeline.
 2. WhatsApp Business Platform — code is deployed, but real end-to-end testing is blocked on finishing the Meta Business Portfolio setup (in progress as of this writing).
 3. The Ollama/Tailscale self-hosting reliability work (surviving reboots, PC sleep) is no longer relevant — AI now runs entirely on Gemini, no home-machine dependency.
 
+## Feature gaps vs LazyChat (competitor benchmark)
+
+Not scheduled yet — surfaced 2026-08-14 comparing against LazyChat (Bangladeshi competitor in the same space; see `LazyChat_Engineering_Architecture_Blueprint.md` for the full reverse-engineered breakdown). Revisit only when explicitly asked; pick based on what's actually blocking beta feedback, not speculatively.
+
+- ❌ Team/multi-user management — ShopMate is single-merchant/single-user per store; LazyChat's paid tiers scale by team seats.
+- ❌ Broadcast/campaign messaging — personalized order confirmations, restock alerts, promotional blasts to segmented audiences. ShopMate only ever reacts to inbound messages.
+- ❌ Cart abandonment automation — no proactive follow-up on stalled carts (cart state already exists on `Conversation.cart`, so this is mostly a scheduled-job problem, not a new data model).
+- ❌ Reverse image recognition — a customer sending a product photo isn't understood; ShopMate can only send photos outward (built 2026-08-14), not interpret incoming ones.
+- ❌ Live-agent escalation with full context — only the Copilot Active/Managed toggle exists today, not a dedicated handoff flow.
+- ❌ Real website chat widget — `Store.widgetKey` exists in schema but nothing implements it; came up when scoping the opening-greeting feature.
+- ❌ WooCommerce integration — still a mock toggle (Shopify sync is real, per teammate's recent commits).
+- ❌ Pricing/billing model — not relevant to the capstone demo itself, but implies multi-tenant subscription infra LazyChat has that ShopMate doesn't.
+
 ## Known environment quirks
 
 - VS Code's TS server has intermittently shown stale "missing @types/react" diagnostics on files after `node_modules` churn (e.g. after downgrading Prisma 7→6). The CLI `npx tsc --noEmit` is the source of truth for whether the build actually typechecks — if it exits 0, the IDE squiggles are a stale cache, not a real error. Restarting the TS server / reloading the window clears it.

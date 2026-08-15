@@ -2889,14 +2889,16 @@ async function startServer() {
 
   // Sends the merchant's configured opening greeting (text + optional image) the very
   // first time a customer messages the business on a real channel — fires once per brand
-  // new Conversation, before the AI's actual reply to their message.
+  // new Conversation, and stands in for the AI's reply on that first message (the caller
+  // skips generateAndStoreAgentReply when this returns true) so the customer doesn't get
+  // two back-to-back greeting-shaped messages on their very first "hello."
   async function sendOpeningGreetingIfNew(
     isNewConversation: boolean,
     conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null }
-  ) {
-    if (!isNewConversation) return;
+  ): Promise<boolean> {
+    if (!isNewConversation) return false;
     const store = await prisma.store.findUnique({ where: { id: conversation.storeId } });
-    if (!store || !store.openingText) return;
+    if (!store || !store.openingText) return false;
 
     const isAutopilot = conversation.status === 'AI_MANAGED';
     await prisma.message.create({
@@ -2910,7 +2912,7 @@ async function startServer() {
     });
     await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
-    if (!isAutopilot || !conversation.externalUserId) return;
+    if (!isAutopilot || !conversation.externalUserId) return true;
     try {
       if (conversation.channelType === 'FACEBOOK') {
         const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
@@ -2934,6 +2936,7 @@ async function startServer() {
     } catch (err) {
       console.error(`Failed to deliver opening greeting to ${conversation.channelType}:`, err);
     }
+    return true;
   }
 
   async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
@@ -2995,8 +2998,10 @@ async function startServer() {
       throw err;
     }
 
-    await sendOpeningGreetingIfNew(isNewConversation, conversation);
-    await generateAndStoreAgentReply(conversation, messageText);
+    const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
+    if (!greetedInstead) {
+      await generateAndStoreAgentReply(conversation, messageText);
+    }
   }
 
   async function handleIncomingWhatsAppMessage(phoneNumberId: string, senderWaId: string, messageText: string, externalMessageId: string, customerName?: string) {
@@ -3046,8 +3051,10 @@ async function startServer() {
       throw err;
     }
 
-    await sendOpeningGreetingIfNew(isNewConversation, conversation);
-    await generateAndStoreAgentReply(conversation, messageText);
+    const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
+    if (!greetedInstead) {
+      await generateAndStoreAgentReply(conversation, messageText);
+    }
   }
 
   async function handleIncomingInstagramMessage(igAccountId: string, senderIgUserId: string, messageText: string, externalMessageId: string) {
@@ -3097,8 +3104,10 @@ async function startServer() {
       throw err;
     }
 
-    await sendOpeningGreetingIfNew(isNewConversation, conversation);
-    await generateAndStoreAgentReply(conversation, messageText);
+    const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
+    if (!greetedInstead) {
+      await generateAndStoreAgentReply(conversation, messageText);
+    }
   }
 
   // Meta webhook receiver — signature-verified before any payload is trusted

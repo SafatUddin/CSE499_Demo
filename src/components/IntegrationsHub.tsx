@@ -458,15 +458,64 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const renderIcon = (type: string, classStyle = "h-5 w-5") => {
     switch (type) {
       case 'facebook':
-        return <Facebook className={classStyle} />;
+        return (
+          <svg className={classStyle} viewBox="0 0 24 24" fill="none">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
+          </svg>
+        );
       case 'instagram':
-        return <Instagram className={classStyle} />;
+        return (
+          <svg className={classStyle} viewBox="0 0 24 24" fill="none">
+            <defs>
+              <radialGradient id="ig-grad-full" cx="30%" cy="107%" r="130%">
+                <stop offset="0%" stopColor="#fdf497" />
+                <stop offset="5%" stopColor="#fdf497" />
+                <stop offset="45%" stopColor="#fd5949" />
+                <stop offset="60%" stopColor="#d6249f" />
+                <stop offset="90%" stopColor="#285AEB" />
+              </radialGradient>
+            </defs>
+            <rect width="24" height="24" rx="6" fill="url(#ig-grad-full)" />
+            <rect x="4.5" y="4.5" width="15" height="15" rx="4.5" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+            <circle cx="12" cy="12" r="3.6" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+            <circle cx="16.3" cy="7.7" r="1.1" fill="#ffffff" />
+          </svg>
+        );
       case 'whatsapp':
-        return <MessageSquare className={classStyle} />;
+        return (
+          <svg className={classStyle} viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="#25D366" />
+            <path 
+              d="M12 4.2a7.8 7.8 0 0 0-6.75 11.7L4 20l4.24-1.21A7.8 7.8 0 1 0 12 4.2zm0 14.1a6.3 6.3 0 0 1-3.21-.88l-.23-.14-2.39.68.68-2.33-.15-.24a6.3 6.3 0 1 1 5.3 2.91zm3.46-4.73c-.19-.09-1.12-.55-1.3-.61-.17-.06-.3-.09-.43.1-.13.19-.5.61-.61.73-.11.13-.23.14-.42.05a5.27 5.27 0 0 1-1.55-.96 5.8 5.8 0 0 1-1.08-1.34c-.11-.19 0-.29.09-.38.08-.08.19-.23.29-.34.1-.11.13-.19.19-.32.06-.13.03-.24-.02-.34-.05-.09-.43-1.03-.59-1.42-.15-.37-.31-.32-.43-.32-.11 0-.24-.01-.37-.01-.13 0-.34.05-.52.24s-.69.67-.69 1.64.71 1.9 0.81 2.03c.1.13 1.39 2.12 3.37 2.97.47.2.84.32 1.13.41.48.15.91.13 1.25.08.38-.06 1.16-.47 1.32-.93.16-.46.16-.85.11-.93-.05-.08-.18-.13-.37-.22z" 
+              fill="#ffffff" 
+            />
+          </svg>
+        );
       case 'shopify':
-        return <ShoppingBag className={classStyle} />;
+        return (
+          <svg className={classStyle} viewBox="0 0 109.5 124.5" fill="none">
+            {/* Official Shopify shopping bag logo */}
+            <path d="M95.6 28.4c-.1-.7-.7-1.1-1.2-1.1s-9.9-.7-9.9-.7-6.6-6.5-7.4-7.2c-.7-.7-2.2-.5-2.7-.3-.1 0-1.4.4-3.7 1.1-2.2-6.3-6.1-12.1-12.9-12.1h-.6c-1.9-2.5-4.3-3.6-6.3-3.6-15.6 0-23.1 19.5-25.4 29.4-6 1.9-10.3 3.2-10.8 3.3-3.4 1.1-3.5 1.2-3.9 4.4C10.4 44.1 0 124.5 0 124.5l75.6 13 33.9-8.4S95.7 29.1 95.6 28.4zM67.3 21.7l-5.7 1.8c0-3.1-.4-7.6-1.8-11.4 4.4.9 6.6 5.9 7.5 9.6zm-9.7 3l-12.3 3.8c1.2-4.6 3.5-9.1 6.3-12.1 1.1-1.1 2.5-2.3 4.2-3 1.7 3.5 1.9 8.5 1.8 11.3zm-6.8-17.7c1.4 0 2.5.5 3.5 1.3-4 1.9-8.3 6.7-10.1 16.3l-9.8 3c2.7-9.1 9-20.6 16.4-20.6z" fill="#95BF47"/>
+            <path d="M94.4 27.3c-.5 0-9.9-.7-9.9-.7s-6.6-6.5-7.4-7.2c-.3-.3-.6-.4-.9-.4l-4.7 95.5 33.9-8.4S95.7 29.1 95.6 28.4c-.1-.7-.7-1.1-1.2-1.1z" fill="#5E8E3E"/>
+            <path d="M57.4 43.6l-4.7 13.9s-4.1-2.2-9.1-2.2c-7.4 0-7.7 4.6-7.7 5.8 0 6.3 16.6 8.8 16.6 23.6 0 11.7-7.4 19.2-17.4 19.2-12 0-18.1-7.5-18.1-7.5l3.2-10.6s6.3 5.4 11.6 5.4c3.5 0 4.9-2.7 4.9-4.7 0-8.3-13.6-8.6-13.6-22.2 0-11.4 8.2-22.5 24.7-22.5 6.4 0 9.6 1.8 9.6 1.8z" fill="#FFFFFF"/>
+          </svg>
+        );
       case 'woocommerce':
-        return <Database className={classStyle} />;
+        return (
+          <svg className={classStyle} viewBox="0 0 24 24" fill="none">
+            {/* WooCommerce purple circle with bold white W */}
+            <circle cx="12" cy="12" r="12" fill="#7F54B3"/>
+            <path d="M5.4 7.8h13.2c.7 0 1.3.4 1.5 1l-3.2 8.6c-.2.5-.7.8-1.2.8H8.3c-.5 0-1-.3-1.2-.8L3.9 8.8c-.2-.5.1-1 .7-1h.8z" fill="#7F54B3" stroke="#fff" strokeWidth="1.2"/>
+            <text x="12" y="16" textAnchor="middle" fill="white" fontSize="11" fontWeight="900" fontFamily="Arial, sans-serif">W</text>
+          </svg>
+        );
+      case 'websocket':
+        return (
+          <svg className={classStyle} viewBox="0 0 24 24" fill="none">
+            {/* Green lightning bolt — no background */}
+            <path d="M13 2L4.5 13h6l-1.5 9L18 11h-6.5L13 2z" fill="#10B981"/>
+          </svg>
+        );
       default:
         return <Database className={classStyle} />;
     }
@@ -566,9 +615,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105 duration-300 ${
                     item.id === 'int-fb'
                       ? 'bg-[#1877f2]/15 border border-[#1877f2]/30 text-[#1877f2]'
-                      : item.id === 'int-shopify'
-                        ? 'bg-[#96bf48]/15 border border-[#96bf48]/30 text-[#96bf48]'
-                        : 'bg-white/10 border border-white/15 text-white/90'
+                      : item.id === 'int-ig'
+                        ? 'bg-gradient-to-tr from-[#fdf497]/20 via-[#fd5949]/20 to-[#d6249f]/20 border border-[#fd5949]/30 text-white'
+                        : item.id === 'int-wa'
+                          ? 'bg-[#25D366]/15 border border-[#25D366]/30 text-[#25D366]'
+                          : item.id === 'int-shopify'
+                            ? 'bg-[#96bf48]/15 border border-[#96bf48]/30 text-[#96bf48]'
+                            : 'bg-white/10 border border-white/15 text-white/90'
                   }`}>
                     {renderIcon(item.logoType, "h-6 w-6")}
                   </div>

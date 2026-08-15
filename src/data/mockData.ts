@@ -443,7 +443,7 @@ export const INITIAL_INTEGRATIONS: Integration[] = [
     statusText: 'Embed Active',
     hasAction: true,
     actionText: 'Get Code',
-    logoType: 'woocommerce', // Will map to a custom widget icon
+    logoType: 'websocket',
   },
 ];
 

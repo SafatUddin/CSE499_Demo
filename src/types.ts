@@ -60,7 +60,7 @@ export interface Integration {
   statusText: string;
   hasAction: boolean;
   actionText?: string;
-  logoType: 'facebook' | 'instagram' | 'whatsapp' | 'shopify' | 'woocommerce';
+  logoType: 'facebook' | 'instagram' | 'whatsapp' | 'shopify' | 'woocommerce' | 'websocket';
 }
 
 export interface AIPersona {

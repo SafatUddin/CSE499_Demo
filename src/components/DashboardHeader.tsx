@@ -37,7 +37,7 @@ function HeaderAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | n
   }, [avatarUrl]);
 
   return (
-    <div className="w-7 h-7 rounded-full border border-blue-400/40 shrink-0 overflow-hidden bg-gradient-to-br from-[#2757d8] to-[#14307c]">
+    <div className="w-7 h-7 rounded-full border border-white/20 shrink-0 overflow-hidden bg-[#242836]">
       {showImage ? (
         <img
           src={avatarUrl!}
@@ -170,7 +170,7 @@ export default function DashboardHeader({
   };
 
   return (
-    <header className="w-full zone-a-topbar z-40 select-none px-4 sm:px-6 md:px-8 py-3 flex items-center justify-between shrink-0">
+    <header className="w-full zone-a-topbar z-40 select-none px-4 sm:px-6 md:px-8 h-[72px] flex items-center justify-between shrink-0 border-b border-white/[0.08]">
       {/* Left side: Mobile menu toggle */}
       <div className="flex items-center gap-3">
         <button 
@@ -194,8 +194,8 @@ export default function DashboardHeader({
             onChange={(e) => onSearchChange?.(e.target.value)}
             className="w-full bg-transparent border-none text-[13px] text-white placeholder-blue-200/40 focus:outline-none font-sans"
           />
-          <button className="w-7 h-7 bg-[#2757d8] hover:bg-[#2d5de2] rounded-lg flex items-center justify-center shrink-0 ml-1.5 text-white shadow-md transition-colors cursor-pointer">
-            <ArrowRight className="h-3.5 w-3.5" />
+          <button className="w-7 h-7 bg-white/10 hover:bg-white/20 border border-white/15 rounded-lg flex items-center justify-center shrink-0 ml-1.5 text-white shadow-md transition-colors cursor-pointer">
+            <ArrowRight className="h-3.5 w-3.5 text-white/70" />
           </button>
         </div>
 

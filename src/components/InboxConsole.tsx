@@ -397,16 +397,49 @@ export default function InboxConsole({
     }).length;
   };
 
-  const renderPlatformIcon = (platform: string, size = 12) => {
+  const renderPlatformIcon = (platform: string, size = 14) => {
     switch (platform) {
       case 'facebook':
-        return <Facebook size={size} className="text-[#1877F2]" />;
+        return (
+          <svg className={`h-[${size}px] w-[${size}px]`} style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
+          </svg>
+        );
       case 'instagram':
-        return <Instagram size={size} className="text-[#E1306C]" />;
+        return (
+          <svg className={`h-[${size}px] w-[${size}px]`} style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none">
+            <defs>
+              <radialGradient id="inbox-ig-grad" cx="30%" cy="107%" r="130%">
+                <stop offset="0%" stopColor="#fdf497" />
+                <stop offset="5%" stopColor="#fdf497" />
+                <stop offset="45%" stopColor="#fd5949" />
+                <stop offset="60%" stopColor="#d6249f" />
+                <stop offset="90%" stopColor="#285AEB" />
+              </radialGradient>
+            </defs>
+            <rect width="24" height="24" rx="6" fill="url(#inbox-ig-grad)" />
+            <rect x="4.5" y="4.5" width="15" height="15" rx="4.5" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+            <circle cx="12" cy="12" r="3.6" stroke="#ffffff" strokeWidth="1.8" fill="none" />
+            <circle cx="16.3" cy="7.7" r="1.1" fill="#ffffff" />
+          </svg>
+        );
       case 'whatsapp':
-        return <MessageSquare size={size} className="text-[#25D366]" />;
+        return (
+          <svg className={`h-[${size}px] w-[${size}px]`} style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="#25D366" />
+            <path 
+              d="M12 4.2a7.8 7.8 0 0 0-6.75 11.7L4 20l4.24-1.21A7.8 7.8 0 1 0 12 4.2zm0 14.1a6.3 6.3 0 0 1-3.21-.88l-.23-.14-2.39.68.68-2.33-.15-.24a6.3 6.3 0 1 1 5.3 2.91zm3.46-4.73c-.19-.09-1.12-.55-1.3-.61-.17-.06-.3-.09-.43.1-.13.19-.5.61-.61.73-.11.13-.23.14-.42.05a5.27 5.27 0 0 1-1.55-.96 5.8 5.8 0 0 1-1.08-1.34c-.11-.19 0-.29.09-.38.08-.08.19-.23.29-.34.1-.11.13-.19.19-.32.06-.13.03-.24-.02-.34-.05-.09-.43-1.03-.59-1.42-.15-.37-.31-.32-.43-.32-.11 0-.24-.01-.37-.01-.13 0-.34.05-.52.24s-.69.67-.69 1.64.71 1.9 0.81 2.03c.1.13 1.39 2.12 3.37 2.97.47.2.84.32 1.13.41.48.15.91.13 1.25.08.38-.06 1.16-.47 1.32-.93.16-.46.16-.85.11-.93-.05-.08-.18-.13-.37-.22z" 
+              fill="#ffffff" 
+            />
+          </svg>
+        );
       case 'websocket':
-        return <Zap size={size} className="text-[#4d8bff]" />;
+        return (
+          <svg className={`h-[${size}px] w-[${size}px]`} style={{ width: size, height: size }} viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="#10B981"/>
+            <path d="M13 3L4 14h7l-2 7 9-11h-7l2-7z" fill="#ffffff" />
+          </svg>
+        );
       default:
         return <User size={size} className="text-white/40" />;
     }
@@ -426,8 +459,7 @@ export default function InboxConsole({
       />
 
       <div className="w-full flex-grow flex flex-col min-h-0 space-y-3 p-4 md:p-5 overflow-hidden">
-
-        {/* 99px Filter Tabs Row matching Picture 1 */}
+        {/* Filter Tabs Row matching Picture 2 Apple Glass Design */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar shrink-0 flex-nowrap">
           {FILTERS.map((f) => {
             const isActive = activeFilter === f;
@@ -438,18 +470,18 @@ export default function InboxConsole({
               <button
                 key={f}
                 onClick={() => setActiveFilter(f)}
-                className={`text-[12px] font-sans font-medium px-4 py-2 rounded-[99px] border shrink-0 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                className={`text-[12px] font-sans font-medium px-4 py-1.5 rounded-full border shrink-0 transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap backdrop-blur-md ${
                   isActive 
-                    ? 'bg-[#183478] border-blue-400/50 text-white font-bold shadow-[0_0_14px_rgba(37,82,198,0.45)]' 
-                    : 'bg-white/[0.06] border-white/12 text-white/70 hover:text-white hover:bg-white/12'
+                    ? 'bg-gradient-to-b from-white/20 to-white/10 border-white/35 text-white font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_4px_12px_rgba(0,0,0,0.4)]' 
+                    : 'bg-white/[0.04] border-white/[0.08] text-white/60 hover:text-white hover:bg-white/10 hover:border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                 }`}
               >
                 <span>{f}</span>
                 {count > 0 && (
                   <span className={`text-[10px] font-bold text-white px-2 py-0.5 rounded-full ${
                     isRedCount 
-                      ? 'bg-gradient-to-r from-[#e53935] to-[#c62828]' 
-                      : 'bg-gradient-to-r from-[#2552c6] to-[#14307c]'
+                      ? 'bg-[#ea4335]' 
+                      : 'bg-white/20'
                   }`}>
                     {count}
                   </span>
@@ -459,13 +491,13 @@ export default function InboxConsole({
           })}
         </div>
 
-        {/* 3-Pane Workspace Container strictly fitting 100vh height */}
-        <div className="flex-grow min-h-0 flex gap-4 overflow-hidden w-full">
+        {/* Unified Apple Glass Workspace Container */}
+        <div className="flex-grow min-h-0 flex overflow-hidden w-full rounded-2xl border border-white/15 bg-[#0a0b10] shadow-2xl divide-x divide-white/[0.08]">
         
           {/* Pane 1: Left Conversation List */}
-          <aside className={`zone-b-grey1 flex flex-col h-full lg:w-[34%] min-w-[290px] w-full overflow-hidden shrink-0 ${mobileView === 'list' ? 'flex' : 'hidden lg:flex'}`}>
-            <header className="p-4 border-b border-white/[0.08] flex items-center justify-between shrink-0">
-              <h3 className="font-sans font-bold text-[16px] text-white">
+          <aside className="bg-[#101117] flex flex-col h-full lg:w-[32%] min-w-[280px] w-full overflow-hidden shrink-0">
+            <header className="h-16 px-4 border-b border-white/[0.08] flex items-center justify-between shrink-0 bg-white/[0.01]">
+              <h3 className="font-sans font-bold text-[15px] text-white">
                 Conversations
               </h3>
               <span className="bg-white/10 border border-white/15 rounded-lg px-2.5 py-0.5 text-[11px] font-bold text-white/80 font-mono">
@@ -473,7 +505,7 @@ export default function InboxConsole({
               </span>
             </header>
 
-            <div className="flex-grow min-h-0 overflow-y-auto divide-y divide-white/[0.05] p-2 space-y-1 no-scrollbar">
+            <div className="flex-grow min-h-0 overflow-y-auto p-3 space-y-2 no-scrollbar">
               {filteredChats.map((chat) => {
                 const isSelected = chat.id === selectedChatId;
                 return (
@@ -486,19 +518,19 @@ export default function InboxConsole({
                       }
                       setMobileView('chat');
                     }}
-                    className={`w-full text-left p-3.5 flex gap-3 items-start transition-all cursor-pointer rounded-xl ${
+                    className={`w-full text-left p-3.5 flex gap-3 items-start transition-all cursor-pointer rounded-2xl border ${
                       isSelected 
-                        ? 'bg-[#1a1d26] border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(0,0,0,0.4)]' 
-                        : 'bg-transparent border border-transparent hover:bg-white/[0.04]'
+                        ? 'bg-gradient-to-b from-white/[0.14] via-white/[0.06] to-white/[0.02] border-white/30 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_6px_20px_rgba(0,0,0,0.5)]' 
+                        : 'bg-white/[0.02] border-white/[0.08] hover:bg-white/[0.06] hover:border-white/15'
                     }`}
                   >
-                    {/* 40px Avatar with channel badge */}
+                    {/* Avatar with channel badge */}
                     <div className="relative shrink-0 mt-0.5">
-                      <div className="w-10 h-10 rounded-full bg-[#2a2d36] border border-white/15 flex items-center justify-center font-sans text-white text-[13px] font-bold uppercase">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-b from-white/20 to-white/5 border border-white/20 flex items-center justify-center font-sans text-white text-[12.5px] font-bold uppercase shadow-inner">
                         {getChatDisplayName(chat).split(' ').map(n => n[0]).join('')}
                       </div>
-                      <div className="absolute -bottom-1 -right-1 bg-[#09090b] p-0.5 rounded-full border border-white/20 shadow-md">
-                        {renderPlatformIcon(chat.platform, 11)}
+                      <div className="absolute -bottom-1 -right-1 bg-[#09090b] p-0.5 rounded-full border border-white/25 shadow-md">
+                        {renderPlatformIcon(chat.platform, 13)}
                       </div>
                     </div>
 
@@ -507,20 +539,22 @@ export default function InboxConsole({
                         <span className={`font-sans text-[13.5px] truncate ${chat.unread ? 'font-bold text-white' : 'font-semibold text-white/90'}`}>
                           {getChatDisplayName(chat)}
                         </span>
-                        <span className="font-sans text-[10.5px] text-white/40 shrink-0 ml-2">{chat.time}</span>
+                        <span className="font-sans text-[10.5px] text-white/40 shrink-0 ml-2 font-mono">{chat.time}</span>
                       </div>
                       <p className="font-sans text-[12px] text-white/50 truncate leading-snug">
                         {chat.lastMessage}
                       </p>
                       
                       <div className="flex items-center gap-1.5 pt-1">
-                        <span className={`inline-block font-sans text-[10.5px] px-2.5 py-0.5 rounded-full font-semibold ${
-                          chat.status === 'AI Managed' ? 'status-info' : 'status-neutral'
+                        <span className={`inline-block font-sans text-[10.5px] px-2.5 py-0.5 rounded-full font-semibold border ${
+                          chat.status === 'AI Managed' 
+                            ? 'bg-white/10 border-white/20 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]' 
+                            : 'bg-white/[0.04] border-white/10 text-white/60'
                         }`}>
                           {chat.status === 'AI Managed' ? 'AI managed' : 'Manual'}
                         </span>
                         {chat.isComplaint && (
-                          <span className="inline-flex items-center gap-1 font-sans text-[10.5px] px-2 py-0.5 rounded-full font-semibold status-danger">
+                          <span className="inline-flex items-center gap-1 font-sans text-[10.5px] px-2 py-0.5 rounded-full font-semibold status-danger border border-red-400/30">
                             Complaint
                             <button
                               type="button"
@@ -543,9 +577,9 @@ export default function InboxConsole({
             </div>
           </aside>
 
-          {/* Pane 2: Middle Message Thread matching Picture 1 */}
-          <main className={`zone-b-black flex flex-col h-full min-w-[360px] flex-1 overflow-hidden relative ${mobileView === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
-            <header className="p-4 border-b border-white/[0.08] flex items-center justify-between bg-black/40 shrink-0">
+          {/* Pane 2: Middle Message Thread */}
+          <main className={`bg-[#07080b] flex flex-col h-full min-w-[360px] flex-1 overflow-hidden relative ${mobileView === 'chat' ? 'flex' : 'hidden lg:flex'}`}>
+            <header className="h-16 px-4 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.01] shrink-0">
               <div className="flex items-center gap-3">
                 <button 
                   type="button"
@@ -555,7 +589,7 @@ export default function InboxConsole({
                   <ChevronLeft className="h-5 w-5" />
                 </button>
 
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2757d8] to-[#14307c] border border-blue-400/40 text-white font-bold flex items-center justify-center font-sans text-[13px] shadow-md">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-b from-white/20 to-white/5 border border-white/20 text-white font-bold flex items-center justify-center font-sans text-[13px] shadow-md">
                   {activeChat ? getChatDisplayName(activeChat).split(' ').map(n => n[0]).join('') : ''}
                 </div>
                 <div>
@@ -709,15 +743,15 @@ export default function InboxConsole({
                     ) : (
                       /* Message Bubbles matching Picture 1 */
                       <div className={`flex flex-col ${isCustomer ? 'items-start max-w-[62%]' : 'items-end max-w-[72%]'}`}>
-                        <div className={`p-4 font-sans text-[13.5px] leading-relaxed ${
+                        <div className={`p-4 font-sans text-[13.5px] leading-relaxed transition-all ${
                           isCustomer
-                            ? 'bg-[#202228] border border-white/10 text-white rounded-[16px] rounded-bl-[4px]'
-                            : 'bg-gradient-to-br from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white rounded-[16px] rounded-br-[4px] shadow-[0_6px_22px_rgba(37,82,198,0.45)]'
+                            ? 'bg-gradient-to-b from-white/[0.08] via-white/[0.03] to-transparent border border-white/15 text-white rounded-[16px] rounded-bl-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]'
+                            : 'bg-gradient-to-b from-white/[0.12] via-[#1a1b22] to-[#121318] border border-white/20 text-white/95 rounded-[16px] rounded-br-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_16px_rgba(0,0,0,0.4)]'
                         }`}>
                           {m.sender === 'ai' && (
-                            <div className="flex items-center gap-1 mb-1 text-blue-200">
-                              <span className="text-[11px]">✦</span>
-                              <span className="font-sans text-[10.5px] font-bold tracking-wider">AI</span>
+                            <div className="flex items-center gap-1.5 mb-1.5 text-white/80">
+                              <span className="text-[11px] text-white">✦</span>
+                              <span className="font-sans text-[10.5px] font-bold tracking-wider text-white uppercase">AI</span>
                             </div>
                           )}
                           <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
@@ -725,7 +759,7 @@ export default function InboxConsole({
                             <img src={m.imageUrl} alt="" className="mt-2 rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
                           )}
                         </div>
-                        <span className="text-[10.5px] text-white/40 mt-1 px-1">{m.time}</span>
+                        <span className="text-[10.5px] text-white/40 mt-1 px-1 font-mono">{m.time}</span>
                       </div>
                     )}
                   </div>
@@ -734,12 +768,12 @@ export default function InboxConsole({
 
               {isTyping && (
                 <div className="flex w-full justify-end">
-                  <div className="bg-gradient-to-br from-[#2552c6]/80 to-[#14307c]/80 border border-blue-400/40 max-w-[72%] rounded-[16px] rounded-br-[4px] p-4">
+                  <div className="bg-gradient-to-b from-white/[0.12] via-[#1a1b22] to-[#121318] border border-white/20 max-w-[72%] rounded-[16px] rounded-br-[4px] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_16px_rgba(0,0,0,0.4)]">
                     <div className="flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce" />
                       <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce [animation-delay:0.2s]" />
                       <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-bounce [animation-delay:0.4s]" />
-                      <span className="font-sans text-[11px] text-blue-200 font-bold ml-1">
+                      <span className="font-sans text-[11px] text-white/70 font-bold ml-1">
                         AI formulating response…
                       </span>
                     </div>
@@ -749,18 +783,18 @@ export default function InboxConsole({
               <div />
             </div>
 
-            {/* Composer matching Picture 1 */}
-            <footer className="p-4 border-t border-white/[0.08] bg-black/40 space-y-3">
+            {/* Composer matching Picture 1 & 2 Apple Glass Design */}
+            <footer className="p-4 border-t border-white/10 bg-black/30 backdrop-blur-xl space-y-3">
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
                   handleSendMessage(inputText);
                 }}
-                className="flex gap-2 bg-[#131418] border border-white/15 rounded-full p-1.5 pl-3 items-center shadow-lg"
+                className="flex gap-2 bg-gradient-to-b from-white/[0.09] to-white/[0.03] border border-white/20 rounded-full p-1.5 pl-3.5 items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_10px_30px_rgba(0,0,0,0.4)] backdrop-blur-md"
               >
                 <button 
                   type="button" 
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/15 transition-all cursor-pointer shrink-0"
                   onClick={() => setInputText("What other sizes are available?")}
                   title="Attach"
                 >
@@ -779,25 +813,25 @@ export default function InboxConsole({
                 <button
                   type="submit"
                   disabled={isTyping || !inputText.trim()}
-                  className="w-8 h-8 rounded-full bg-[#2552c6] hover:bg-[#2e5ee6] text-white flex items-center justify-center cursor-pointer disabled:opacity-40 shrink-0 shadow-md transition-colors"
+                  className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center cursor-pointer disabled:opacity-40 shrink-0 shadow-[0_2px_10px_rgba(255,255,255,0.4)] transition-all hover:bg-white/90"
                 >
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-4 w-4 fill-current text-black" />
                 </button>
               </form>
 
-              {/* Action Chips + AI Copilot Control matching Picture 1 */}
-              <div className="flex items-center gap-3 flex-wrap">
+              {/* Action Chips + AI Copilot Control matching Picture 2 Apple Glass */}
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <button 
                   type="button"
                   onClick={() => setInputText("Here is a customized quote for a bulk order of 5 units. We can offer a discounted rate of $1,199.00 per unit.")}
-                  className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                  className="bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-white/90 hover:text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-md"
                 >
                   <span className="text-white/60">✦</span> Suggest quote
                 </button>
                 <button 
                   type="button"
                   onClick={() => setInputText("The SM-99 Carbon L is one of our premium executive units featuring fully customized hardware.")}
-                  className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                  className="bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-white/90 hover:text-white font-medium text-[11.5px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-md"
                 >
                   <span className="text-white/60">📄</span> Insert SKU
                 </button>
@@ -819,29 +853,29 @@ export default function InboxConsole({
                         time: 'Just now'
                       });
                     }}
-                    className="bg-[#1a1c22] hover:bg-[#22252d] border border-white/15 text-[#7aa8ff] font-medium text-[11.5px] px-3.5 py-2 rounded-xl cursor-pointer transition-colors"
+                    className="bg-blue-500/10 hover:bg-blue-500/20 border border-blue-400/30 text-[#8cb4ff] font-medium text-[11.5px] px-3.5 py-2 rounded-xl cursor-pointer transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-md"
                   >
                     ⚡ Simulate customer order reply
                   </button>
                 )}
 
-                {/* AI Copilot toggle control matching Picture 1 */}
+                {/* AI Copilot toggle control matching Picture 2 prototype */}
                 <div 
                   onClick={handleToggleAutomation}
-                  className={`ml-auto flex items-center gap-3 px-4 py-2 rounded-full cursor-pointer select-none transition-all ${
+                  className={`ml-auto flex items-center gap-3 px-4 py-2 rounded-full cursor-pointer select-none transition-all border backdrop-blur-xl ${
                     activeChat?.status === 'AI Managed'
-                      ? 'bg-gradient-to-r from-[#2552c6] to-[#14307c] border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(37,82,198,0.45)]'
-                      : 'bg-[#1a1c22] border border-white/15 text-white/70'
+                      ? 'bg-gradient-to-r from-[#2176ff] via-[#00a8e8] to-[#00d2ff] border-white/50 text-white shadow-[0_0_25px_rgba(0,168,232,0.65),inset_0_1px_0_rgba(255,255,255,0.7)] ring-1 ring-white/20'
+                      : 'bg-white/[0.06] hover:bg-white/[0.12] border-white/20 text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]'
                   }`}
                 >
-                  <span className="font-sans text-[12px] font-bold">
-                    AI copilot
+                  <span className="font-sans text-[12px] font-bold flex items-center gap-1">
+                    ✦ AI copilot
                   </span>
                   
-                  {/* Track 40x22 & Knob 16px */}
-                  <div className="w-[38px] h-[20px] bg-black/60 border border-white/20 rounded-full relative p-[2px] box-sizing-border-box">
+                  {/* Glass Pill Track & Glowing White Knob matching Picture 2 */}
+                  <div className="w-[38px] h-[20px] bg-black/30 border border-white/40 rounded-full relative p-[2px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)]">
                     <div 
-                      className={`w-[14px] h-[14px] rounded-full bg-white transition-all duration-200 cubic-bezier(0.4,0,0.2,1) shadow-md ${
+                      className={`w-[14px] h-[14px] rounded-full bg-white transition-all duration-200 cubic-bezier(0.4,0,0.2,1) shadow-[0_2px_6px_rgba(0,0,0,0.4),0_0_8px_rgba(255,255,255,0.8)] ${
                         activeChat?.status === 'AI Managed' ? 'translate-x-[18px]' : 'translate-x-0'
                       }`}
                     />
@@ -851,22 +885,11 @@ export default function InboxConsole({
             </footer>
           </main>
 
-          {/* Pane 3: Right Cart Panel matching Picture 1 */}
-          <aside className={`zone-b-grey1 flex flex-col h-full lg:w-[22%] min-w-[240px] overflow-hidden shrink-0 ${mobileView === 'info' ? 'flex' : 'hidden lg:flex'}`}>
-            <div className="lg:hidden p-4 border-b border-white/[0.07] flex items-center gap-2 shrink-0">
-              <button 
-                type="button"
-                onClick={() => setMobileView('chat')}
-                className="p-1.5 text-white/60 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <span className="font-sans text-sm font-bold text-white">Back to thread</span>
-            </div>
-            
-            <section className="p-5 space-y-4 flex-grow min-h-0 overflow-y-auto no-scrollbar">
+          {/* Pane 3: Right Cart Panel (No top header bar, section-based layout) */}
+          <aside className={`bg-[#0d0e14] flex flex-col h-full lg:w-[22%] min-w-[240px] overflow-hidden shrink-0 ${mobileView === 'info' ? 'flex' : 'hidden lg:flex'}`}>
+            <section className="p-4 space-y-4 flex-grow min-h-0 overflow-y-auto no-scrollbar">
               <div className="flex items-center justify-between">
-                <h4 className="font-sans text-[13px] font-bold text-white/80">
+                <h4 className="font-sans text-[13px] font-bold text-white/80 tracking-wide uppercase">
                   Cart
                 </h4>
                 {activeChat?.cart && activeChat.cart.length > 0 && (
@@ -875,7 +898,6 @@ export default function InboxConsole({
                   </span>
                 )}
               </div>
-
               {!activeChat?.cart || activeChat.cart.length === 0 ? (
                 <div className="bg-[#15161a] p-8 rounded-2xl border border-dashed border-white/12 text-center">
                   <p className="text-[13px] text-white/40 font-sans">No items in cart yet.</p>

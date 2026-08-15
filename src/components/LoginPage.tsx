@@ -4,7 +4,7 @@ import { Eye, EyeOff, ArrowRight, Facebook } from 'lucide-react';
 import { Tab } from '../types';
 import { login, getGoogleConnectUrl, AuthResponse } from '../lib/api';
 
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 
 interface LoginPageProps {
   onNavigate: (tab: Tab) => void;
@@ -54,7 +54,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess, initialError }: 
   };
 
   return (
-    <div className="app-bg-gradient text-[#e2e2e2] font-sans min-h-screen flex flex-col justify-between selection:bg-white/10 selection:text-white relative overflow-x-hidden overflow-y-auto">
+    <div className="app-bg-gradient text-[#e2e2e2] font-sans min-h-screen flex flex-col justify-between selection:bg-white/10 selection:text-white relative overflow-y-auto">
       {/* Background soft blurs according to DESIGN.md */}
       <div className="ambient-bloom-tl" />
       <div className="ambient-bloom-br" />
@@ -75,7 +75,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess, initialError }: 
               className="cursor-pointer mb-5"
               onClick={() => onNavigate('landing')}
             >
-              <ShopMateLogo size={32} className="w-16 h-16" />
+              <RemlinLogo size={32} className="w-16 h-16" />
             </div>
             
             {mode === 'login' ? (
@@ -296,7 +296,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess, initialError }: 
           {/* Card Footer */}
           <div className="mt-6 pt-6 border-t border-white/[0.06] w-full text-center">
             <p className="text-xs text-white/40 font-sans">
-              New to ShopMate? 
+              New to Remlin? 
               <button 
                 onClick={() => onNavigate('signup')}
                 className="text-white font-bold hover:underline ml-1 font-sans cursor-pointer transition-colors"
@@ -312,7 +312,7 @@ export default function LoginPage({ onNavigate, onLoginSuccess, initialError }: 
       <footer className="w-full bg-[#050506] border-t border-white/[0.06] relative z-10 py-6">
         <div className="max-w-[1200px] mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavigate('landing')}>
-            <span className="font-sans font-bold text-xs text-white">ShopMate AI</span>
+            <span className="font-sans font-bold text-xs text-white">Remlin</span>
             <span className="text-white/35 text-[10px] font-sans">© 2024. All rights reserved.</span>
           </div>
           <div className="flex gap-6 text-[10px] text-white/40 font-sans">

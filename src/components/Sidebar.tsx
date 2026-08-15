@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Tab } from '../types';
 
-import { ShopMateLogo } from './ShopMateLogo';
+import { RemlinLogo } from './RemlinLogo';
 
 interface SidebarProps {
   activeTab: Tab;
@@ -60,15 +60,11 @@ export default function Sidebar({
         isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
         <div className="flex flex-col flex-grow no-scrollbar overflow-y-auto">
-          {/* Brand Block matching Picture 1 */}
-          <header className={`p-5 flex items-center ${isCollapsed ? 'justify-center p-4' : 'justify-between'} border-b border-white/[0.08] relative`}>
-            <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-              <ShopMateLogo size={22} className="w-10 h-10" />
+          <header className={`px-5 py-4 h-[72px] flex items-center ${isCollapsed ? 'justify-center px-4' : 'justify-between'} border-b border-white/[0.08] relative shrink-0`}>
+            <div className={`flex items-center gap-3 cursor-pointer ${isCollapsed ? 'justify-center' : ''}`} onClick={() => onNavigate('landing')}>
+              <RemlinLogo className="h-8 w-auto shrink-0" />
               {!isCollapsed && (
-                <div>
-                  <span className="font-sans font-extrabold text-[16px] text-white block leading-tight tracking-tight">ShopMate AI</span>
-                  <span className="font-sans text-[11px] text-blue-200/60 block mt-0.5 leading-tight font-medium">Elite sales command</span>
-                </div>
+                <span className="font-sans text-[22px] font-bold text-white leading-none tracking-tight">Remlin</span>
               )}
             </div>
             
@@ -117,12 +113,12 @@ export default function Sidebar({
                     isCollapsed 
                       ? `w-12 h-12 rounded-xl justify-center ${
                           isActive 
-                            ? 'bg-gradient-to-r from-[#2757d8] to-[#183aa7] border border-blue-400/40 text-white shadow-[0_4px_18px_rgba(39,87,216,0.45)]' 
+                            ? 'bg-[#222634] border border-white/20 text-white shadow-md' 
                             : 'bg-transparent text-white/70 hover:text-white hover:bg-white/[0.08]'
                         }`
                       : `w-full text-left px-4 py-3 rounded-xl gap-3.5 ${
                           isActive 
-                            ? 'bg-gradient-to-r from-[#2757d8] to-[#183aa7] border border-blue-400/40 text-white font-medium shadow-[0_4px_20px_rgba(39,87,216,0.45)]' 
+                            ? 'bg-[#222634] border border-white/20 text-white font-medium shadow-md' 
                             : 'bg-transparent text-white/70 hover:text-white hover:bg-white/[0.08]'
                         }`
                   }`}

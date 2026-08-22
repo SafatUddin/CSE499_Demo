@@ -19,6 +19,7 @@ enum ChannelType {
   WHATSAPP
   WIDGET
   SHOPIFY
+  WOOCOMMERCE
 }
 
 enum ConversationStatus {

@@ -350,7 +350,7 @@ export function listNotifications() {
 }
 
 export interface ApiChannel {
-  type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket' | 'shopify';
+  type: 'facebook' | 'instagram' | 'whatsapp' | 'websocket' | 'shopify' | 'woocommerce';
   connected: boolean;
   name: string | null;
 }
@@ -379,6 +379,19 @@ export function connectShopifyChannel(input: { domain: string; accessToken: stri
 
 export function syncShopifyChannel() {
   return request<{ success: boolean; created: number; updated: number; total: number }>('/api/channels/shopify/sync', {
+    method: 'POST',
+  });
+}
+
+export function connectWooCommerceChannel(input: { url: string; consumerKey: string; consumerSecret: string }) {
+  return request<{ success: boolean; name: string }>('/api/channels/woocommerce/connect', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function syncWooCommerceChannel() {
+  return request<{ success: boolean; created: number; updated: number; total: number }>('/api/channels/woocommerce/sync', {
     method: 'POST',
   });
 }

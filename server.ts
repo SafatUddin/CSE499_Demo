@@ -43,6 +43,7 @@ import {
 import { encryptSecret, decryptSecret } from './server/crypto';
 import { buildGoogleAuthUrl, exchangeCodeForProfile } from './server/google';
 import { verifyShopifyStore, fetchShopifyProducts, getShopifyOAuthUrl, verifyShopifyCallbackHmac, exchangeShopifyCodeForToken } from './server/shopify';
+import { verifyWooCommerceStore, fetchWooCommerceProducts, normalizeWooUrl } from './server/woocommerce';
 import {
   parseAwaitingQuantityFor,
   sanitizeAskQuantityForSku,
@@ -689,6 +690,7 @@ async function startServer() {
     WHATSAPP: 'whatsapp',
     WIDGET: 'websocket',
     SHOPIFY: 'shopify',
+    WOOCOMMERCE: 'woocommerce',
   };
 
   function getFacebookRedirectUri(): string {
@@ -857,6 +859,102 @@ async function startServer() {
       }
       console.error('Connect Shopify channel error');
       res.status(400).json({ error: 'Unable to connect integration' });
+    }
+  });
+
+  // Connect a WooCommerce store via Consumer Key & Consumer Secret
+  app.post('/api/channels/woocommerce/connect', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const { url, consumerKey, consumerSecret } = req.body;
+      if (!url || !consumerKey || !consumerSecret) {
+        return res.status(400).json({ error: 'Store URL, Consumer Key, and Consumer Secret are required' });
+      }
+
+      const shop = await verifyWooCommerceStore(url, consumerKey, consumerSecret);
+      const normalizedUrl = normalizeWooUrl(url);
+      await assertChannelExternalIdAvailable('WOOCOMMERCE', normalizedUrl, req.auth!.storeId);
+
+      const credentials = {
+        consumerKey: encryptSecret(consumerKey.trim()),
+        consumerSecret: encryptSecret(consumerSecret.trim()),
+        url: normalizedUrl,
+        name: shop.name,
+      };
+
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'WOOCOMMERCE' } },
+        update: { connected: true, externalId: normalizedUrl, credentials },
+        create: { storeId: req.auth!.storeId, type: 'WOOCOMMERCE', connected: true, externalId: normalizedUrl, credentials },
+      });
+
+      res.json({ success: true, name: shop.name });
+    } catch (err: any) {
+      if (isChannelOwnershipError(err) || isUniqueConstraintError(err)) {
+        return res.status(409).json({ error: CHANNEL_ALREADY_CONNECTED_MESSAGE });
+      }
+      console.error('Connect WooCommerce channel error:', err?.message || err);
+      res.status(400).json({ error: err?.message || 'Unable to connect WooCommerce store' });
+    }
+  });
+
+  // Pulls latest products from connected WooCommerce store and upserts into product catalog
+  app.post('/api/channels/woocommerce/sync', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const channel = await prisma.channel.findUnique({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'WOOCOMMERCE' } },
+      });
+      if (!channel?.connected || !channel.credentials) {
+        return res.status(400).json({ error: 'WooCommerce is not connected' });
+      }
+
+      const { consumerKey, consumerSecret, url } = channel.credentials as { consumerKey: string; consumerSecret: string; url: string };
+      const ck = decryptSecret(consumerKey);
+      const cs = decryptSecret(consumerSecret);
+      const wooProducts = await fetchWooCommerceProducts(url, ck, cs);
+
+      let created = 0;
+      let updated = 0;
+      for (const p of wooProducts) {
+        const existing = await prisma.product.findUnique({
+          where: { storeId_sku: { storeId: req.auth!.storeId, sku: p.sku } },
+        });
+        if (existing) {
+          await prisma.product.update({
+            where: { id: existing.id },
+            data: {
+              name: p.name,
+              price: p.price,
+              inventory: p.inventory,
+              externalId: p.externalId,
+              ...(p.description !== undefined ? { description: p.description } : {}),
+              ...(p.imageUrl !== undefined ? { imageUrl: p.imageUrl } : {}),
+              ...(p.rawAttributes !== undefined ? { rawAttributes: p.rawAttributes } : {}),
+            },
+          });
+          updated++;
+        } else {
+          await prisma.product.create({
+            data: {
+              storeId: req.auth!.storeId,
+              name: p.name,
+              sku: p.sku,
+              price: p.price,
+              inventory: p.inventory,
+              externalId: p.externalId,
+              description: p.description || null,
+              imageUrl: p.imageUrl || null,
+              rawAttributes: p.rawAttributes || null,
+              status: 'TRAINED',
+            },
+          });
+          created++;
+        }
+      }
+
+      res.json({ success: true, created, updated, total: wooProducts.length });
+    } catch (err: any) {
+      console.error('WooCommerce sync error:', err?.message || err);
+      res.status(500).json({ error: err?.message || 'Unable to sync WooCommerce products' });
     }
   });
 
@@ -1243,7 +1341,7 @@ async function startServer() {
       ]);
 
       const connectedTypes = channels.map(c => c.type);
-      const isWebsiteConnected = connectedTypes.includes('SHOPIFY');
+      const isWebsiteConnected = connectedTypes.includes('SHOPIFY') || connectedTypes.includes('WOOCOMMERCE');
 
       res.json({
         products: products.map(toPublicProduct),

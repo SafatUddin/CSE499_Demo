@@ -32,6 +32,8 @@ import {
   connectShopifyChannel,
   syncShopifyChannel,
   getShopifyConnectUrl,
+  connectWooCommerceChannel,
+  syncWooCommerceChannel,
 } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
@@ -183,6 +185,17 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  // Real WooCommerce connection state
+  const [wooConnected, setWooConnected] = useState(false);
+  const [wooStoreName, setWooStoreName] = useState<string | null>(null);
+  const [wooUrl, setWooUrl] = useState('');
+  const [wooConsumerKey, setWooConsumerKey] = useState('');
+  const [wooConsumerSecret, setWooConsumerSecret] = useState('');
+  const [wooError, setWooError] = useState('');
+  const [isConnectingWoo, setIsConnectingWoo] = useState(false);
+  const [isSyncingWoo, setIsSyncingWoo] = useState(false);
+  const [wooSyncResult, setWooSyncResult] = useState<{ created: number; updated: number; total: number } | null>(null);
+
   const refreshChannelsStatus = () => {
     listChannels()
       .then((channels) => {
@@ -201,6 +214,10 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         const shopify = channels.find((c) => c.type === 'shopify');
         setShopifyConnected(!!shopify?.connected);
         setShopifyStoreName(shopify?.name || null);
+
+        const woo = channels.find((c) => c.type === 'woocommerce');
+        setWooConnected(!!woo?.connected);
+        setWooStoreName(woo?.name || null);
       })
       .catch((err) => console.error('Failed to load channel status:', err));
   };
@@ -394,6 +411,55 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  const handleWooCommerceConnect = async () => {
+    if (!wooUrl.trim() || !wooConsumerKey.trim() || !wooConsumerSecret.trim()) {
+      setWooError('Store URL, Consumer Key, and Consumer Secret are required');
+      return;
+    }
+    setWooError('');
+    setIsConnectingWoo(true);
+    try {
+      const res = await connectWooCommerceChannel({
+        url: wooUrl.trim(),
+        consumerKey: wooConsumerKey.trim(),
+        consumerSecret: wooConsumerSecret.trim(),
+      });
+      setWooConnected(true);
+      setWooStoreName(res.name);
+      setWizardStep(2);
+      refreshChannelsStatus();
+    } catch (err: any) {
+      setWooError(err.message || 'Failed to connect WooCommerce store');
+    } finally {
+      setIsConnectingWoo(false);
+    }
+  };
+
+  const handleWooCommerceSync = async () => {
+    setWooError('');
+    setIsSyncingWoo(true);
+    try {
+      const res = await syncWooCommerceChannel();
+      setWooSyncResult(res);
+    } catch (err: any) {
+      setWooError(err.message || 'Failed to sync WooCommerce products');
+    } finally {
+      setIsSyncingWoo(false);
+    }
+  };
+
+  const handleWooCommerceDisconnect = async () => {
+    try {
+      await disconnectChannel('woocommerce');
+      setWooConnected(false);
+      setWooStoreName(null);
+      setWooSyncResult(null);
+      refreshChannelsStatus();
+    } catch (err) {
+      console.error('Failed to disconnect WooCommerce:', err);
+    }
+  };
+
   const handleInstagramCardClick = async () => {
     if (igConnected) {
       try {
@@ -424,8 +490,6 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [shopifyDomain, setShopifyDomain] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('+1 (555) 019-2834');
   const [selectedFbPage, setSelectedFbPage] = useState('Aether Tech Labs');
-  const [wooUrl, setWooUrl] = useState('https://mystore.wpcomstaging.com');
-  const [wooConsumerKey, setWooConsumerKey] = useState('ck_91802b...');
 
   const startShopifyOAuth = async () => {
     const domain = shopifyDomain.trim();
@@ -439,11 +503,14 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   const handleConnectClick = (item: Integration) => {
     setActiveWizardId(item.id);
-    setWizardStep(item.id === 'int-shopify' && shopifyConnected ? 2 : 1);
+    const initialStep = (item.id === 'int-shopify' && shopifyConnected) || (item.id === 'int-woo' && wooConnected) ? 2 : 1;
+    setWizardStep(initialStep);
     setIsSimulatingSync(false);
     setWaError('');
     setShopifyError('');
     setShopifySyncResult(null);
+    setWooError('');
+    setWooSyncResult(null);
   };
 
   const handleCompleteWizard = (id: string) => {
@@ -548,6 +615,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         ...item,
         connected: shopifyConnected,
         statusText: shopifyConnected ? (shopifyStoreName ? `Connected: ${shopifyStoreName}` : 'Active sync') : 'Not connected',
+      };
+    }
+    if (item.id === 'int-woo') {
+      return {
+        ...item,
+        connected: wooConnected,
+        statusText: wooConnected ? (wooStoreName ? `Connected: ${wooStoreName}` : 'Active sync') : 'Not connected',
       };
     }
     return item;
@@ -681,7 +755,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                         : 'btn-accent'
                   }`}
                 >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : item.id === 'int-woo' ? (wooConnected ? 'Manage' : 'Connect') : 'Manage'}
                 </button>
               </div>
             </div>
@@ -1063,39 +1137,62 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                       <div className="space-y-4">
                         {wizardStep === 1 && (
                           <div className="space-y-4">
-                            <div className="text-center py-2 space-y-1">
+                            <div className="text-center py-1 space-y-1">
                               <Database className="h-10 w-10 text-[#7F54B3] mx-auto" />
                               <h5 className="text-base font-bold text-white font-sans">WooCommerce REST API setup</h5>
                               <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto font-sans">
-                                Link your WooCommerce store by entering your API keys.
+                                Connect your WooCommerce store using your generated REST API Consumer Key and Consumer Secret.
                               </p>
                             </div>
+
+                            {wooError && (
+                              <div className="status-danger text-xs p-3 rounded-xl font-sans text-center">
+                                {wooError}
+                              </div>
+                            )}
+
                             <div className="space-y-3">
                               <div className="space-y-1.5">
                                 <label className="font-sans text-xs text-white/60 font-semibold block">Store URL</label>
                                 <input
                                   type="text"
+                                  placeholder="https://yourstore.com"
                                   value={wooUrl}
                                   onChange={(e) => setWooUrl(e.target.value)}
                                   className="w-full zone-b-input p-2.5 text-xs outline-none"
                                 />
                               </div>
                               <div className="space-y-1.5">
-                                <label className="font-sans text-xs text-white/60 font-semibold block">Consumer key</label>
+                                <label className="font-sans text-xs text-white/60 font-semibold block">Consumer Key</label>
                                 <input
                                   type="password"
+                                  placeholder="ck_..."
                                   value={wooConsumerKey}
                                   onChange={(e) => setWooConsumerKey(e.target.value)}
                                   className="w-full zone-b-input p-2.5 text-xs outline-none"
                                 />
                               </div>
+                              <div className="space-y-1.5">
+                                <label className="font-sans text-xs text-white/60 font-semibold block">Consumer Secret</label>
+                                <input
+                                  type="password"
+                                  placeholder="cs_..."
+                                  value={wooConsumerSecret}
+                                  onChange={(e) => setWooConsumerSecret(e.target.value)}
+                                  className="w-full zone-b-input p-2.5 text-xs outline-none"
+                                />
+                              </div>
                             </div>
                             <button 
-                              onClick={() => setWizardStep(2)}
-                              className="w-full btn-accent py-3 text-xs font-bold cursor-pointer"
+                              onClick={handleWooCommerceConnect}
+                              disabled={isConnectingWoo || !wooUrl.trim() || !wooConsumerKey.trim() || !wooConsumerSecret.trim()}
+                              className="w-full btn-accent py-3 text-xs font-bold cursor-pointer disabled:opacity-40"
                             >
-                              Verify authorization key
+                              {isConnectingWoo ? 'Connecting & Verifying…' : 'Connect WooCommerce'}
                             </button>
+                            <p className="text-[11px] text-white/40 text-center font-sans">
+                              Need API keys? Check <code className="text-white/70">woo.md</code> in project root for instructions.
+                            </p>
                           </div>
                         )}
 
@@ -1103,16 +1200,45 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                           <div className="space-y-4 text-center py-4">
                             <ShieldCheck className="h-12 w-12 text-[#7F54B3] mx-auto" />
                             <div className="space-y-1.5">
-                              <h5 className="text-base font-bold text-white font-sans">Credentials verified</h5>
+                              <h5 className="text-base font-bold text-white font-sans">
+                                {wooStoreName ? `Connected: ${wooStoreName}` : 'WooCommerce connected'}
+                              </h5>
                               <p className="text-xs text-white/60 max-w-sm mx-auto leading-relaxed font-sans">
-                                REST endpoints verified. Webhook handlers registered for continuous sync.
+                                Sync products, categories, SKUs, and stock levels from your WooCommerce store into ShopMate AI.
                               </p>
                             </div>
+
+                            {wooError && (
+                              <div className="status-danger text-xs p-3 rounded-xl font-sans text-center">
+                                {wooError}
+                              </div>
+                            )}
+
+                            {wooSyncResult && (
+                              <div className="zone-b-grey2 p-3.5 rounded-xl text-xs text-white/70 font-sans space-y-1">
+                                <div>{wooSyncResult.total} product(s) found on WooCommerce</div>
+                                <div>{wooSyncResult.created} added, {wooSyncResult.updated} updated in your catalog</div>
+                              </div>
+                            )}
+
                             <button 
-                              onClick={() => handleCompleteWizard(activeWizardId)}
-                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer"
+                              onClick={handleWooCommerceSync}
+                              disabled={isSyncingWoo}
+                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
                             >
-                              Sync WooCommerce catalog
+                              {isSyncingWoo ? 'Syncing Catalog…' : 'Sync products now'}
+                            </button>
+                            <button
+                              onClick={async () => { await handleWooCommerceDisconnect(); setActiveWizardId(null); }}
+                              className="w-full btn-glass py-2.5 text-xs font-bold cursor-pointer"
+                            >
+                              Disconnect store
+                            </button>
+                            <button
+                              onClick={() => setActiveWizardId(null)}
+                              className="w-full text-xs text-white/50 hover:text-white transition-colors cursor-pointer font-sans"
+                            >
+                              Return to integrations
                             </button>
                           </div>
                         )}

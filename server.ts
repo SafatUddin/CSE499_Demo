@@ -4,7 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { MulterError } from 'multer';
 import { prisma } from './server/db';
 import {
@@ -127,6 +127,16 @@ async function startServer() {
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   }));
 
+  // Helmet's default Cross-Origin-Resource-Policy: same-origin would make browsers block
+  // widget.js (and its API calls) from loading on any business's own website — the widget's
+  // entire purpose. Override it back to cross-origin for exactly the paths that need it.
+  app.use((req, res, next) => {
+    if (req.path === '/widget.js' || req.path.startsWith('/api/widget/')) {
+      res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+    next();
+  });
+
   // In-memory store: fine for a single Node process. Multi-instance (e.g. multiple
   // Railway replicas) would need a shared store for accurate global limits.
   const authLimiter = rateLimit({
@@ -143,6 +153,18 @@ async function startServer() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please try again later.' },
+  });
+
+  // No requireAuth on widget routes (public, keyed by widgetKey instead of a session),
+  // so cap by widgetKey+IP too — otherwise one abusive visitor or one abused store can
+  // exhaust Gemini calls for every other store sharing this process.
+  const widgetLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please try again later.' },
+    keyGenerator: (req, res) => `${(req.body?.widgetKey || req.query?.widgetKey || '').toString()}:${ipKeyGenerator(req.ip || '')}`,
   });
 
   app.use(express.json({
@@ -826,6 +848,30 @@ async function startServer() {
     }
   });
 
+  // Enable the website chat widget. No external OAuth/credentials — the store's
+  // pre-existing widgetKey (unique, auto-generated at Store creation) is the whole
+  // identity. Connecting just flips the Channel row on so /api/widget/* will respond
+  // and the conversation shows up in the Inbox (visibleConversations gates on this).
+  app.post('/api/channels/widget/connect', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const store = await prisma.store.findUnique({ where: { id: req.auth!.storeId } });
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+
+      await prisma.channel.upsert({
+        where: { storeId_type: { storeId: req.auth!.storeId, type: 'WIDGET' } },
+        update: { connected: true },
+        create: { storeId: req.auth!.storeId, type: 'WIDGET', connected: true },
+      });
+
+      res.json({ success: true, widgetKey: store.widgetKey });
+    } catch (err: any) {
+      console.error('Connect widget channel error');
+      res.status(500).json({ error: 'Failed to connect website widget' });
+    }
+  });
+
   // Connect a Shopify store via a merchant-supplied custom-app Admin API access
   // token (not a public OAuth app — see ShopifySetup.md). Verifies the credentials
   // actually work against the real store before saving anything.
@@ -1390,6 +1436,48 @@ async function startServer() {
     }
   });
 
+  app.patch('/api/products/:id', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    try {
+      const existingProduct = await prisma.product.findUnique({ where: { id: req.params.id } });
+      if (!existingProduct || existingProduct.storeId !== req.auth!.storeId) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      const validated = validateProductInput(req.body);
+      if (!validated) {
+        return res.status(400).json({ error: 'Invalid product data.' });
+      }
+
+      if (validated.sku !== existingProduct.sku) {
+        const conflict = await prisma.product.findUnique({
+          where: { storeId_sku: { storeId: req.auth!.storeId, sku: validated.sku } },
+        });
+        if (conflict) {
+          return res.status(409).json({ error: 'A product with this SKU already exists' });
+        }
+      }
+
+      const rawAttributes = req.body.rawAttributes && typeof req.body.rawAttributes === 'object' ? req.body.rawAttributes : undefined;
+
+      const updated = await prisma.product.update({
+        where: { id: existingProduct.id },
+        data: {
+          name: validated.name,
+          sku: validated.sku,
+          price: validated.price,
+          inventory: validated.inventory,
+          status: validated.status,
+          description: validated.description ?? null,
+          ...(rawAttributes !== undefined ? { rawAttributes } : {}),
+        },
+      });
+      res.json(toPublicProduct(updated));
+    } catch (err: any) {
+      console.error('Update product error:', err);
+      res.status(500).json({ error: 'Unable to process request' });
+    }
+  });
+
   // Upload a product photo (multipart/form-data, field: "image")
   app.post('/api/products/:id/image', requireAuth, requireProfileComplete, productImageUpload.single('image'), async (req: AuthedRequest, res) => {
     try {
@@ -1696,6 +1784,11 @@ async function startServer() {
       // Parallel fetch — one round-trip for each logical data category.
       // All queries are scoped to storeId; none load full message bodies.
       // ------------------------------------------------------------------
+      // Previous period of equal length, immediately preceding `start` — used only
+      // to compute order-count growth (no series/activity uses this window).
+      const prevStart = new Date(start);
+      prevStart.setUTCDate(prevStart.getUTCDate() - range);
+
       const [
         conversationsInRange,
         ordersInRange,
@@ -1703,6 +1796,9 @@ async function startServer() {
         recentOrders,
         recentComplaints,
         lowStockProducts,
+        responseTimeMessages,
+        prevPeriodOrderCount,
+        prevPeriodConversations,
       ] = await Promise.all([
         // Slim conversation rows: only the fields needed for series + KPIs.
         prisma.conversation.findMany({
@@ -1749,6 +1845,22 @@ async function startServer() {
           orderBy: { inventory: 'asc' },
           take: 10,
           select: { id: true, name: true, inventory: true },
+        }),
+
+        // Every message in range, ordered so first-reply latency can be paired up
+        // per conversation in a single pass below. Only pending: false messages
+        // count as a "reply" — an unapproved AI draft was never actually delivered.
+        prisma.message.findMany({
+          where: { conversation: { storeId }, createdAt: { gte: start } },
+          orderBy: [{ conversationId: 'asc' }, { createdAt: 'asc' }],
+          select: { conversationId: true, sender: true, createdAt: true, pending: true },
+        }),
+
+        prisma.order.count({ where: { storeId, createdAt: { gte: prevStart, lt: start } } }),
+
+        prisma.conversation.findMany({
+          where: { storeId, createdAt: { gte: prevStart, lt: start } },
+          select: { status: true },
         }),
       ]);
 
@@ -1815,13 +1927,52 @@ async function startServer() {
       const aiManagedCount = conversationsInRange.filter(c => c.status === 'AI_MANAGED').length;
       const automationRate = totalConvs > 0 ? Math.round((aiManagedCount / totalConvs) * 100) : 0;
 
-      // Average response time is omitted in M1. Computing reliable first-reply
-      // latency requires pairing each CUSTOMER message with the next AI or
-      // MERCHANT reply, accounting for pending drafts (Copilot mode) and human-
-      // takeover gaps. That logic is out of scope for this milestone.
-      const averageResponseTime: null = null;
+      // Automation rate delta vs. the immediately preceding period of equal length.
+      // Null when there were no conversations at all in that prior window.
+      const prevTotalConvs = prevPeriodConversations.length;
+      const prevAutomationRate = prevTotalConvs > 0
+        ? Math.round((prevPeriodConversations.filter(c => c.status === 'AI_MANAGED').length / prevTotalConvs) * 100)
+        : null;
+      const automationRateDeltaPoints = prevAutomationRate !== null ? automationRate - prevAutomationRate : null;
+
+      // Average first-reply latency: for each conversation, pair its first CUSTOMER
+      // message with the next actually-delivered (pending: false) AI or MERCHANT
+      // message that follows it, then average the gap across conversations that
+      // have both. Conversations with no reply yet (or a reply still awaiting
+      // merchant approval) are excluded rather than counted as instant/zero.
+      const responseTimesMs: number[] = [];
+      {
+        let i = 0;
+        while (i < responseTimeMessages.length) {
+          const conversationId = responseTimeMessages[i].conversationId;
+          let j = i;
+          while (j < responseTimeMessages.length && responseTimeMessages[j].conversationId === conversationId) j++;
+          const thread = responseTimeMessages.slice(i, j);
+
+          const firstCustomerMsg = thread.find(m => m.sender === 'CUSTOMER');
+          if (firstCustomerMsg) {
+            const reply = thread.find(m =>
+              m.sender !== 'CUSTOMER' && !m.pending && m.createdAt > firstCustomerMsg.createdAt
+            );
+            if (reply) {
+              responseTimesMs.push(reply.createdAt.getTime() - firstCustomerMsg.createdAt.getTime());
+            }
+          }
+          i = j;
+        }
+      }
+      const averageResponseTimeSeconds = responseTimesMs.length > 0
+        ? Math.round((responseTimesMs.reduce((sum, ms) => sum + ms, 0) / responseTimesMs.length) / 1000)
+        : null;
 
       const orderCount = ordersInRange.length;
+
+      // Order uplift: % change in order count vs. the immediately preceding period
+      // of equal length. Null (not 0% or Infinity) when there's no prior-period
+      // baseline to compare against, so the frontend can show "New" honestly.
+      const orderUpliftPercent = prevPeriodOrderCount > 0
+        ? Math.round(((orderCount - prevPeriodOrderCount) / prevPeriodOrderCount) * 1000) / 10
+        : null;
 
       // Revenue: sum of all order totals in range regardless of status, so
       // merchants see gross committed revenue, not just fulfilled orders.
@@ -1888,8 +2039,10 @@ async function startServer() {
         series,
         kpis: {
           automationRate,
-          averageResponseTime,
+          automationRateDeltaPoints,
+          averageResponseTimeSeconds,
           orderCount,
+          orderUpliftPercent,
           revenue: Math.round(revenue * 100) / 100,
           aiMessages: aiMessageCount,
           complaints,
@@ -2042,6 +2195,8 @@ async function startServer() {
       status: STATUS_TO_FRONTEND[c.status] || 'AI Managed',
       messages,
       isComplaint: c.isComplaint,
+      isArchived: !!c.isArchived,
+      isSpam: !!c.isSpam,
       cart: c.cart || undefined,
       detectedAddress: c.detectedAddress || undefined,
       orderConfirmed: !!c.orderConfirmed,
@@ -2091,6 +2246,51 @@ async function startServer() {
     return null;
   }
 
+  // Below this many products, the full catalog is small enough that filtering it isn't
+  // worth the risk of ever omitting something relevant — send it as-is.
+  const CATALOG_LEXICAL_FILTER_THRESHOLD = 15;
+
+  const CATALOG_FILTER_STOPWORDS = new Set([
+    'the', 'a', 'an', 'is', 'are', 'do', 'does', 'you', 'have', 'has', 'i', 'want', 'to',
+    'buy', 'of', 'for', 'and', 'in', 'on', 'it', 'this', 'that', 'what', 'how', 'much',
+    'price', 'can', 'please', 'me', 'my', 'with', 'pcs', 'piece', 'pieces', 'item', 'items',
+    'order', 'get', 'like', 'any', 'your', 'there', 'hello', 'hi', 'hey',
+  ]);
+
+  function tokenizeForCatalogFilter(text: string): string[] {
+    return (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(
+      (w) => w.length > 2 && !CATALOG_FILTER_STOPWORDS.has(w)
+    );
+  }
+
+  // Narrows what actually gets listed in the Gemini prompt to the products plausibly
+  // relevant to the current turn, so a large catalog doesn't inflate every request's
+  // latency. Pure lexical overlap (no embeddings/vector search needed at this scale —
+  // worth revisiting as real RAG only once a store's catalog grows much larger than a
+  // few dozen items). Falls back to the full catalog whenever nothing matches, so the
+  // model is never worse-informed than before, only faster when it doesn't need to be.
+  function selectRelevantCatalog<T extends { name: string; sku: string }>(
+    fullCatalog: T[],
+    message: string,
+    historyTexts: string[],
+    pinnedSkus: Set<string>
+  ): T[] {
+    if (fullCatalog.length <= CATALOG_LEXICAL_FILTER_THRESHOLD) return fullCatalog;
+
+    const queryTokens = new Set([
+      ...tokenizeForCatalogFilter(message),
+      ...historyTexts.flatMap(tokenizeForCatalogFilter),
+    ]);
+    if (queryTokens.size === 0) return fullCatalog;
+
+    const matched = fullCatalog.filter((p) => {
+      if (pinnedSkus.has(p.sku)) return true;
+      return tokenizeForCatalogFilter(`${p.name} ${p.sku}`).some((t) => queryTokens.has(t));
+    });
+
+    return matched.length > 0 ? matched : fullCatalog;
+  }
+
   // Generates an AI reply for a conversation and either delivers it immediately (Copilot
   // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
   // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
@@ -2101,7 +2301,10 @@ async function startServer() {
     const [store, products, recentMessages, currentConversation, conversationOrders] = await Promise.all([
       prisma.store.findUnique({ where: { id: conversation.storeId } }),
       prisma.product.findMany({ where: { storeId: conversation.storeId } }),
-      prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' } }),
+      // Only the last 11 are ever used below (10 for history + the just-inserted customer
+      // message that gets dropped) — fetching the whole thread wastes DB work on long-running
+      // conversations. desc + take, then reversed in JS, to get "last N in chronological order".
+      prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'desc' }, take: 11 }),
       prisma.conversation.findUnique({ where: { id: conversation.id } }),
       prisma.order.findMany({
         where: {
@@ -2125,7 +2328,7 @@ async function startServer() {
     }));
     // Cap history sent to the model — an unbounded prompt grows with every message in a
     // long-running conversation, which slows down local LLM inference noticeably.
-    const history = recentMessages.slice(0, -1).slice(-10).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+    const history = recentMessages.slice().reverse().slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
 
     const existingCart: { sku: string; quantity: number }[] = (currentConversation.cart as any) || [];
 
@@ -2206,7 +2409,16 @@ async function startServer() {
       })),
     };
 
-    const result = await generateAgentReply({ message: customerText, history, persona, catalog, orderState });
+    const pinnedCatalogSkus = new Set(existingCart.map((c) => c.sku));
+    if (pendingEncodedSku) pinnedCatalogSkus.add(pendingEncodedSku);
+    const promptCatalog = selectRelevantCatalog(
+      catalog,
+      customerText,
+      history.map((h) => h.text),
+      pinnedCatalogSkus
+    );
+
+    const result = await generateAgentReply({ message: customerText, history, persona, catalog, promptCatalog, orderState });
     const isAutopilot = conversation.status === 'AI_MANAGED';
     const autoFinalizeEligible = isAutopilot || !!store.autoFinalizeOrdersAlways;
     let orderCreatedThisTurn = false;
@@ -2700,11 +2912,13 @@ async function startServer() {
         return res.status(404).json({ error: 'Conversation not found' });
       }
 
-      const { status, cart, isComplaint } = req.body;
+      const { status, cart, isComplaint, isArchived, isSpam } = req.body;
       const dataToUpdate: {
         status?: 'AI_MANAGED' | 'ACTIVE' | 'CLOSED';
         cart?: { sku: string; quantity: number }[];
         isComplaint?: boolean;
+        isArchived?: boolean;
+        isSpam?: boolean;
       } = {};
 
       if (status) {
@@ -2735,6 +2949,14 @@ async function startServer() {
 
       if (isComplaint !== undefined) {
         dataToUpdate.isComplaint = Boolean(isComplaint);
+      }
+
+      if (isArchived !== undefined) {
+        dataToUpdate.isArchived = Boolean(isArchived);
+      }
+
+      if (isSpam !== undefined) {
+        dataToUpdate.isSpam = Boolean(isSpam);
       }
 
       if (Object.keys(dataToUpdate).length === 0) {
@@ -2964,11 +3186,122 @@ async function startServer() {
             .map((h: any) => ({ sender: h.sender, text: h.text }))
         : [];
 
-      const result = await generateAgentReply({ message, history: safeHistory, persona, catalog });
+      const promptCatalog = selectRelevantCatalog(catalog, message, safeHistory.map((h) => h.text), new Set());
+      const result = await generateAgentReply({ message, history: safeHistory, persona, catalog, promptCatalog });
       return res.json(result);
     } catch (err: any) {
       console.error('Server error handling chat');
       res.status(500).json({ error: 'Unable to process request' });
+    }
+  });
+
+  // Public website-widget endpoints. No merchant session/JWT — the widget script embeds a
+  // store's widgetKey directly on an arbitrary business's own site, so the trust boundary is
+  // the widgetKey itself, not Origin/cookies (requireTrustedOrigin exempts this prefix, see
+  // server/auth.ts). CORS is opened wide (Access-Control-Allow-Origin: *) since any site is a
+  // legitimate embedder and no credentials/cookies are ever involved.
+  const MAX_WIDGET_MESSAGE_LENGTH = 4000;
+
+  function applyWidgetCors(res: Response) {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+
+  app.options('/api/widget/message', (_req, res) => { applyWidgetCors(res); res.sendStatus(204); });
+  app.options('/api/widget/messages', (_req, res) => { applyWidgetCors(res); res.sendStatus(204); });
+
+  // Resolves widgetKey -> Store, and confirms the merchant has actually enabled the widget
+  // (Channel row connected) — mirrors how Messenger/WhatsApp/Instagram drop events for
+  // unconnected Pages/numbers rather than trusting the payload alone.
+  async function resolveConnectedWidgetStore(widgetKey: unknown): Promise<{ id: string } | null> {
+    if (!widgetKey || typeof widgetKey !== 'string') return null;
+    const store = await prisma.store.findUnique({ where: { widgetKey } });
+    if (!store) return null;
+    const channel = await prisma.channel.findUnique({ where: { storeId_type: { storeId: store.id, type: 'WIDGET' } } });
+    if (!channel?.connected) return null;
+    return store;
+  }
+
+  // Unlike the merchant Inbox (which must show pending AI drafts awaiting approval),
+  // the customer-facing widget must never show a message that hasn't actually been
+  // approved/sent yet — so pending drafts are stripped before the shared toPublicConversation
+  // formatter runs.
+  function toPublicWidgetConversation(c: any) {
+    return toPublicConversation({ ...c, messages: c.messages.filter((m: any) => !m.pending) });
+  }
+
+  app.post('/api/widget/message', widgetLimiter, async (req, res) => {
+    applyWidgetCors(res);
+    try {
+      const { widgetKey, visitorId, text } = req.body || {};
+      if (!visitorId || typeof visitorId !== 'string') {
+        return res.status(400).json({ error: 'visitorId is required' });
+      }
+      if (!text || typeof text !== 'string' || text.length > MAX_WIDGET_MESSAGE_LENGTH) {
+        return res.status(400).json({ error: 'A non-empty message is required' });
+      }
+
+      const store = await resolveConnectedWidgetStore(widgetKey);
+      if (!store) {
+        return res.status(404).json({ error: 'Widget not found' });
+      }
+
+      let conversation = await prisma.conversation.findFirst({
+        where: { storeId: store.id, channelType: 'WIDGET', externalUserId: visitorId },
+      });
+      const isNewConversation = !conversation;
+      if (!conversation) {
+        conversation = await prisma.conversation.create({
+          data: { storeId: store.id, channelType: 'WIDGET', externalUserId: visitorId, lastMessageAt: new Date() },
+        });
+      }
+
+      await prisma.message.create({ data: { conversationId: conversation.id, sender: 'CUSTOMER', text } });
+      await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+      const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
+      if (!greetedInstead) {
+        await generateAndStoreAgentReply(conversation, text);
+      }
+
+      const updated = await prisma.conversation.findUnique({
+        where: { id: conversation.id },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      res.json(toPublicWidgetConversation(updated));
+    } catch (err: any) {
+      console.error('Widget message error:', err);
+      res.status(500).json({ error: 'Unable to process message' });
+    }
+  });
+
+  app.get('/api/widget/messages', widgetLimiter, async (req, res) => {
+    applyWidgetCors(res);
+    try {
+      const widgetKey = req.query.widgetKey;
+      const visitorId = req.query.visitorId;
+      if (!visitorId || typeof visitorId !== 'string') {
+        return res.status(400).json({ error: 'visitorId is required' });
+      }
+
+      const store = await resolveConnectedWidgetStore(widgetKey);
+      if (!store) {
+        return res.status(404).json({ error: 'Widget not found' });
+      }
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { storeId: store.id, channelType: 'WIDGET', externalUserId: visitorId },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      if (!conversation) {
+        return res.json({ messages: [] });
+      }
+      res.json(toPublicWidgetConversation(conversation));
+    } catch (err: any) {
+      console.error('Widget messages poll error:', err);
+      res.status(500).json({ error: 'Unable to fetch messages' });
     }
   });
 

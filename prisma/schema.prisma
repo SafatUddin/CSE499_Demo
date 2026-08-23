@@ -171,6 +171,9 @@ model Conversation {
   messages       Message[]
   lastMessageAt  DateTime           @default(now())
   createdAt      DateTime           @default(now())
+
+  @@unique([storeId, channelType, externalUserId])
+  @@index([storeId])
 }
 
 model Message {
@@ -202,6 +205,8 @@ model Order {
   status         OrderStatus @default(PROCESSING)
   total          Decimal
   createdAt      DateTime    @default(now())
+
+  @@index([storeId])
 }
 
 // Short-lived opaque handoff codes for OAuth (connect / pending selection / Google login

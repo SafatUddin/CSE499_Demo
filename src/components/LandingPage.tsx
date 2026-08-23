@@ -417,7 +417,7 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
             <div className="flex w-max gap-19 pr-19 animate-[marquee_28s_linear_infinite]">
               {brandsLoop.map((b, i) => (
                 <span key={i} className="text-xl font-bold tracking-[0.06em] text-white/42 whitespace-nowrap">
-                  {b.name}
+                  {b}
                 </span>
               ))}
             </div>
@@ -453,7 +453,33 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
 
         {/* FOOTER */}
         <footer className="relative overflow-hidden border-t border-white/[0.08] bg-gradient-to-b from-white/[0.03] to-transparent">
-          <div className="relative max-w-[1440px] mx-auto px-5 lg:px-12 pt-18 pb-11 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-11">
+          {/* Giant wordmark artwork per DESIGN.md footer spec — text-based rather than a
+              rasterized PNG so it never goes stale across rebrands. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center overflow-hidden"
+            style={{
+              maskImage: 'linear-gradient(180deg, transparent 0%, #000 24%, #000 66%, transparent 98%)',
+              WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 24%, #000 66%, transparent 98%)',
+            }}
+          >
+            <span
+              className="translate-y-[26%] select-none whitespace-nowrap font-extrabold tracking-[-0.04em] text-white/[0.08]"
+              style={{ fontSize: 'clamp(90px, 19vw, 280px)', lineHeight: 1 }}
+            >
+              Remlin
+            </span>
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{ background: 'linear-gradient(180deg, rgba(5,5,6,0.86), rgba(5,5,6,0.55) 34%, rgba(5,5,6,0.30) 62%, rgba(5,5,6,0.88))' }}
+          />
+
+          <div
+            className="relative max-w-[1440px] mx-auto px-5 lg:px-12 pt-18 pb-11 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-11"
+            style={{ textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}
+          >
             <div className="min-w-0">
               <div className="flex items-center mb-4 cursor-pointer" onClick={() => onNavigate('landing')}>
                 <RemlinLogo className="h-9 w-auto" />
@@ -497,7 +523,10 @@ export default function LandingPage({ onNavigate }: LandingPageProps) {
             </div>
           </div>
 
-          <div className="relative max-w-[1440px] mx-auto px-5 lg:px-12 py-6.5 pb-16 flex flex-wrap items-center gap-3.5 border-t border-white/[0.07]">
+          <div
+            className="relative max-w-[1440px] mx-auto px-5 lg:px-12 pt-6.5 flex flex-wrap items-center gap-3.5 border-t border-white/[0.07]"
+            style={{ paddingBottom: 'clamp(150px, 20vw, 320px)', textShadow: '0 1px 12px rgba(0,0,0,0.6)' }}
+          >
             <span className="text-xs text-white/55">© 2024 Remlin. All rights reserved.</span>
             <div className="flex-1" />
             <span className="inline-flex items-center gap-2 text-[11px] font-bold tracking-[0.15em] uppercase text-white/45 whitespace-nowrap">

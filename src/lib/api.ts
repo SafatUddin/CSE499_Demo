@@ -202,6 +202,10 @@ export function createProduct(input: { name: string; sku: string; price: number;
   return request<ApiProduct>('/api/products', { method: 'POST', body: JSON.stringify(input) });
 }
 
+export function updateProduct(id: string, input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending'; description?: string; rawAttributes?: Record<string, any> }) {
+  return request<ApiProduct>(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
 export function deleteProduct(id: string) {
   return request<void>(`/api/products/${id}`, { method: 'DELETE' });
 }
@@ -292,6 +296,8 @@ export interface ApiConversation {
   status: 'Active' | 'AI Managed' | 'Closed';
   messages: ApiChatMessage[];
   isComplaint?: boolean;
+  isArchived?: boolean;
+  isSpam?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
   orderConfirmed?: boolean;
@@ -312,6 +318,14 @@ export function updateConversationCart(id: string, cart: { sku: string; quantity
 
 export function updateConversationComplaint(id: string, isComplaint: boolean) {
   return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ isComplaint }) });
+}
+
+export function updateConversationArchived(id: string, isArchived: boolean) {
+  return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ isArchived }) });
+}
+
+export function updateConversationSpam(id: string, isSpam: boolean) {
+  return request<ApiConversation>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ isSpam }) });
 }
 
 export function deleteConversation(id: string) {
@@ -367,6 +381,12 @@ export function connectWhatsAppChannel(input: { phoneNumberId: string; accessTok
   return request<{ success: boolean }>('/api/channels/whatsapp/connect', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function connectWidgetChannel() {
+  return request<{ success: boolean; widgetKey: string }>('/api/channels/widget/connect', {
+    method: 'POST',
   });
 }
 
@@ -498,8 +518,10 @@ export interface ApiAnalytics {
   series: { date: string; conversations: number; convertedSales: number }[];
   kpis: {
     automationRate: number;
-    averageResponseTime: null;
+    automationRateDeltaPoints: number | null;
+    averageResponseTimeSeconds: number | null;
     orderCount: number;
+    orderUpliftPercent: number | null;
     revenue: number;
     aiMessages: number;
     complaints: number;

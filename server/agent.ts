@@ -55,16 +55,24 @@ export async function generateAgentReply({
   history = [],
   persona,
   catalog = [],
+  promptCatalog,
   orderState = {},
 }: {
   message: string;
   history?: AgentHistoryItem[];
   persona?: AgentPersona;
   catalog?: AgentCatalogItem[];
+  /** Subset of `catalog` actually listed in the prompt text (see selectRelevantCatalog in
+   * server.ts) — keeps large catalogs from bloating every request. All SKU/cart/image
+   * validation below still uses the full `catalog`, never this narrowed list, so a product
+   * the model already committed to earlier in the conversation is never rejected as
+   * "not in the catalog" just because it didn't come up in the current message. Defaults
+   * to the full catalog when the caller doesn't narrow it. */
+  promptCatalog?: AgentCatalogItem[];
   orderState?: AgentOrderState;
 }): Promise<AgentReply> {
   // Format catalog description for the model context
-  const catalogText = catalog
+  const catalogText = (promptCatalog ?? catalog)
     .map(
       (p) =>
         `- Name: ${p.name}, SKU: ${p.sku}, Price: $${p.price}, Inventory: ${p.inventory} units, Status: ${p.status}, Photo available: ${p.imageUrl ? 'yes' : 'no'}`
@@ -224,6 +232,24 @@ ${catalogText || 'No products registered in catalog.'}`;
       console.error('Gemini call failed, falling back to simulated logic');
       // Fall through to the rule-based simulator
     }
+  }
+
+  // Last-resort product guess for a message that names no product (e.g. a bare "yes, 1"
+  // continuing an earlier turn). Prefers the SKU the server already knows is pending
+  // (awaitingQuantityFor), then scans recent history newest-first for the last product
+  // actually mentioned, and only then falls back to catalog[0] — otherwise a short
+  // confirmation reply could reference a completely unrelated, arbitrarily-ordered product.
+  function findContextuallyRelevantProduct(): AgentCatalogItem | undefined {
+    if (orderState.awaitingQuantityFor) {
+      const pinned = catalog.find((p) => p.sku === orderState.awaitingQuantityFor);
+      if (pinned) return pinned;
+    }
+    for (let i = history.length - 1; i >= 0; i--) {
+      const text = history[i].text.toLowerCase();
+      const mentioned = catalog.find((p) => text.includes(p.name.toLowerCase().split(' ')[0]) || text.includes(p.sku.toLowerCase()));
+      if (mentioned) return mentioned;
+    }
+    return catalog[0];
   }
 
   // High-fidelity local fallback simulation implementing all 6 agent rules
@@ -703,7 +729,7 @@ ${catalogText || 'No products registered in catalog.'}`;
   if (isBuyIntent) {
     const found =
       catalog.find((p) => lowerMsg.includes(p.name.toLowerCase().split(' ')[0]) || lowerMsg.includes(p.sku.toLowerCase())) ||
-      (orderState.awaitingQuantityFor ? catalog.find((p) => p.sku === orderState.awaitingQuantityFor) : catalog[0]);
+      findContextuallyRelevantProduct();
 
     if (found) {
       if (statedQuantity && statedQuantity > 0) {
@@ -769,7 +795,8 @@ ${catalogText || 'No products registered in catalog.'}`;
 
   if (isPriceInquiry) {
     const found =
-      catalog.find((p) => lowerMsg.includes(p.name.toLowerCase().split(' ')[0]) || lowerMsg.includes(p.sku.toLowerCase())) || catalog[0];
+      catalog.find((p) => lowerMsg.includes(p.name.toLowerCase().split(' ')[0]) || lowerMsg.includes(p.sku.toLowerCase())) ||
+      findContextuallyRelevantProduct();
 
     if (found) {
       replyText = `The price of ${found.name} (SKU: ${found.sku}) is $${found.price.toFixed(2)}. Would you like to buy this product?`;
@@ -837,7 +864,7 @@ ${catalogText || 'No products registered in catalog.'}`;
   }
 
   // Default response - no cart action
-  const defaultProduct = catalog[0];
+  const defaultProduct = findContextuallyRelevantProduct();
   replyText = defaultProduct
     ? `The price of ${defaultProduct.name} is $${defaultProduct.price.toFixed(2)}. Would you like to buy this product?`
     : `Hello! How can I assist you with your shopping today?`;

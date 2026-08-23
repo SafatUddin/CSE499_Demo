@@ -133,7 +133,7 @@ export function validateCartSkusInStore(
   return cart.every((item) => storeSkus.has(item.sku));
 }
 
-const ALLOWED_CONVERSATION_PATCH_KEYS = new Set(['status', 'cart', 'isComplaint']);
+const ALLOWED_CONVERSATION_PATCH_KEYS = new Set(['status', 'cart', 'isComplaint', 'isArchived', 'isSpam']);
 
 export function conversationPatchHasOnlyAllowedKeys(body: unknown): boolean {
   if (!isPlainObject(body)) return false;

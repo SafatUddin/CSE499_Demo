@@ -4,6 +4,7 @@ import {
   Package,
   Plus,
   Trash2,
+  Pencil,
   CheckCircle,
   AlertCircle,
   X,
@@ -17,6 +18,7 @@ interface ProductCatalogProps {
   products: Product[];
   isWebsiteConnected?: boolean;
   onAddProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
+  onEditProduct: (id: string, updates: Omit<Product, 'id' | 'imageUrl' | 'rawAttributes'>) => Promise<Product>;
   onDeleteProduct: (id: string) => Promise<void>;
   onUploadProductImage: (id: string, file: File) => Promise<void>;
   onDeleteProductImage: (id: string) => Promise<void>;
@@ -26,6 +28,7 @@ export default function ProductCatalog({
   products,
   isWebsiteConnected = false,
   onAddProduct,
+  onEditProduct,
   onDeleteProduct,
   onUploadProductImage,
   onDeleteProductImage
@@ -33,6 +36,7 @@ export default function ProductCatalog({
   const [searchTerm, setSearchTerm] = useState('');
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [newProductName, setNewProductName] = useState('');
   const [newProductSku, setNewProductSku] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
@@ -80,6 +84,31 @@ export default function ProductCatalog({
     return false;
   });
 
+  const resetProductForm = () => {
+    setNewProductName('');
+    setNewProductSku('');
+    setNewProductPrice('');
+    setNewProductInventory('');
+    setNewProductDescription('');
+    setNewProductImageFile(null);
+    setNewProductImagePreview(null);
+    setEditingProductId(null);
+    setShowAddForm(false);
+  };
+
+  const handleEditClick = (product: Product) => {
+    setEditingProductId(product.id);
+    setNewProductName(product.name);
+    setNewProductSku(product.sku);
+    setNewProductPrice(String(product.price));
+    setNewProductInventory(String(product.inventory));
+    setNewProductDescription(product.description || '');
+    setNewProductImageFile(null);
+    setNewProductImagePreview(null);
+    setAddProductError('');
+    setShowAddForm(true);
+  };
+
   const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProductName || !newProductSku || !newProductPrice) return;
@@ -87,33 +116,37 @@ export default function ProductCatalog({
     setAddProductError('');
     setIsAddingProduct(true);
     try {
-      const created = await onAddProduct({
-        name: newProductName,
-        sku: newProductSku,
-        price: parseFloat(newProductPrice) || 0.0,
-        inventory: parseInt(newProductInventory) || 0,
-        description: newProductDescription.trim() || undefined,
-        status: 'Trained'
-      });
+      if (editingProductId) {
+        await onEditProduct(editingProductId, {
+          name: newProductName,
+          sku: newProductSku,
+          price: parseFloat(newProductPrice) || 0.0,
+          inventory: parseInt(newProductInventory) || 0,
+          description: newProductDescription.trim() || undefined,
+          status: 'Trained'
+        });
+      } else {
+        const created = await onAddProduct({
+          name: newProductName,
+          sku: newProductSku,
+          price: parseFloat(newProductPrice) || 0.0,
+          inventory: parseInt(newProductInventory) || 0,
+          description: newProductDescription.trim() || undefined,
+          status: 'Trained'
+        });
 
-      if (newProductImageFile) {
-        try {
-          await onUploadProductImage(created.id, newProductImageFile);
-        } catch (err: any) {
-          setImageError(err.message || 'Product was created, but the photo failed to upload.');
+        if (newProductImageFile) {
+          try {
+            await onUploadProductImage(created.id, newProductImageFile);
+          } catch (err: any) {
+            setImageError(err.message || 'Product was created, but the photo failed to upload.');
+          }
         }
       }
 
-      setNewProductName('');
-      setNewProductSku('');
-      setNewProductPrice('');
-      setNewProductInventory('');
-      setNewProductDescription('');
-      setNewProductImageFile(null);
-      setNewProductImagePreview(null);
-      setShowAddForm(false);
+      resetProductForm();
     } catch (err: any) {
-      setAddProductError(err.message || 'Failed to add product.');
+      setAddProductError(err.message || (editingProductId ? 'Failed to save changes.' : 'Failed to add product.'));
     } finally {
       setIsAddingProduct(false);
     }
@@ -190,7 +223,7 @@ export default function ProductCatalog({
                 </div>
               ) : (
                 <button
-                  onClick={() => setShowAddForm(!showAddForm)}
+                  onClick={() => (showAddForm ? resetProductForm() : setShowAddForm(true))}
                   className="btn-accent px-4 py-2 font-sans font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   {showAddForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
@@ -210,7 +243,9 @@ export default function ProductCatalog({
                   className="zone-b-grey3 p-5 rounded-xl space-y-4 border border-white/[0.1] overflow-hidden"
                 >
                   <div className="flex justify-between items-center">
-                    <h4 className="font-sans font-bold text-sm text-white">Manual product registration</h4>
+                    <h4 className="font-sans font-bold text-sm text-white">
+                      {editingProductId ? 'Edit product' : 'Manual product registration'}
+                    </h4>
                     <span className="text-[10px] text-white/40 font-mono">MODEL SCHEMA VALIDATION</span>
                   </div>
 
@@ -220,6 +255,7 @@ export default function ProductCatalog({
                     </div>
                   )}
 
+                  {!editingProductId && (
                   <div className="flex items-center gap-4 py-1">
                     <label
                       className="relative w-16 h-16 rounded-xl border-2 border-dashed border-white/20 hover:border-white/40 flex items-center justify-center cursor-pointer transition-all overflow-hidden group/thumb bg-white/5 shrink-0"
@@ -253,6 +289,7 @@ export default function ProductCatalog({
                       )}
                     </div>
                   </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
@@ -320,7 +357,9 @@ export default function ProductCatalog({
                     disabled={isAddingProduct}
                     className="w-full btn-light-primary py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
                   >
-                    {isAddingProduct ? 'Indexing…' : 'Confirm & index SKU'}
+                    {editingProductId
+                      ? (isAddingProduct ? 'Saving…' : 'Save changes')
+                      : (isAddingProduct ? 'Indexing…' : 'Confirm & index SKU')}
                   </button>
                 </motion.form>
               )}
@@ -457,6 +496,13 @@ export default function ProductCatalog({
                           )}
                         </td>
                         <td className="p-4 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => handleEditClick(p)}
+                            className="text-white/30 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                            title="Edit product"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleDeleteClick(p.id)}
                             className="text-white/30 hover:text-[#ff9d92] p-2 rounded-lg hover:bg-white/10 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"

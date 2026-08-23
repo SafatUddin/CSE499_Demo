@@ -117,7 +117,11 @@ export default function AnalyticsDashboard() {
                       <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
                         {data?.kpis.automationRate ?? 0}%
                       </h3>
-                      <span className="status-success px-2 py-0.5 text-[10.5px] font-bold rounded-full">+4.2%</span>
+                      {data?.kpis.automationRateDeltaPoints != null && (
+                        <span className={`px-2 py-0.5 text-[10.5px] font-bold rounded-full ${data.kpis.automationRateDeltaPoints >= 0 ? 'status-success' : 'status-danger'}`}>
+                          {data.kpis.automationRateDeltaPoints >= 0 ? '+' : ''}{data.kpis.automationRateDeltaPoints}pts
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -128,8 +132,12 @@ export default function AnalyticsDashboard() {
                       <Clock className="h-5 w-5 text-[#4d8bff]" />
                     </div>
                     <div className="mt-4 flex items-baseline gap-2">
-                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">1.2s</h3>
-                      <span className="status-success px-2 py-0.5 text-[10.5px] font-bold rounded-full">-0.4s</span>
+                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
+                        {data?.kpis.averageResponseTimeSeconds != null ? `${data.kpis.averageResponseTimeSeconds}s` : '—'}
+                      </h3>
+                      {data?.kpis.averageResponseTimeSeconds == null && (
+                        <span className="status-neutral px-2 py-0.5 text-[10.5px] font-bold rounded-full">No replies yet</span>
+                      )}
                     </div>
                   </div>
 
@@ -141,9 +149,13 @@ export default function AnalyticsDashboard() {
                     </div>
                     <div className="mt-4 flex items-baseline gap-2">
                       <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
-                        +18.4%
+                        {data?.kpis.orderUpliftPercent != null
+                          ? `${data.kpis.orderUpliftPercent >= 0 ? '+' : ''}${data.kpis.orderUpliftPercent}%`
+                          : data?.kpis.orderCount || 0}
                       </h3>
-                      <span className="status-success px-2 py-0.5 text-[10.5px] font-bold rounded-full">Active</span>
+                      <span className="status-success px-2 py-0.5 text-[10.5px] font-bold rounded-full">
+                        {data?.kpis.orderUpliftPercent != null ? 'vs. prior period' : 'orders'}
+                      </span>
                     </div>
                   </div>
 

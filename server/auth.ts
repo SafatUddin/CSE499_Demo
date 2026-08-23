@@ -162,6 +162,9 @@ const CSRF_EXEMPT_PREFIXES = [
   '/api/channels/facebook/connect',
   '/api/channels/shopify/callback',
   '/api/channels/shopify/connect',
+  // Public, unauthenticated: trust boundary is the widgetKey, not a cookie session.
+  // Requests come from arbitrary business websites, so Origin/Referer can never match APP_URL.
+  '/api/widget/',
 ];
 
 /**

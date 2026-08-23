@@ -46,6 +46,8 @@ export interface Conversation {
   messages: ChatMessage[];
   lastProductViewed?: string;
   isComplaint?: boolean;
+  isArchived?: boolean;
+  isSpam?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
   orderConfirmed?: boolean;

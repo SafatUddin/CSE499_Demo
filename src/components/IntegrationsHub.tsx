@@ -15,7 +15,9 @@ import {
   X,
   ChevronRight,
   FileSpreadsheet,
-  Upload
+  Upload,
+  Code2,
+  Copy,
 } from 'lucide-react';
 import { Integration } from '../types';
 import {
@@ -29,6 +31,7 @@ import {
   selectWhatsAppNumber,
   WhatsAppPendingNumber,
   connectWhatsAppChannel,
+  connectWidgetChannel,
   connectShopifyChannel,
   syncShopifyChannel,
   getShopifyConnectUrl,
@@ -72,6 +75,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [waPendingToken, setWaPendingToken] = useState<string | null>(null);
   const [waPendingNumbers, setWaPendingNumbers] = useState<WhatsAppPendingNumber[]>([]);
   const [isSelectingWa, setIsSelectingWa] = useState(false);
+
+  // Real website widget connection state
+  const [widgetConnected, setWidgetConnected] = useState(false);
+  const [widgetKey, setWidgetKey] = useState<string | null>(null);
+  const [widgetError, setWidgetError] = useState('');
+  const [isConnectingWidget, setIsConnectingWidget] = useState(false);
+  const [widgetCodeCopied, setWidgetCodeCopied] = useState(false);
 
   // Real Shopify connection state
   const [shopifyConnected, setShopifyConnected] = useState(false);
@@ -218,6 +228,9 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         const woo = channels.find((c) => c.type === 'woocommerce');
         setWooConnected(!!woo?.connected);
         setWooStoreName(woo?.name || null);
+
+        const widget = channels.find((c) => c.type === 'websocket');
+        setWidgetConnected(!!widget?.connected);
       })
       .catch((err) => console.error('Failed to load channel status:', err));
   };
@@ -460,6 +473,47 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     }
   };
 
+  const handleWidgetConnect = async () => {
+    setWidgetError('');
+    setIsConnectingWidget(true);
+    try {
+      const res = await connectWidgetChannel();
+      setWidgetConnected(true);
+      setWidgetKey(res.widgetKey);
+      setWizardStep(2);
+      refreshChannelsStatus();
+    } catch (err: any) {
+      setWidgetError(err.message || 'Failed to enable the website widget');
+    } finally {
+      setIsConnectingWidget(false);
+    }
+  };
+
+  const handleWidgetDisconnect = async () => {
+    try {
+      await disconnectChannel('widget');
+      setWidgetConnected(false);
+      setWidgetKey(null);
+      refreshChannelsStatus();
+    } catch (err) {
+      console.error('Failed to disconnect website widget:', err);
+    }
+  };
+
+  const widgetEmbedSnippet = widgetKey
+    ? `<script src="${window.location.origin}/widget.js" data-widget-key="${widgetKey}" async></script>`
+    : '';
+
+  const handleCopyWidgetSnippet = async () => {
+    try {
+      await navigator.clipboard.writeText(widgetEmbedSnippet);
+      setWidgetCodeCopied(true);
+      setTimeout(() => setWidgetCodeCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy embed snippet:', err);
+    }
+  };
+
   const handleInstagramCardClick = async () => {
     if (igConnected) {
       try {
@@ -488,6 +542,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   };
 
   const [shopifyDomain, setShopifyDomain] = useState('');
+  const [showShopifyManual, setShowShopifyManual] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState('+1 (555) 019-2834');
   const [selectedFbPage, setSelectedFbPage] = useState('Aether Tech Labs');
 
@@ -503,7 +558,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   const handleConnectClick = (item: Integration) => {
     setActiveWizardId(item.id);
-    const initialStep = (item.id === 'int-shopify' && shopifyConnected) || (item.id === 'int-woo' && wooConnected) ? 2 : 1;
+    const initialStep = (item.id === 'int-shopify' && shopifyConnected) || (item.id === 'int-woo' && wooConnected) || (item.id === 'int-widget' && widgetConnected) ? 2 : 1;
     setWizardStep(initialStep);
     setIsSimulatingSync(false);
     setWaError('');
@@ -511,6 +566,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
     setShopifySyncResult(null);
     setWooError('');
     setWooSyncResult(null);
+    setWidgetError('');
+    // Already connected: re-fetch the widgetKey (connect is an idempotent upsert) so the
+    // embed snippet renders even though widgetKey isn't persisted in this component's state
+    // across remounts.
+    if (item.id === 'int-widget' && widgetConnected) {
+      void handleWidgetConnect();
+    }
   };
 
   const handleCompleteWizard = (id: string) => {
@@ -622,6 +684,13 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         ...item,
         connected: wooConnected,
         statusText: wooConnected ? (wooStoreName ? `Connected: ${wooStoreName}` : 'Active sync') : 'Not connected',
+      };
+    }
+    if (item.id === 'int-widget') {
+      return {
+        ...item,
+        connected: widgetConnected,
+        statusText: widgetConnected ? 'Embed active' : 'Not connected',
       };
     }
     return item;
@@ -755,7 +824,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                         : 'btn-accent'
                   }`}
                 >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : item.id === 'int-woo' ? (wooConnected ? 'Manage' : 'Connect') : 'Manage'}
+                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : item.id === 'int-woo' ? (wooConnected ? 'Manage' : 'Connect') : item.id === 'int-widget' ? (widgetConnected ? 'Manage' : 'Connect') : 'Manage'}
                 </button>
               </div>
             </div>
@@ -1233,6 +1302,81 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               className="w-full btn-glass py-2.5 text-xs font-bold cursor-pointer"
                             >
                               Disconnect store
+                            </button>
+                            <button
+                              onClick={() => setActiveWizardId(null)}
+                              className="w-full text-xs text-white/50 hover:text-white transition-colors cursor-pointer font-sans"
+                            >
+                              Return to integrations
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeWizardId === 'int-widget' && (
+                      <div className="space-y-4">
+                        {wizardStep === 1 && (
+                          <div className="space-y-4 text-center py-2">
+                            <Code2 className="h-10 w-10 text-emerald-400 mx-auto" />
+                            <div className="space-y-1.5">
+                              <h5 className="text-base font-bold text-white font-sans">Enable the website chat widget</h5>
+                              <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto font-sans">
+                                No OAuth, no tokens — enabling generates a unique embed snippet you paste onto your own site. Visitors get a live AI chat bubble instantly.
+                              </p>
+                            </div>
+
+                            {widgetError && (
+                              <div className="status-danger text-xs p-3 rounded-xl text-center font-sans">
+                                {widgetError}
+                              </div>
+                            )}
+
+                            <button
+                              onClick={handleWidgetConnect}
+                              disabled={isConnectingWidget}
+                              className="w-full btn-accent py-3 text-xs font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              {isConnectingWidget ? 'Enabling…' : 'Enable website widget'}
+                            </button>
+                          </div>
+                        )}
+
+                        {wizardStep === 2 && (
+                          <div className="space-y-4 text-center py-2">
+                            <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto" />
+                            <div className="space-y-1.5">
+                              <h5 className="text-base font-bold text-white font-sans">Widget enabled</h5>
+                              <p className="text-xs text-white/60 max-w-sm mx-auto leading-relaxed font-sans">
+                                Paste this snippet just before the closing <code className="text-white/80">&lt;/body&gt;</code> tag of your website.
+                              </p>
+                            </div>
+
+                            {widgetError && (
+                              <div className="status-danger text-xs p-3 rounded-xl text-center font-sans">
+                                {widgetError}
+                              </div>
+                            )}
+
+                            <div className="zone-b-grey2 p-3.5 rounded-xl text-left">
+                              <code className="text-[11px] text-white/80 font-mono break-all leading-relaxed block">
+                                {widgetEmbedSnippet}
+                              </code>
+                            </div>
+
+                            <button
+                              onClick={handleCopyWidgetSnippet}
+                              disabled={!widgetEmbedSnippet}
+                              className="w-full btn-light-primary py-3 text-xs font-bold cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                              {widgetCodeCopied ? 'Copied!' : 'Copy embed code'}
+                            </button>
+                            <button
+                              onClick={async () => { await handleWidgetDisconnect(); setActiveWizardId(null); }}
+                              className="w-full btn-glass py-2.5 text-xs font-bold cursor-pointer"
+                            >
+                              Disable widget
                             </button>
                             <button
                               onClick={() => setActiveWizardId(null)}

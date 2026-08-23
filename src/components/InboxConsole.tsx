@@ -20,7 +20,7 @@ import {
   AlertOctagon
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
-import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
+import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, updateConversationArchived, updateConversationSpam, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
 // Shows the customer's real Facebook/Instagram profile photo when we have one (never
@@ -83,9 +83,9 @@ export default function InboxConsole({
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [orderCancelError, setOrderCancelError] = useState('');
   
-  // Local state to track archived, spam, or locally deleted chat IDs
-  const [archivedChatIds, setArchivedChatIds] = useState<string[]>([]);
-  const [spamChatIds, setSpamChatIds] = useState<string[]>([]);
+  // Optimistic-hide for a chat mid-delete, before the server confirms and it drops out
+  // of the conversations prop entirely. Archive/spam state itself is server-persisted
+  // (Conversation.isArchived/isSpam) and read directly off each chat below.
   const [deletedChatIds, setDeletedChatIds] = useState<string[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -356,18 +356,32 @@ export default function InboxConsole({
     }
   };
 
-  const handleArchiveChat = (chatId: string) => {
+  const handleArchiveChat = async (chatId: string) => {
     setIsMenuOpen(false);
-    setArchivedChatIds((prev) => 
-      prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId]
-    );
+    const chat = conversations.find((c) => c.id === chatId);
+    const nextValue = !chat?.isArchived;
+    onUpdateConversation(chatId, { isArchived: nextValue });
+    try {
+      const updated = await updateConversationArchived(chatId, nextValue);
+      onUpdateConversation(chatId, updated);
+    } catch (err) {
+      console.error('Failed to update archive state:', err);
+      onUpdateConversation(chatId, { isArchived: !nextValue });
+    }
   };
 
-  const handleSpamChat = (chatId: string) => {
+  const handleSpamChat = async (chatId: string) => {
     setIsMenuOpen(false);
-    setSpamChatIds((prev) => 
-      prev.includes(chatId) ? prev.filter(id => id !== chatId) : [...prev, chatId]
-    );
+    const chat = conversations.find((c) => c.id === chatId);
+    const nextValue = !chat?.isSpam;
+    onUpdateConversation(chatId, { isSpam: nextValue });
+    try {
+      const updated = await updateConversationSpam(chatId, nextValue);
+      onUpdateConversation(chatId, updated);
+    } catch (err) {
+      console.error('Failed to update spam state:', err);
+      onUpdateConversation(chatId, { isSpam: !nextValue });
+    }
   };
 
   const filteredChats = conversations.filter(chat => {
@@ -378,8 +392,8 @@ export default function InboxConsole({
     
     if (!matchesSearch) return false;
     const f = activeFilter.toLowerCase();
-    const isArchived = archivedChatIds.includes(chat.id);
-    const isSpam = spamChatIds.includes(chat.id);
+    const isArchived = !!chat.isArchived;
+    const isSpam = !!chat.isSpam;
 
     if (f === 'archived') return isArchived;
     if (f === 'spam') return isSpam;
@@ -403,8 +417,8 @@ export default function InboxConsole({
     const f = filterName.toLowerCase();
     return conversations.filter(chat => {
       if (deletedChatIds.includes(chat.id)) return false;
-      const isArchived = archivedChatIds.includes(chat.id);
-      const isSpam = spamChatIds.includes(chat.id);
+      const isArchived = !!chat.isArchived;
+      const isSpam = !!chat.isSpam;
 
       if (f === 'archived') return isArchived;
       if (f === 'spam') return isSpam;
@@ -673,7 +687,7 @@ export default function InboxConsole({
                             className="w-full text-left px-4 py-2.5 hover:bg-white/10 text-white/90 hover:text-white flex items-center gap-2.5 transition-colors cursor-pointer"
                           >
                             <Archive className="h-4 w-4 text-blue-400" />
-                            <span>{archivedChatIds.includes(activeChat.id) ? 'Unarchive chat' : 'Archive chat'}</span>
+                            <span>{activeChat.isArchived ? 'Unarchive chat' : 'Archive chat'}</span>
                           </button>
                           
                           <button
@@ -682,7 +696,7 @@ export default function InboxConsole({
                             className="w-full text-left px-4 py-2.5 hover:bg-white/10 text-white/90 hover:text-white flex items-center gap-2.5 transition-colors cursor-pointer"
                           >
                             <AlertOctagon className="h-4 w-4 text-amber-400" />
-                            <span>{spamChatIds.includes(activeChat.id) ? 'Unmark as spam' : 'Mark as spam'}</span>
+                            <span>{activeChat.isSpam ? 'Unmark as spam' : 'Mark as spam'}</span>
                           </button>
 
                           <div className="my-1 border-t border-white/10" />

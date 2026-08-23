@@ -15,6 +15,7 @@ import {
   deleteAvatar,
   listProducts,
   createProduct,
+  updateProduct,
   deleteProduct,
   uploadProductImage,
   deleteProductImage,
@@ -342,6 +343,12 @@ export default function App() {
     return created;
   };
 
+  const handleEditProduct = async (id: string, updates: Omit<Product, 'id' | 'imageUrl' | 'rawAttributes'>) => {
+    const updated = await updateProduct(id, updates);
+    setProducts((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    return updated;
+  };
+
   const handleDeleteProduct = async (id: string) => {
     await deleteProduct(id);
     setProducts((prev) => prev.filter(p => p.id !== id));
@@ -506,6 +513,7 @@ export default function App() {
             products={products}
             isWebsiteConnected={isWebsiteConnected}
             onAddProduct={handleAddProduct}
+            onEditProduct={handleEditProduct}
             onDeleteProduct={handleDeleteProduct}
             onUploadProductImage={handleUploadProductImage}
             onDeleteProductImage={handleDeleteProductImage}

@@ -196,7 +196,7 @@ export function createChannelsRouter(): express.Router {
   });
 
   // Connect a Shopify store via a merchant-supplied custom-app Admin API access
-  // token (not a public OAuth app — see ShopifySetup.md). Verifies the credentials
+  // token (not a public OAuth app — see docs/SHOPIFY_SETUP.md). Verifies the credentials
   // actually work against the real store before saving anything.
   router.post('/api/channels/shopify/connect', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {

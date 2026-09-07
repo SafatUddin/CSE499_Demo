@@ -1,7 +1,7 @@
 // Shopify Admin API helpers. Supports two connection paths: the original manual
 // custom-app Admin API access token (still useful for quick testing, no OAuth setup
 // needed), and a real self-serve OAuth flow via a custom-distributed Partners app
-// (no Shopify App Store review needed — see ShopifySetup.md).
+// (no Shopify App Store review needed — see docs/SHOPIFY_SETUP.md).
 
 import crypto from 'crypto';
 

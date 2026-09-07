@@ -1,6 +1,6 @@
 # ShopMate AI — Project Notes for Claude
 
-This file tracks project state and working preferences so future sessions don't need to re-derive them. See `PLANNING.md` for the full build roadmap and architecture rationale, and `CHANGELOG.md` for a dated, plain-language history of what's been built and why.
+This file tracks project state and working preferences so future sessions don't need to re-derive them. See `docs/PLANNING.md` for the full build roadmap and architecture rationale, and `docs/CHANGELOG.md` for a dated, plain-language history of what's been built and why.
 
 ## What this project is
 
@@ -10,13 +10,13 @@ A CSE499 capstone: an AI sales agent merchants connect to Messenger/Instagram/Wh
 
 - **Never add `Co-Authored-By: Claude` or any Claude/Anthropic attribution to git commits.** This is a shared repo with a human teammate (SafatUddin) — no Claude visibility in commit history.
 - **Only commit when explicitly asked in that turn.** Don't infer commit consent from an ambiguous "yes" to a broader question (e.g. "yes" to "push and redeploy?" is not "yes, commit this").
-- Don't invent new UI styling — reuse existing patterns already in the component/file (error banners, loading-button states, etc. all follow patterns already established in `LoginPage.tsx`/`SignupPage.tsx`/the persona-save button). Anything genuinely new should follow `DESIGN.md`.
+- Don't invent new UI styling — reuse existing patterns already in the component/file (error banners, loading-button states, etc. all follow patterns already established in `LoginPage.tsx`/`SignupPage.tsx`/the persona-save button). Anything genuinely new should follow `docs/DESIGN.md`.
 - This repo has a collaborator (not just the primary user) — treat force-pushing/rewriting shared history as needing explicit confirmation each time, and warn that the collaborator will need to `git fetch && git reset --hard origin/main` to resync afterward.
 - **A second machine (`d:\CSE499_Demo`) also works against this same repo and the same shared Supabase DB.** All commits so far, from both machines, use the identical git email (`safwanismaunamin@gmail.com`) with different `user.name` (`safwan` here, `aspiroo` there). It previously applied migrations directly to the shared DB (adding `Conversation.orderConfirmationRequested`/`orderConfirmed`/`orderSummaryShown`/`awaitingQuantityFor`) without pushing the corresponding code — that's since been reconciled (as of 2026-07-31, that machine isn't actively building anything and both machines' commits are pushed/synced on `origin/main`) but the pattern can recur. Always `git fetch` and check for DB schema drift (`npx prisma migrate diff --from-schema-datasource ... --to-schema-datamodel ...`) before assuming this machine's `schema.prisma` is authoritative.
 
 ## Infrastructure (as of this writing)
 
-- **Hosting:** Railway, project `Remlin` (renamed from `shopmateAI` on 2026-08-14 to match the app's rebrand — see `CHANGELOG.md`), deployed via `railway up` (not GitHub-integration — the user is a repo collaborator without admin rights to grant Railway's GitHub App access, so deploys are pushed straight from the CLI). Public URL: `https://remlin.up.railway.app`.
+- **Hosting:** Railway, project `Remlin` (renamed from `shopmateAI` on 2026-08-14 to match the app's rebrand — see `docs/CHANGELOG.md`), deployed via `railway up` (not GitHub-integration — the user is a repo collaborator without admin rights to grant Railway's GitHub App access, so deploys are pushed straight from the CLI). Public URL: `https://remlin.up.railway.app`.
 - **Database:** Supabase Postgres (project `shopmateAI`, `ap-northeast-2`/Seoul region). Prisma ORM, schema at `prisma/schema.prisma`. Uses the pooled connection (`DATABASE_URL`, port 6543, `pgbouncer=true`) for the app and the direct connection (`DIRECT_URL`, port 5432) for migrations.
 - **AI:** Gemini (`gemini-3.5-flash`, via `server/gemini.ts`) is the model, with a rule-based simulator in `server/agent.ts` as the last resort if Gemini errors/is unreachable. Previously ran a self-hosted Ollama model (with Gemini as fallback, then briefly the reverse) to avoid API costs entirely; reverted to Gemini-only on 2026-08-05 after the self-hosted model's Bangla/Banglish quality proved too weak for real use, and the user decided they're fine paying for API usage once payment plans exist (Gemini's free tier is still $0 for now regardless). The whole Ollama/Tailscale Funnel self-hosting setup (previously required to reach a home GPU machine from Railway) was removed along with it — no more dependency on this machine staying on for AI to work in production.
 - Env vars needed locally (`.env`, gitignored) and on Railway: `GEMINI_API_KEY`, `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN`, `FACEBOOK_APP_ID`, `CHANNEL_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. Placeholders documented in `.env.example`.
@@ -53,7 +53,7 @@ Beta testing is imminent — a handful of testers, days-scale timeline.
 
 ## Feature gaps vs LazyChat (competitor benchmark)
 
-Not scheduled yet — surfaced 2026-08-14 comparing against LazyChat (Bangladeshi competitor in the same space; see `LazyChat_Engineering_Architecture_Blueprint.md` for the full reverse-engineered breakdown). Revisit only when explicitly asked; pick based on what's actually blocking beta feedback, not speculatively.
+Not scheduled yet — surfaced 2026-08-14 comparing against LazyChat (Bangladeshi competitor in the same space; see `docs/LAZYCHAT_ENGINEERING_ARCHITECTURE_BLUEPRINT.md` for the full reverse-engineered breakdown). Revisit only when explicitly asked; pick based on what's actually blocking beta feedback, not speculatively.
 
 - ❌ Team/multi-user management — ShopMate is single-merchant/single-user per store; LazyChat's paid tiers scale by team seats.
 - ❌ Broadcast/campaign messaging — personalized order confirmations, restock alerts, promotional blasts to segmented audiences. ShopMate only ever reacts to inbound messages.

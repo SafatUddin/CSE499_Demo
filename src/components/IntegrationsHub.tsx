@@ -1129,7 +1129,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                             {showShopifyManual && (
                               <div className="space-y-3 pt-1 border-t border-white/[0.07]">
                                 <p className="text-[11px] text-white/50 leading-relaxed font-sans pt-3">
-                                  For testing without OAuth — see ShopifySetup.md for how to create a custom-app Admin API access token.
+                                  For testing without OAuth — see docs/SHOPIFY_SETUP.md for how to create a custom-app Admin API access token.
                                 </p>
                                 <div className="space-y-1.5">
                                   <label className="font-sans text-xs text-white/60 font-semibold block">Admin API access token</label>
@@ -1260,7 +1260,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
                               {isConnectingWoo ? 'Connecting & Verifying…' : 'Connect WooCommerce'}
                             </button>
                             <p className="text-[11px] text-white/40 text-center font-sans">
-                              Need API keys? Check <code className="text-white/70">woo.md</code> in project root for instructions.
+                              Need API keys? Check <code className="text-white/70">docs/WOO.md</code> in the project for instructions.
                             </p>
                           </div>
                         )}

@@ -12,7 +12,7 @@ The repo is a high-fidelity **frontend demo with fake data**:
 
 | Piece | Status |
 |---|---|
-| UI (landing, login, inbox, catalog, analytics, integrations, settings) | ✅ Built, polished, dark theme per `DESIGN.md` |
+| UI (landing, login, inbox, catalog, analytics, integrations, settings) | ✅ Built, polished, dark theme per `docs/DESIGN.md` |
 | Auth | ❌ Fake — `isAuthenticated` boolean + localStorage profile |
 | Database | ❌ None — everything lives in React state / `mockData.ts` |
 | AI chat | ⚠️ Half real — `/api/chat` calls Gemini with a JSON schema, falls back to keyword simulator |

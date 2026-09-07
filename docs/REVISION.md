@@ -2,7 +2,7 @@
 
 _Last updated: 2026-07-31_
 
-A snapshot of the tech stack, what's been built so far, the database schema, and system diagrams — for capstone revision/reporting purposes. For day-to-day working notes see `CLAUDE.md`; for the original roadmap see `PLANNING.md`; for a dated plain-language history see `CHANGELOG.md`.
+A snapshot of the tech stack, what's been built so far, the database schema, and system diagrams — for capstone revision/reporting purposes. For day-to-day working notes see `CLAUDE.md`; for the original roadmap see `docs/PLANNING.md`; for a dated plain-language history see `docs/CHANGELOG.md`.
 
 ---
 

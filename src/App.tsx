@@ -48,7 +48,17 @@ import IntegrationsHub from './components/IntegrationsHub';
 import OrdersPage from './components/OrdersPage';
 import SettingsPage from './components/SettingsPage';
 
+// ─────────────────────────────────────────────────────────────────────────
+// App is the single root component: it owns navigation, the auth session,
+// and every domain's data (products/persona/conversations/integrations),
+// then routes to one of the page components in src/components/ based on
+// activeTab. This file mixes several concerns that would normally live in
+// separate custom hooks (useAuthSession, useAppNavigation, useProducts,
+// etc.) — everything below is grouped and commented by responsibility so
+// it reads that way even though it hasn't been physically split yet.
+// ─────────────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Navigation state ──────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<Tab>('landing');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -101,6 +111,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // ── Auth session state ────────────────────────────────────────────────
   // Real auth state — merchant is null when logged out
   const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
   const [store, setStore] = useState<PublicStore | null>(null);
@@ -267,7 +278,11 @@ export default function App() {
     syncProfileToLocalStorage(updated);
   };
 
-  // Application Data States
+  // ── Domain data state (products/integrations/persona/conversations) ────
+  // Each domain below owns its own state + fetch/mutation handlers, all scoped
+  // to this one component — see "Product mutations" / "Persona save" /
+  // "Conversations updating" / "Integration mutations" comments further down
+  // for where each domain's handlers live.
   const [products, setProducts] = useState<Product[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [persona, setPersona] = useState<AIPersona>(DEFAULT_AI_PERSONA);
@@ -447,6 +462,9 @@ export default function App() {
     }
   };
 
+  // ── Page routing ─────────────────────────────────────────────────────
+  // renderPageContent below is the switch that maps activeTab to a page
+  // component, passing it the relevant domain state + handlers as props.
   // Shared by the 'inbox' tab and the authenticated default fallback below.
   const renderInbox = () => {
     if (connectedPlatforms.size === 0) {
@@ -556,6 +574,10 @@ export default function App() {
     }
   };
 
+  // ── Layout / render ──────────────────────────────────────────────────
+  // Below: a loading spinner while the session check is in flight, then the
+  // onboarding gate (no Sidebar chrome), then the real app shell — Sidebar
+  // + main content — for authenticated users, or the raw page for guests.
   if (isCheckingAuth) {
     return (
       <div className="bg-background min-h-screen w-full flex items-center justify-center">

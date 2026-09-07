@@ -23,6 +23,16 @@ import {
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Meta's profile_pic URLs are short-lived signed CDN links (observed Instagram URLs
+// expiring within ~24h) — refetch periodically rather than only once, or the stored
+// avatarUrl silently rots into a dead link the first time it expires.
+const AVATAR_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+function isProfileBackfillDue(conversation: { customerName: string | null; avatarUrl: string | null; avatarFetchedAt: Date | null }): boolean {
+  if (!conversation.customerName || !conversation.avatarUrl || !conversation.avatarFetchedAt) return true;
+  return Date.now() - conversation.avatarFetchedAt.getTime() > AVATAR_REFRESH_INTERVAL_MS;
+}
+
 export function createWebhooksRouter(): express.Router {
   const router = express.Router();
 
@@ -73,17 +83,17 @@ export function createWebhooksRouter(): express.Router {
       });
     }
 
-    // Backfill the customer's real name/avatar if we don't have both yet — covers both
-    // brand-new conversations and older ones created before this profile lookup existed.
-    if (!conversation.customerName || !conversation.avatarUrl) {
+    // Backfill the customer's real name/avatar if we don't have both yet, or if the
+    // stored avatar URL is old enough to have likely expired — covers brand-new
+    // conversations, older ones created before this profile lookup existed, and
+    // conversations whose Meta-issued avatar link has since gone stale.
+    if (isProfileBackfillDue(conversation)) {
       const pageAccessToken = await getPageAccessTokenForStore(storeId);
       const profile = pageAccessToken ? await fetchMessengerProfile(pageAccessToken, senderPsid) : { name: null, profilePicUrl: null };
-      const updateData: any = {};
-      if (profile.name && !conversation.customerName) updateData.customerName = profile.name;
-      if (profile.profilePicUrl && !conversation.avatarUrl) updateData.avatarUrl = profile.profilePicUrl;
-      if (Object.keys(updateData).length > 0) {
-        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
-      }
+      const updateData: any = { avatarFetchedAt: new Date() };
+      if (profile.name) updateData.customerName = profile.name;
+      if (profile.profilePicUrl) updateData.avatarUrl = profile.profilePicUrl;
+      conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
     }
 
     try {
@@ -182,15 +192,13 @@ export function createWebhooksRouter(): express.Router {
       });
     }
 
-    if (!conversation.customerName || !conversation.avatarUrl) {
+    if (isProfileBackfillDue(conversation)) {
       const igCreds = await getInstagramCredentialsForStore(storeId);
       const profile = igCreds ? await fetchInstagramProfile(igCreds.accessToken, senderIgUserId) : { name: null, profilePicUrl: null };
-      const updateData: any = {};
-      if (profile.name && !conversation.customerName) updateData.customerName = `@${profile.name}`;
-      if (profile.profilePicUrl && !conversation.avatarUrl) updateData.avatarUrl = profile.profilePicUrl;
-      if (Object.keys(updateData).length > 0) {
-        conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
-      }
+      const updateData: any = { avatarFetchedAt: new Date() };
+      if (profile.name) updateData.customerName = `@${profile.name}`;
+      if (profile.profilePicUrl) updateData.avatarUrl = profile.profilePicUrl;
+      conversation = await prisma.conversation.update({ where: { id: conversation.id }, data: updateData });
     }
 
     try {

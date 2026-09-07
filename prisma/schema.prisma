@@ -149,9 +149,11 @@ model Conversation {
   customerName   String?
   // Customer's profile photo URL, fetched from Meta's Graph API for Facebook/Instagram
   // (never available for WhatsApp — the platform doesn't expose it). Meta's returned
-  // URLs are temporary/CDN-backed, so this is refreshed opportunistically alongside
-  // customerName rather than treated as a permanent value.
+  // URLs are short-lived signed CDN links (observed Instagram URLs expiring within
+  // ~24h) — avatarFetchedAt tracks when this was last fetched so it gets refreshed
+  // periodically instead of going permanently stale after the first successful fetch.
   avatarUrl      String?
+  avatarFetchedAt DateTime?
   status         ConversationStatus @default(AI_MANAGED)
   isComplaint    Boolean            @default(false)
   cart           Json?

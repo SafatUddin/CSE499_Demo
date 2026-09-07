@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db';
-import { requireAuth, AuthedRequest, establishMerchantSession } from '../auth';
+import { requireAuth, AuthedRequest, establishMerchantSession, isPasswordStrongEnough } from '../auth';
 import { getProfileCompletionStatus } from '../profileCompletion';
 import { toPublicMerchant, toPublicStore } from '../publicViews';
 import {
@@ -15,7 +15,10 @@ import {
   saveAvatarFile,
   deleteLocalAvatarFile,
   isLocalAvatarUrl,
+  MAX_AVATAR_BYTES,
 } from '../mediaStorage';
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 export function createProfileRouter(): express.Router {
   const router = express.Router();

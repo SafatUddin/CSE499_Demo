@@ -2,7 +2,7 @@
 
 _Last updated: 2026-07-31_
 
-A snapshot of the tech stack, what's been built so far, the database schema, and system diagrams — for capstone revision/reporting purposes. For day-to-day working notes see `CLAUDE.md`; for the original roadmap see `docs/PLANNING.md`; for a dated plain-language history see `docs/CHANGELOG.md`.
+A snapshot of the tech stack, what's been built so far, the database schema, and system diagrams — for capstone revision/reporting purposes. For day-to-day working notes see `.claude/CLAUDE.md`; for the original roadmap see `docs/PLANNING.md`; for a dated plain-language history see `docs/CHANGELOG.md`.
 
 ---
 
@@ -93,7 +93,7 @@ Order      { id, store, conversationId?, items(Json), customerName, address,
              status, total, createdAt }
 ```
 
-> Note: `orderConfirmationRequested`/`orderConfirmed`/`orderSummaryShown`/`awaitingQuantityFor` were originally added directly against the shared DB from a second development machine before the corresponding code was pushed — since reconciled into one implementation (see `CLAUDE.md`).
+> Note: `orderConfirmationRequested`/`orderConfirmed`/`orderSummaryShown`/`awaitingQuantityFor` were originally added directly against the shared DB from a second development machine before the corresponding code was pushed — since reconciled into one implementation (see `.claude/CLAUDE.md`).
 
 ### Entity-Relationship Diagram
 
@@ -300,7 +300,7 @@ flowchart TD
 
 ---
 
-## 5. Known Environment Quirks (see `CLAUDE.md` for detail)
+## 5. Known Environment Quirks (see `.claude/CLAUDE.md` for detail)
 
 - `prisma migrate dev` doesn't run in this non-interactive shell — migrations are hand-generated via `prisma migrate diff` and applied with `prisma migrate deploy`.
 - Meta's webhook subscription can silently desync (UI shows "Verified"/"Subscribed" but nothing is delivered) — fixed by removing and re-adding the webhook subscription.

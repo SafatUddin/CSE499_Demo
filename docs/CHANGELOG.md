@@ -1,6 +1,6 @@
 # Changelog
 
-Plain-language history of work on ShopMate AI, for humans (not git blame). See `CLAUDE.md` for current project state and `docs/PLANNING.md` for the roadmap.
+Plain-language history of work on ShopMate AI, for humans (not git blame). See `.claude/CLAUDE.md` for current project state and `docs/PLANNING.md` for the roadmap.
 
 ## 2026-08-14 — Rebrand to Remlin, Railway project renamed
 

@@ -193,19 +193,6 @@ async function startServer() {
   app.use(createAuthRouter());
   app.use(createChannelsRouter());
 
-
-
-
-
-
-
-
-
-
-
-
-
-
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', geminiActive: !!ai });

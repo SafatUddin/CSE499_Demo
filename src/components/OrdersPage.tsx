@@ -45,7 +45,7 @@ export default function OrdersPage() {
         <div className="zone-b-grey2 p-6 space-y-5">
           <div className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
             <div>
-              <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Real orders</h3>
+              <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Orders</h3>
               <p className="text-[13px] text-white/55 mt-0.5">
                 {filteredOrders.length} order{filteredOrders.length === 1 ? '' : 's'} generated from customer conversations
               </p>
@@ -59,6 +59,7 @@ export default function OrdersPage() {
                   <tr className="bg-white/[0.05] border-b border-white/[0.07] text-[11px] font-sans text-white/50 tracking-[0.11em] font-bold">
                     <th className="p-4">Customer</th>
                     <th className="p-4">Items</th>
+                    <th className="p-4">Phone</th>
                     <th className="p-4">Address</th>
                     <th className="p-4">Total</th>
                     <th className="p-4">Status</th>
@@ -69,7 +70,7 @@ export default function OrdersPage() {
                 <tbody className="divide-y divide-white/[0.055] font-sans text-[14px]">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-white/40 font-sans text-xs">
+                      <td colSpan={8} className="p-8 text-center text-white/40 font-sans text-xs">
                         No orders recorded yet. Orders appear here once confirmed from customer conversations.
                       </td>
                     </tr>
@@ -80,13 +81,26 @@ export default function OrdersPage() {
                         order.status === 'Cancelled' ? 'status-danger' :
                         order.status === 'On the Way' ? 'status-info' : 'status-warning';
 
+                      // Parse phone and address from the combined address field
+                      const parseAddress = (addr: string) => {
+                        const phoneMatch = addr.match(/Phone:\s*([^|]+)/i);
+                        const addressMatch = addr.match(/Address:\s*(.+)/i);
+                        return {
+                          phone: phoneMatch ? phoneMatch[1].trim() : '',
+                          address: addressMatch ? addressMatch[1].trim() : addr
+                        };
+                      };
+
+                      const { phone, address } = parseAddress(order.address);
+
                       return (
                         <tr key={order.id} className="hover:bg-white/[0.03] transition-colors">
                           <td className="p-4 font-sans font-bold text-white">{order.customerName}</td>
                           <td className="p-4 text-white/70">
                             {order.items.map((item) => `${item.name} ×${item.quantity}`).join(', ')}
                           </td>
-                          <td className="p-4 text-white/50 max-w-[240px] truncate" title={order.address}>{order.address}</td>
+                          <td className="p-4 text-white/50">{phone || '—'}</td>
+                          <td className="p-4 text-white/50 max-w-[240px] truncate" title={address}>{address || '—'}</td>
                           <td className="p-4 font-sans text-white font-bold">${order.total.toFixed(2)}</td>
                           <td className="p-4">
                             <select

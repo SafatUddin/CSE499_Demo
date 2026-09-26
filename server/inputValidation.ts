@@ -393,6 +393,7 @@ export type ValidatedPersonaInput = {
   customInstructions: string;
   autoFinalizeOrdersAlways: boolean;
   openingText: string;
+  shareBusinessInfo: boolean;
 };
 
 export function validatePersonaInput(body: unknown): ValidatedPersonaInput | null {
@@ -421,5 +422,6 @@ export function validatePersonaInput(body: unknown): ValidatedPersonaInput | nul
     customInstructions: customInstructions ?? '',
     autoFinalizeOrdersAlways: !!body.autoFinalizeOrdersAlways,
     openingText: openingText ?? '',
+    shareBusinessInfo: body.shareBusinessInfo === undefined ? true : !!body.shareBusinessInfo,
   };
 }

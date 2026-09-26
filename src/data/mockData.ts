@@ -451,6 +451,16 @@ export const DEFAULT_AI_PERSONA: AIPersona = {
   tone: 'Direct, helpful, and highly sophisticated. Focus on technical features but explain them for a luxury lifestyle audience. Use a confident, elite tone.',
   style: 'bullets',
   customInstructions: 'Avoid slang. Mention that standard shipping takes 2-3 business days. If they show high interest, offer a custom 10% voucher: COMPOSITE10.',
+  shareBusinessInfo: true,
+  businessInfo: {
+    businessPhone: null,
+    website: null,
+    streetAddress: null,
+    city: null,
+    province: null,
+    postalCode: null,
+    country: null,
+  },
 };
 
 export const RECHART_DATA_30_DAYS: DailyMetric[] = [

@@ -5,6 +5,16 @@ export interface AgentPersona {
   tone?: string;
   style?: string;
   customInstructions?: string;
+  merchantBusinessInfo?: {
+    businessPhone?: string;
+    website?: string;
+    streetAddress?: string;
+    city?: string;
+    province?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  shareBusinessInfo?: boolean;
 }
 
 export interface AgentCatalogItem {
@@ -86,6 +96,23 @@ export async function generateAgentReply({
       : 'Use a fluid, warm, conversational narrative style. Do not use bullets.';
   const customInst = persona?.customInstructions || '';
 
+  // Format merchant business information for the AI to share with customers when asked
+  const businessInfo = persona?.merchantBusinessInfo;
+  const shareBusinessInfo = persona?.shareBusinessInfo ?? true;
+  const merchantBusinessInfoText = shareBusinessInfo && businessInfo
+    ? [
+        businessInfo.businessPhone ? `Business Phone: ${businessInfo.businessPhone}` : '',
+        businessInfo.website ? `Website: ${businessInfo.website}` : '',
+        businessInfo.streetAddress ? `Store Address: ${businessInfo.streetAddress}` : '',
+        businessInfo.city ? `City: ${businessInfo.city}` : '',
+        businessInfo.province ? `Province/State: ${businessInfo.province}` : '',
+        businessInfo.postalCode ? `Postal Code: ${businessInfo.postalCode}` : '',
+        businessInfo.country ? `Country: ${businessInfo.country}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
   const cartText = orderState.cartItems && orderState.cartItems.length > 0
     ? orderState.cartItems.map((item) => `${item.quantity}x ${item.name} (SKU: ${item.sku})`).join(', ')
     : 'empty';
@@ -158,6 +185,21 @@ ${styleText}
 
 Additional Store Instructions:
 ${customInst}
+
+Merchant Business Information:
+${merchantBusinessInfoText
+  ? `${merchantBusinessInfoText}
+Important: When customers ask about the store's contact details, location, website, or any business information mentioned above, provide this information accurately. Examples of questions to answer with this information:
+- "What's your website?" → Share the website URL
+- "Where is your shop located?" / "What's your address?" → Share the store address
+- "How can I contact you?" → Share the business phone number
+- "Do you have a physical store?" → Mention the address if available`
+  : `The merchant has chosen not to share detailed business contact information with customers.
+Important: When customers ask about the store's physical location, address, or contact details, respond with: "We operate entirely online to bring you the best selection of products directly to your doorstep. You can browse our catalog and place orders right here through this chat!"
+- Do NOT provide any physical address, phone number, or location details
+- Focus on the convenience of online shopping and delivery
+- Redirect to product browsing and ordering`
+}
 
 Current Order State:
 ${orderStateText || 'No cart/address/confirmation in progress yet.'}

@@ -242,13 +242,23 @@ export interface ApiPersona {
   autoFinalizeOrdersAlways: boolean;
   openingText?: string;
   openingImageUrl?: string;
+  shareBusinessInfo: boolean;
+  businessInfo: {
+    businessPhone: string | null;
+    website: string | null;
+    streetAddress: string | null;
+    city: string | null;
+    province: string | null;
+    postalCode: string | null;
+    country: string | null;
+  };
 }
 
 export function getPersona() {
   return request<ApiPersona>('/api/persona');
 }
 
-export function updatePersona(input: { tone: string; style: string; customInstructions: string; autoFinalizeOrdersAlways?: boolean; openingText?: string }) {
+export function updatePersona(input: { tone: string; style: string; customInstructions: string; autoFinalizeOrdersAlways?: boolean; openingText?: string; shareBusinessInfo?: boolean }) {
   return request<ApiPersona>('/api/persona', { method: 'PUT', body: JSON.stringify(input) });
 }
 

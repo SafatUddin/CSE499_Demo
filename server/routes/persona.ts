@@ -22,6 +22,16 @@ export function createPersonaRouter(): express.Router {
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
         openingText: store.openingText || '',
         openingImageUrl: store.openingImageUrl || undefined,
+        shareBusinessInfo: store.shareBusinessInfo,
+        businessInfo: {
+          businessPhone: store.businessPhone || null,
+          website: store.website || null,
+          streetAddress: store.streetAddress || null,
+          city: store.city || null,
+          province: store.province || null,
+          postalCode: store.postalCode || null,
+          country: store.country || null,
+        },
       });
     } catch (err: any) {
       console.error('Fetch persona error:', err);
@@ -32,10 +42,13 @@ export function createPersonaRouter(): express.Router {
   // Update this store's AI persona
   router.put('/api/persona', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
     try {
+      console.log('[PERSONA UPDATE] Request body:', JSON.stringify(req.body, null, 2));
       const validated = validatePersonaInput(req.body);
       if (!validated) {
-        return res.status(400).json({ error: 'Invalid request.' });
+        console.error('[PERSONA UPDATE] Validation failed for body:', req.body);
+        return res.status(400).json({ error: 'Invalid request. Please check all required fields.' });
       }
+      console.log('[PERSONA UPDATE] Validated data:', JSON.stringify(validated, null, 2));
       const store = await prisma.store.update({
         where: { id: req.auth!.storeId },
         data: {
@@ -44,6 +57,7 @@ export function createPersonaRouter(): express.Router {
           customInstructions: validated.customInstructions,
           autoFinalizeOrdersAlways: validated.autoFinalizeOrdersAlways,
           openingText: validated.openingText,
+          shareBusinessInfo: validated.shareBusinessInfo,
         },
       });
       res.json({
@@ -53,6 +67,16 @@ export function createPersonaRouter(): express.Router {
         autoFinalizeOrdersAlways: store.autoFinalizeOrdersAlways,
         openingText: store.openingText || '',
         openingImageUrl: store.openingImageUrl || undefined,
+        shareBusinessInfo: store.shareBusinessInfo,
+        businessInfo: {
+          businessPhone: store.businessPhone || null,
+          website: store.website || null,
+          streetAddress: store.streetAddress || null,
+          city: store.city || null,
+          province: store.province || null,
+          postalCode: store.postalCode || null,
+          country: store.country || null,
+        },
       });
     } catch (err: any) {
       console.error('Update persona error:', err);

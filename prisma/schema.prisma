@@ -81,6 +81,8 @@ model Store {
   province      String?
   postalCode    String?
   country       String?
+  // Toggle to control whether AI should share business contact info with customers
+  shareBusinessInfo Boolean @default(true)
   products      Product[]
   channels      Channel[]
   conversations Conversation[]

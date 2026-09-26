@@ -73,6 +73,16 @@ export interface AIPersona {
   autoFinalizeOrdersAlways?: boolean;
   openingText?: string;
   openingImageUrl?: string;
+  shareBusinessInfo: boolean;
+  businessInfo: {
+    businessPhone: string | null;
+    website: string | null;
+    streetAddress: string | null;
+    city: string | null;
+    province: string | null;
+    postalCode: string | null;
+    country: string | null;
+  };
 }
 
 export interface DailyMetric {

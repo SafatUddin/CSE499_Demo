@@ -312,7 +312,16 @@ export default function App() {
       })
       .catch((err) => console.error('Failed to load products:', err));
     getPersona()
-      .then((p) => setPersona({ tone: p.tone, style: p.style as AIPersona['style'], customInstructions: p.customInstructions, autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways, openingText: p.openingText, openingImageUrl: p.openingImageUrl }))
+      .then((p) => setPersona({ 
+        tone: p.tone, 
+        style: p.style as AIPersona['style'], 
+        customInstructions: p.customInstructions, 
+        autoFinalizeOrdersAlways: p.autoFinalizeOrdersAlways, 
+        openingText: p.openingText, 
+        openingImageUrl: p.openingImageUrl,
+        shareBusinessInfo: p.shareBusinessInfo,
+        businessInfo: p.businessInfo
+      }))
       .catch((err) => console.error('Failed to load persona:', err));
     listConversations().then(setConversations).catch((err) => console.error('Failed to load conversations:', err));
     refreshChannels();
@@ -417,6 +426,8 @@ export default function App() {
       autoFinalizeOrdersAlways: saved.autoFinalizeOrdersAlways,
       openingText: saved.openingText,
       openingImageUrl: saved.openingImageUrl ?? prev.openingImageUrl,
+      shareBusinessInfo: saved.shareBusinessInfo,
+      businessInfo: saved.businessInfo,
     }));
   };
 

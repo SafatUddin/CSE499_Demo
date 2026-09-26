@@ -144,7 +144,21 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
   ]);
   if (!store || !currentConversation) return;
 
-  const persona = { tone: store.tone, style: store.style, customInstructions: store.customInstructions };
+  const persona = {
+    tone: store.tone,
+    style: store.style,
+    customInstructions: store.customInstructions,
+    merchantBusinessInfo: {
+      businessPhone: store.businessPhone || undefined,
+      website: store.website || undefined,
+      streetAddress: store.streetAddress || undefined,
+      city: store.city || undefined,
+      province: store.province || undefined,
+      postalCode: store.postalCode || undefined,
+      country: store.country || undefined,
+    },
+    shareBusinessInfo: store.shareBusinessInfo,
+  };
   const catalog = products.map((p) => ({
     name: p.name,
     sku: p.sku,

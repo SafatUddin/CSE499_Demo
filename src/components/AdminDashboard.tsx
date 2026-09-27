@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, MessageSquare, DollarSign, TrendingUp, Settings, LogOut } from 'lucide-react';
+import { Shield, Users, MessageSquare, DollarSign, TrendingUp, Settings, LogOut, X, User, Building2, Phone, Mail, Globe, MapPin } from 'lucide-react';
 import DashboardHeader from './DashboardHeader';
 
 interface MerchantAnalytics {
   merchantId: string;
   merchantName: string;
   merchantEmail: string;
+  merchantPhone: string | null;
+  merchantAvatarUrl: string | null;
+  storeName: string;
+  storeBusinessPhone: string | null;
+  storeWebsite: string | null;
+  storeStreetAddress: string | null;
+  storeCity: string | null;
+  storeProvince: string | null;
+  storePostalCode: string | null;
+  storeCountry: string | null;
   totalConversations: number;
   convertedConversations: number;
   totalSales: number;
@@ -20,6 +30,7 @@ export default function AdminDashboard() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedMerchant, setSelectedMerchant] = useState<MerchantAnalytics | null>(null);
 
   const handleNavigateToSettings = () => {
     window.dispatchEvent(new CustomEvent('shopmate_navigate', { detail: 'settings' }));
@@ -27,6 +38,14 @@ export default function AdminDashboard() {
 
   const handleLogout = () => {
     window.dispatchEvent(new Event('shopmate_logout'));
+  };
+
+  const handleMerchantClick = (merchant: MerchantAnalytics) => {
+    setSelectedMerchant(merchant);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedMerchant(null);
   };
 
   useEffect(() => {
@@ -158,7 +177,13 @@ export default function AdminDashboard() {
               <Users className="h-4 w-4" />
               <span className="text-[12px] font-medium uppercase tracking-wider">Total Merchants</span>
             </div>
-            <p className="text-[28px] font-bold text-white">{totals.merchants}</p>
+            {loading ? (
+              <div className="flex items-center justify-center py-2">
+                <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-[#00a8e8] animate-spin" />
+              </div>
+            ) : (
+              <p className="text-[28px] font-bold text-white">{totals.merchants}</p>
+            )}
           </div>
 
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5 space-y-2">
@@ -166,7 +191,13 @@ export default function AdminDashboard() {
               <MessageSquare className="h-4 w-4" />
               <span className="text-[12px] font-medium uppercase tracking-wider">Total Conversations</span>
             </div>
-            <p className="text-[28px] font-bold text-white">{totals.conversations.toLocaleString()}</p>
+            {loading ? (
+              <div className="flex items-center justify-center py-2">
+                <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-[#00a8e8] animate-spin" />
+              </div>
+            ) : (
+              <p className="text-[28px] font-bold text-white">{totals.conversations.toLocaleString()}</p>
+            )}
           </div>
 
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5 space-y-2">
@@ -174,7 +205,13 @@ export default function AdminDashboard() {
               <DollarSign className="h-4 w-4" />
               <span className="text-[12px] font-medium uppercase tracking-wider">Total Sales by Merchants</span>
             </div>
-            <p className="text-[28px] font-bold text-white">${totals.sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            {loading ? (
+              <div className="flex items-center justify-center py-2">
+                <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-[#00a8e8] animate-spin" />
+              </div>
+            ) : (
+              <p className="text-[28px] font-bold text-white">${totals.sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            )}
           </div>
 
           <div className="bg-white/[0.03] border border-white/[0.08] rounded-xl p-5 space-y-2">
@@ -182,7 +219,13 @@ export default function AdminDashboard() {
               <TrendingUp className="h-4 w-4" />
               <span className="text-[12px] font-medium uppercase tracking-wider">AI Messages</span>
             </div>
-            <p className="text-[28px] font-bold text-white">{totals.messages.toLocaleString()}</p>
+            {loading ? (
+              <div className="flex items-center justify-center py-2">
+                <div className="w-7 h-7 rounded-full border-2 border-white/20 border-t-[#00a8e8] animate-spin" />
+              </div>
+            ) : (
+              <p className="text-[28px] font-bold text-white">{totals.messages.toLocaleString()}</p>
+            )}
           </div>
         </div>
 
@@ -202,7 +245,7 @@ export default function AdminDashboard() {
                   <th className="p-4">Merchant</th>
                   <th className="p-4">Email</th>
                   <th className="p-4 text-center">Conversations</th>
-                  <th className="p-4 text-center">Converted</th>
+                  <th className="p-4 text-center">Orders Placed</th>
                   <th className="p-4 text-center">Conversion Rate</th>
                   <th className="p-4 text-right">Total Sales</th>
                   <th className="p-4 text-center">AI Messages</th>
@@ -231,7 +274,14 @@ export default function AdminDashboard() {
 
                     return (
                       <tr key={merchant.merchantId} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="p-4 font-bold text-white">{merchant.merchantName}</td>
+                        <td className="p-4">
+                          <button
+                            onClick={() => handleMerchantClick(merchant)}
+                            className="font-bold text-white hover:text-[#00a8e8] transition-colors text-left"
+                          >
+                            {merchant.merchantName}
+                          </button>
+                        </td>
                         <td className="p-4 text-white/60">{merchant.merchantEmail}</td>
                         <td className="p-4 text-center text-white/80">{merchant.totalConversations}</td>
                         <td className="p-4 text-center text-emerald-400 font-semibold">
@@ -270,6 +320,188 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Merchant Details Modal */}
+      {selectedMerchant && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={handleCloseModal}
+        >
+          <div
+            className="bg-[#0a0a0b] border border-white/[0.08] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-[#0a0a0b] border-b border-white/[0.06] p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {selectedMerchant.merchantAvatarUrl ? (
+                  <img
+                    src={selectedMerchant.merchantAvatarUrl}
+                    alt={selectedMerchant.merchantName}
+                    className="w-14 h-14 rounded-full border-2 border-white/[0.08]"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-r from-[#2176ff] via-[#00a8e8] to-[#00d2ff] flex items-center justify-center">
+                    <User className="h-7 w-7 text-white" />
+                  </div>
+                )}
+                <div>
+                  <h2 className="font-sans font-bold text-[20px] text-white">{selectedMerchant.merchantName}</h2>
+                  <p className="text-[13px] text-white/50">Merchant Details</p>
+                </div>
+              </div>
+              <button
+                onClick={handleCloseModal}
+                className="p-2 hover:bg-white/[0.05] rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-white/60 hover:text-white" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6">
+              {/* Personal Information */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-white/60">
+                  <User className="h-5 w-5 text-[#00a8e8]" />
+                  <h3 className="font-sans font-bold text-[16px] text-white uppercase tracking-wider">
+                    Personal Information
+                  </h3>
+                </div>
+                <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <User className="h-4 w-4 text-white/40 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Full Name</p>
+                      <p className="text-[14px] text-white font-medium">{selectedMerchant.merchantName}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Mail className="h-4 w-4 text-white/40 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Email</p>
+                      <p className="text-[14px] text-white font-medium">{selectedMerchant.merchantEmail}</p>
+                    </div>
+                  </div>
+                  {selectedMerchant.merchantPhone && (
+                    <div className="flex items-start gap-3">
+                      <Phone className="h-4 w-4 text-white/40 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Phone</p>
+                        <p className="text-[14px] text-white font-medium">{selectedMerchant.merchantPhone}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Business Information */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-white/60">
+                  <Building2 className="h-5 w-5 text-[#00a8e8]" />
+                  <h3 className="font-sans font-bold text-[16px] text-white uppercase tracking-wider">
+                    Business Information
+                  </h3>
+                </div>
+                <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-5 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Building2 className="h-4 w-4 text-white/40 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Business Name</p>
+                      <p className="text-[14px] text-white font-medium">{selectedMerchant.storeName}</p>
+                    </div>
+                  </div>
+                  {selectedMerchant.storeBusinessPhone && (
+                    <div className="flex items-start gap-3">
+                      <Phone className="h-4 w-4 text-white/40 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Business Phone</p>
+                        <p className="text-[14px] text-white font-medium">{selectedMerchant.storeBusinessPhone}</p>
+                      </div>
+                    </div>
+                  )}
+                  {selectedMerchant.storeWebsite && (
+                    <div className="flex items-start gap-3">
+                      <Globe className="h-4 w-4 text-white/40 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Website</p>
+                        <a
+                          href={selectedMerchant.storeWebsite}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[14px] text-[#00a8e8] hover:text-[#00d2ff] font-medium transition-colors"
+                        >
+                          {selectedMerchant.storeWebsite}
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {(selectedMerchant.storeStreetAddress ||
+                    selectedMerchant.storeCity ||
+                    selectedMerchant.storeProvince ||
+                    selectedMerchant.storePostalCode ||
+                    selectedMerchant.storeCountry) && (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-4 w-4 text-white/40 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Address</p>
+                        <p className="text-[14px] text-white font-medium leading-relaxed">
+                          {selectedMerchant.storeStreetAddress && (
+                            <>
+                              {selectedMerchant.storeStreetAddress}
+                              <br />
+                            </>
+                          )}
+                          {selectedMerchant.storeCity && `${selectedMerchant.storeCity}, `}
+                          {selectedMerchant.storeProvince && `${selectedMerchant.storeProvince} `}
+                          {selectedMerchant.storePostalCode}
+                          {(selectedMerchant.storeCity ||
+                            selectedMerchant.storeProvince ||
+                            selectedMerchant.storePostalCode) && <br />}
+                          {selectedMerchant.storeCountry}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Quick Stats */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-white/60">
+                  <TrendingUp className="h-5 w-5 text-[#00a8e8]" />
+                  <h3 className="font-sans font-bold text-[16px] text-white uppercase tracking-wider">
+                    Performance Summary
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+                    <p className="text-[11px] text-white/40 uppercase tracking-wider mb-2">Total Sales</p>
+                    <p className="text-[20px] font-bold text-emerald-400">
+                      ${selectedMerchant.totalSales.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </div>
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+                    <p className="text-[11px] text-white/40 uppercase tracking-wider mb-2">Conversations</p>
+                    <p className="text-[20px] font-bold text-white">{selectedMerchant.totalConversations}</p>
+                  </div>
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+                    <p className="text-[11px] text-white/40 uppercase tracking-wider mb-2">Converted</p>
+                    <p className="text-[20px] font-bold text-white">{selectedMerchant.convertedConversations}</p>
+                  </div>
+                  <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-4">
+                    <p className="text-[11px] text-white/40 uppercase tracking-wider mb-2">AI Messages</p>
+                    <p className="text-[20px] font-bold text-white">{selectedMerchant.totalAiMessages}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

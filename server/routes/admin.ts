@@ -18,6 +18,8 @@ export function createAdminRouter(): express.Router {
     try {
       const { timeFilter } = req.query;
       
+      console.log('[Admin Analytics] Time filter:', timeFilter);
+      
       // Calculate date threshold based on filter
       let dateThreshold: Date | null = null;
       const now = new Date();
@@ -41,11 +43,8 @@ export function createAdminRouter(): express.Router {
       // Admin email to exclude from analytics
       const ADMIN_EMAIL = 'remlin75@gmail.com';
 
-      // Get all merchants with their stores, excluding admin
-      const merchants = await prisma.merchant.findMany({
-        where: {
-          email: { not: ADMIN_EMAIL },
-        },
+      // Get all merchants with their stores
+      const allMerchants = await prisma.merchant.findMany({
         include: {
           store: true,
         },
@@ -54,14 +53,17 @@ export function createAdminRouter(): express.Router {
         },
       });
 
+      console.log('[Admin Analytics] Found total merchants:', allMerchants.length);
+
+      // Filter out admin and merchants without stores
+      const merchants = allMerchants.filter(m => m.email !== ADMIN_EMAIL && m.store);
+
+      console.log('[Admin Analytics] Non-admin merchants with stores:', merchants.length);
+
       // Build analytics for each merchant
       const analytics = await Promise.all(
         merchants.map(async (merchant) => {
-          if (!merchant.store) {
-            return null;
-          }
-
-          const storeId = merchant.store.id;
+          const storeId = merchant.store!.id;
 
           // Build where clause for time filtering
           const whereClause: any = { storeId };
@@ -85,28 +87,38 @@ export function createAdminRouter(): express.Router {
             },
           });
 
-          // Get orders with time filter
+          // Get orders with time filter, excluding cancelled orders
           const orders = await prisma.order.findMany({
-            where: whereClause,
+            where: {
+              ...whereClause,
+              status: { not: 'CANCELLED' }, // Exclude cancelled orders (enum is uppercase)
+            },
             select: {
               total: true,
               conversationId: true,
             },
           });
 
-          // Count converted conversations (conversations that have orders)
-          const conversationIdsWithOrders = new Set(
-            orders.filter((o) => o.conversationId).map((o) => o.conversationId)
-          );
-          const convertedConversations = conversationIdsWithOrders.size;
+          // Count converted conversations = total number of non-cancelled orders
+          const convertedConversations = orders.length;
 
-          // Calculate total sales
+          // Calculate total sales (excluding cancelled orders)
           const totalSales = orders.reduce((sum, order) => sum + Number(order.total), 0);
 
           return {
             merchantId: merchant.id,
             merchantName: merchant.name,
             merchantEmail: merchant.email,
+            merchantPhone: merchant.phone,
+            merchantAvatarUrl: merchant.avatarUrl,
+            storeName: merchant.store!.name,
+            storeBusinessPhone: merchant.store!.businessPhone,
+            storeWebsite: merchant.store!.website,
+            storeStreetAddress: merchant.store!.streetAddress,
+            storeCity: merchant.store!.city,
+            storeProvince: merchant.store!.province,
+            storePostalCode: merchant.store!.postalCode,
+            storeCountry: merchant.store!.country,
             totalConversations,
             convertedConversations,
             totalSales,
@@ -116,13 +128,12 @@ export function createAdminRouter(): express.Router {
         })
       );
 
-      // Filter out null entries (merchants without stores)
-      const validAnalytics = analytics.filter((a) => a !== null);
+      console.log('[Admin Analytics] Returning analytics for', analytics.length, 'merchants');
 
-      res.json(validAnalytics);
+      res.json(analytics);
     } catch (err: any) {
-      console.error('Admin analytics error:', err);
-      res.status(500).json({ error: 'Failed to load analytics' });
+      console.error('[Admin Analytics] Error:', err);
+      res.status(500).json({ error: 'Failed to load analytics', details: err.message });
     }
   });
 

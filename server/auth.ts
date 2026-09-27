@@ -26,6 +26,8 @@ export interface AuthTokenPayload {
   storeId: string;
   /** Merchant.tokenVersion at issuance — must still match on every request. */
   tv: number;
+  /** Admin flag - true if user is admin */
+  isAdmin?: boolean;
 }
 
 export function signToken(payload: AuthTokenPayload): string {

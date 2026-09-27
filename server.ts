@@ -129,6 +129,7 @@ import { createConversationsRouter } from './server/routes/conversations';
 import { createProfileRouter } from './server/routes/profile';
 import { createAuthRouter } from './server/routes/auth';
 import { createChannelsRouter } from './server/routes/channels';
+import { createAdminRouter } from './server/routes/admin';
 import {
   getPageAccessTokenForStore,
   getWhatsAppCredentialsForStore,
@@ -192,6 +193,7 @@ async function startServer() {
   app.use(createProfileRouter());
   app.use(createAuthRouter());
   app.use(createChannelsRouter());
+  app.use(createAdminRouter());
 
   // Health check
   app.get('/api/health', (req, res) => {

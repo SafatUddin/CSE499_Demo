@@ -47,6 +47,8 @@ import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IntegrationsHub from './components/IntegrationsHub';
 import OrdersPage from './components/OrdersPage';
 import SettingsPage from './components/SettingsPage';
+import AdminDashboard from './components/AdminDashboard';
+import AdminSettings from './components/AdminSettings';
 
 // ─────────────────────────────────────────────────────────────────────────
 // App is the single root component: it owns navigation, the auth session,
@@ -116,6 +118,7 @@ export default function App() {
   const [merchant, setMerchant] = useState<PublicMerchant | null>(null);
   const [store, setStore] = useState<PublicStore | null>(null);
   const [profileComplete, setProfileComplete] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [authFlashError, setAuthFlashError] = useState('');
   const isAuthenticated = !!merchant;
@@ -142,8 +145,14 @@ export default function App() {
         setMerchant(res.merchant);
         setStore(res.store);
         setProfileComplete(res.profileComplete);
+        setIsAdmin(res.isAdmin ?? false);
         syncProfileToLocalStorage(res.merchant);
-        navigateTo(res.profileComplete ? 'inbox' : 'onboarding', true);
+        // Admin goes to admin dashboard, others go to inbox or onboarding
+        if (res.isAdmin) {
+          navigateTo('admin', true);
+        } else {
+          navigateTo(res.profileComplete ? 'inbox' : 'onboarding', true);
+        }
       })
       .catch(() => {
         // Not authenticated — expected on first visit or after logout.
@@ -222,9 +231,15 @@ export default function App() {
     setMerchant(auth.merchant);
     setStore(auth.store);
     setProfileComplete(auth.profileComplete ?? false);
+    setIsAdmin(auth.isAdmin ?? false);
     setAuthFlashError('');
     syncProfileToLocalStorage(auth.merchant);
-    navigateTo(auth.profileComplete ? 'inbox' : 'onboarding');
+    // Admin goes to admin dashboard, others go to inbox or onboarding
+    if (auth.isAdmin) {
+      navigateTo('admin');
+    } else {
+      navigateTo(auth.profileComplete ? 'inbox' : 'onboarding');
+    }
     setIsSidebarOpen(false);
   };
 
@@ -356,6 +371,7 @@ export default function App() {
     setMerchant(null);
     setStore(null);
     setProfileComplete(false);
+    setIsAdmin(false);
     navigateTo('landing');
     setIsSidebarOpen(false);
   };
@@ -534,6 +550,29 @@ export default function App() {
 
     // Authenticated + complete views
     switch (activeTab) {
+      case 'admin':
+        return <AdminDashboard />;
+      case 'settings':
+        // If admin, show admin settings; otherwise show merchant settings
+        if (isAdmin) {
+          return (
+            <AdminSettings
+              merchant={merchant}
+              onUpdateProfile={handleUpdateProfile}
+              onLogout={handleLogout}
+            />
+          );
+        }
+        return (
+          <SettingsPage
+            merchant={merchant}
+            store={store}
+            onUpdateProfile={handleUpdateProfile}
+            onUpdateStore={handleUpdateStore}
+            onUploadAvatar={handleUploadAvatar}
+            onDeleteAvatar={handleDeleteAvatar}
+          />
+        );
       case 'inbox':
         return renderInbox();
       case 'catalog':
@@ -567,17 +606,6 @@ export default function App() {
             integrations={integrations}
             onToggleConnection={handleToggleIntegration}
             onRefreshAll={handleRefreshAllIntegrations}
-          />
-        );
-      case 'settings':
-        return (
-          <SettingsPage
-            merchant={merchant}
-            store={store}
-            onUpdateProfile={handleUpdateProfile}
-            onUpdateStore={handleUpdateStore}
-            onUploadAvatar={handleUploadAvatar}
-            onDeleteAvatar={handleDeleteAvatar}
           />
         );
       default:
@@ -617,20 +645,9 @@ export default function App() {
 
       {/* If authenticated and profile complete, wrap in persistent Sidebar layout */}
       {isAuthenticated ? (
-        <div className="flex w-full min-h-screen">
-          {/* Sidebar Left Navigation */}
-          <Sidebar 
-            activeTab={activeTab} 
-            onNavigate={handleNavigate} 
-            onLogout={handleLogout} 
-            isOpen={isSidebarOpen}
-            onClose={() => setIsSidebarOpen(false)}
-            isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
-          />
-
-          {/* Core Content Area — h-screen, inner page content scrolls without visible scrollbar */}
-          <main ref={mainRef} className={`pl-0 ${isSidebarCollapsed ? 'md:pl-24' : 'md:pl-[290px]'} h-screen flex flex-col flex-1 min-w-0 ${activeTab === 'inbox' ? 'overflow-hidden' : 'overflow-y-auto'} no-scrollbar transition-all duration-300 relative z-10`}>
+        isAdmin ? (
+          /* Admin layout - no sidebar */
+          <main ref={mainRef} className="h-screen flex flex-col flex-1 min-w-0 overflow-y-auto no-scrollbar relative z-10">
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -638,13 +655,43 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
-                className={`flex-1 min-h-0 w-full flex flex-col ${activeTab === 'inbox' ? 'overflow-hidden' : ''}`}
+                className="flex-1 min-h-0 w-full flex flex-col"
               >
                 {renderPageContent()}
               </motion.div>
             </AnimatePresence>
           </main>
-        </div>
+        ) : (
+          /* Regular merchant layout - with sidebar */
+          <div className="flex w-full min-h-screen">
+            {/* Sidebar Left Navigation */}
+            <Sidebar 
+              activeTab={activeTab} 
+              onNavigate={handleNavigate} 
+              onLogout={handleLogout} 
+              isOpen={isSidebarOpen}
+              onClose={() => setIsSidebarOpen(false)}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
+            />
+
+            {/* Core Content Area — h-screen, inner page content scrolls without visible scrollbar */}
+            <main ref={mainRef} className={`pl-0 ${isSidebarCollapsed ? 'md:pl-24' : 'md:pl-[290px]'} h-screen flex flex-col flex-1 min-w-0 ${activeTab === 'inbox' ? 'overflow-hidden' : 'overflow-y-auto'} no-scrollbar transition-all duration-300 relative z-10`}>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className={`flex-1 min-h-0 w-full flex flex-col ${activeTab === 'inbox' ? 'overflow-hidden' : ''}`}
+                >
+                  {renderPageContent()}
+                </motion.div>
+              </AnimatePresence>
+            </main>
+          </div>
+        )
       ) : (
         /* If unauthenticated, render raw consumer view directly */
         <AnimatePresence mode="wait">

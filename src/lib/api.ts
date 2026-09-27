@@ -41,6 +41,7 @@ export interface ProfileStatus {
 export interface AuthResponse extends ProfileStatus {
   merchant: PublicMerchant;
   store: PublicStore;
+  isAdmin?: boolean;
 }
 
 export interface OnboardingResponse extends ProfileStatus {

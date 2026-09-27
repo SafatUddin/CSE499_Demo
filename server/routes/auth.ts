@@ -9,6 +9,7 @@ import {
   isPasswordStrongEnough,
   establishMerchantSession,
   clearSessionCookie,
+  AuthTokenPayload,
 } from '../auth';
 import { getProfileCompletionStatus } from '../profileCompletion';
 import { toPublicMerchant, toPublicStore } from '../publicViews';
@@ -28,18 +29,21 @@ export function createAuthRouter(): express.Router {
     res: express.Response,
     merchant: { id: string; name: string; email: string; phone?: string | null; avatarUrl: string | null; tokenVersion: number },
     store: { id: string; name: string; businessPhone?: string | null; website?: string | null; streetAddress?: string | null; city?: string | null; province?: string | null; postalCode?: string | null; country?: string | null },
+    isAdmin?: boolean,
   ) {
-    const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, store);
+    const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, store, isAdmin);
     establishMerchantSession(res, {
       merchantId: merchant.id,
       storeId: store.id,
       tv: merchant.tokenVersion,
+      isAdmin,
     });
     res.json({
       merchant: toPublicMerchant(merchant),
       store: toPublicStore(store),
       profileComplete,
       missingFields,
+      isAdmin,
     });
   }
 
@@ -83,6 +87,53 @@ export function createAuthRouter(): express.Router {
         return res.status(400).json({ error: 'Email and password are required' });
       }
 
+      // Check for admin credentials
+      const ADMIN_EMAIL = 'remlin75@gmail.com';
+      const ADMIN_PASSWORD = 'thy@tho$20hoe';
+      
+      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+        // Admin login - create a special admin session
+        // Find or create admin merchant account
+        let merchant = await prisma.merchant.findUnique({ where: { email: ADMIN_EMAIL }, include: { store: true } });
+        
+        if (!merchant) {
+          // Create admin merchant and store
+          merchant = await prisma.merchant.create({
+            data: { 
+              email: ADMIN_EMAIL, 
+              passwordHash: await bcrypt.hash(ADMIN_PASSWORD, 12), 
+              name: 'Admin',
+              phone: 'N/A', // Set dummy data to avoid profile incomplete
+            },
+            include: { store: true }
+          });
+          
+          if (!merchant.store) {
+            const store = await prisma.store.create({
+              data: { 
+                merchantId: merchant.id, 
+                name: 'Admin Dashboard',
+                businessPhone: 'N/A', // Set dummy data to avoid profile incomplete
+                streetAddress: 'N/A',
+                city: 'N/A',
+                province: 'N/A',
+                postalCode: 'N/A',
+                country: 'N/A',
+              },
+            });
+            merchant = { ...merchant, store };
+          }
+        }
+        
+        if (!merchant.store) {
+          return res.status(500).json({ error: 'Admin account configuration error' });
+        }
+        
+        // Send auth success with admin flag
+        return sendAuthSuccess(res, merchant, merchant.store, true);
+      }
+
+      // Normal merchant login
       const merchant = await prisma.merchant.findUnique({ where: { email }, include: { store: true } });
       if (!merchant || !merchant.store) {
         return res.status(401).json({ error: 'Invalid email or password' });

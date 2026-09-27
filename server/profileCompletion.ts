@@ -33,11 +33,18 @@ function nonEmpty(value: string | null | undefined): boolean {
 /**
  * Derives profile completion from the actual field values — no separate flag column.
  * Completion requires all the mandatory personal and business fields to be non-empty.
+ * Admin users are always considered to have a complete profile.
  */
 export function getProfileCompletionStatus(
   merchant: MerchantForCompletion,
   store: StoreForCompletion,
+  isAdmin?: boolean,
 ): ProfileCompletionStatus {
+  // Admin users always have a complete profile
+  if (isAdmin) {
+    return { profileComplete: true, missingFields: [] };
+  }
+
   const missing: string[] = [];
 
   if (!nonEmpty(merchant.name)) missing.push('name');
@@ -83,12 +90,19 @@ export function isOnboardingAllowedRoute(method: string, path: string): boolean 
 /**
  * Must be chained after `requireAuth`. Checks profile completeness and returns
  * 403 with a machine-readable code for any route not in the onboarding allowlist.
+ * Admin users bypass profile completion checks.
  */
 export async function requireProfileComplete(
   req: AuthedRequest,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
+  // Admin users bypass profile completion checks
+  if (req.auth?.isAdmin) {
+    next();
+    return;
+  }
+
   if (isOnboardingAllowedRoute(req.method, req.path)) {
     next();
     return;

@@ -33,12 +33,13 @@ export function createProfileRouter(): express.Router {
       if (!merchant || !merchant.store) {
         return res.status(404).json({ error: 'Account not found' });
       }
-      const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, merchant.store);
+      const { profileComplete, missingFields } = getProfileCompletionStatus(merchant, merchant.store, req.auth!.isAdmin);
       res.json({
         merchant: toPublicMerchant(merchant),
         store: toPublicStore(merchant.store),
         profileComplete,
         missingFields,
+        isAdmin: req.auth!.isAdmin ?? false,
       });
     } catch (err: any) {
       console.error('Fetch profile error:', err);
@@ -136,7 +137,7 @@ export function createProfileRouter(): express.Router {
         select: { name: true, businessPhone: true, streetAddress: true, city: true, province: true, postalCode: true, country: true },
       });
       const { profileComplete, missingFields } = store
-        ? getProfileCompletionStatus(updated, store)
+        ? getProfileCompletionStatus(updated, store, req.auth!.isAdmin)
         : { profileComplete: false, missingFields: ['store'] };
 
       res.json({ merchant: toPublicMerchant(updated), profileComplete, missingFields });
@@ -236,7 +237,7 @@ export function createProfileRouter(): express.Router {
         select: { name: true, email: true, phone: true },
       });
       const { profileComplete, missingFields } = merchant
-        ? getProfileCompletionStatus(merchant, updated)
+        ? getProfileCompletionStatus(merchant, updated, req.auth!.isAdmin)
         : { profileComplete: false, missingFields: ['merchant'] };
 
       res.json({ store: toPublicStore(updated), profileComplete, missingFields });
@@ -279,7 +280,7 @@ export function createProfileRouter(): express.Router {
         }),
       ]);
 
-      const { profileComplete, missingFields } = getProfileCompletionStatus(updatedMerchant, updatedStore);
+      const { profileComplete, missingFields } = getProfileCompletionStatus(updatedMerchant, updatedStore, req.auth!.isAdmin);
 
       res.json({
         merchant: toPublicMerchant(updatedMerchant),

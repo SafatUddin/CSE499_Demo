@@ -10,7 +10,8 @@ export type Tab =
   | 'analytics'
   | 'integrations'
   | 'settings'
-  | 'support';
+  | 'support'
+  | 'admin';
 
 export interface Product {
   id: string;

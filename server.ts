@@ -201,6 +201,10 @@ async function startServer() {
   });
 
 
+  // Serve public folder for static assets
+  const publicPath = path.join(process.cwd(), 'public');
+  app.use('/assets', express.static(path.join(publicPath, 'assets')));
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

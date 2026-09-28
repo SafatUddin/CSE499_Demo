@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remlin — The AI sales agent for Facebook, Instagram, and WhatsApp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <div class="hero__top">
+      <nav class="navbar" aria-label="Main">
+        <div class="navbar__inner">
+          <a href="#top" class="navbar__logo" aria-label="Back to top">
+            <img src="assets/logo.svg" alt="">
+          </a>
+          <ul class="navbar__links">
+            <li><a href="https://remlin.up.railway.app/#login">Product</a></li>
+            <li><a href="#">Pricing</a></li>
+            <li><a href="#features">Features</a></li>
+          </ul>
+          <div class="navbar__actions">
+            <a href="https://remlin.up.railway.app/#login" class="btn btn--ghost">Sign in</a>
+            <a href="https://remlin.up.railway.app/#signup" class="btn btn--primary">Start for free</a>
+          </div>
+        </div>
+      </nav>
+
+      <div class="hero__copy">
+        <h1 class="hero__title">Turn every message<br>into a sale with Remlin</h1>
+        <p class="hero__subtitle">
+          The AI sales agent for <strong>Facebook, Instagram, and WhatsApp</strong>.<br>
+          Multilingual, image-aware, and always active to close deals while you sleep.
+        </p>
+      </div>
+    </div>
+
+    <div class="hero__video-frame">
+      <video class="hero__video" autoplay muted loop playsinline preload="auto">
+        <source src="hero%20video.mp4" type="video/mp4">
+      </video>
+    </div>
+
+    <img class="hero__landscape" src="assets/grass.png" alt="" aria-hidden="true">
+  </section>
+
+  <div class="page">
+
+    <!-- ============ STATS ============ -->
+    <section class="stats">
+      <div class="stats__frame">
+        <div class="stats__stripes stats__stripes--left" aria-hidden="true"></div>
+        <div class="stats__stripes stats__stripes--right" aria-hidden="true"></div>
+
+        <div class="stats__grid">
+          <div class="stats__row">
+            <div class="stat stat--1">
+              <p class="stat__value">98%</p>
+              <p class="stat__label">Inquiry accuracy</p>
+            </div>
+            <div class="stat stat--2">
+              <p class="stat__value">3.2x</p>
+              <p class="stat__label">Sales conversion</p>
+            </div>
+            <div class="stat stat--3">
+              <p class="stat__value">24/7</p>
+              <p class="stat__label">Always online</p>
+            </div>
+          </div>
+          <div class="stat stat--wide">
+            <p class="stat__value">Multilingual support</p>
+            <p class="stat__label">Bangla, English and Banglish</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ELITE SALES SUITE ============ -->
+    <section class="suite" id="features">
+      <header class="section-head">
+        <h2 class="section-head__title">The elite sales suite</h2>
+        <p class="section-head__subtitle">Engineered for high-volume commerce and precision automation.</p>
+      </header>
+
+      <div class="suite__rows">
+        <!-- Always on -->
+        <article class="feature">
+          <div class="feature__text feature__text--always">
+            <h3 class="feature__title">Always on</h3>
+            <p class="feature__desc">Talks to customers autonomously and even confirms and places product orders and you don't have to intervene. You can always take over and turn Remlin off whenever you want to.</p>
+          </div>
+          <div class="feature__media feature__media--right">
+            <img class="img-always" src="assets/always-on.png" alt="Laptop showing a Remlin chat in a pixel-art meadow">
+          </div>
+        </article>
+
+        <!-- One-click checkout -->
+        <article class="feature">
+          <div class="feature__media feature__media--left">
+            <img class="img-checkout" src="assets/checkout.png" alt="Shoppers on their phones with parcels parachuting over a city">
+          </div>
+          <div class="feature__text feature__text--checkout">
+            <h3 class="feature__title">One-click checkout</h3>
+            <p class="feature__desc">Don't lose customers to friction. Generate secure payment links directly within the chat window instantly.</p>
+          </div>
+        </article>
+
+        <!-- Visual intelligence -->
+        <article class="feature">
+          <div class="feature__text feature__text--visual">
+            <h3 class="feature__title">Visual intelligence</h3>
+            <p class="feature__desc">Our neural engine identifies products from customer photos in real-time. Stop asking for SKUs; Remlin knows exactly what they want.</p>
+          </div>
+          <div class="feature__media feature__media--right feature__media--visual">
+           <div class="visual__stage">
+            <div class="visual__bg"><img src="assets/visual-bg.png" alt=""></div>
+
+            <div class="visual__tile visual__tile--watch">
+              <img src="assets/product-watch.png" alt="Wristwatch">
+            </div>
+            <div class="visual__tile visual__tile--headphones">
+              <img src="assets/product-headphones.png" alt="Headphones">
+            </div>
+            <div class="visual__tile visual__tile--shoe">
+              <div class="visual__shoe-wrap">
+                <img src="assets/product-shoe.png" alt="Sneaker">
+              </div>
+            </div>
+
+            <span class="visual__corner visual__corner--tl"><img src="assets/corner-a.svg" alt=""></span>
+            <span class="visual__corner visual__corner--bl"><img src="assets/corner-a.svg" alt=""></span>
+            <span class="visual__corner visual__corner--tr"><img src="assets/corner-b.svg" alt=""></span>
+            <span class="visual__corner visual__corner--br"><img src="assets/corner-b.svg" alt=""></span>
+
+            <span class="visual__scan-glow"></span>
+            <span class="visual__scan-line"></span>
+            <span class="visual__scan-tick visual__scan-tick--r"></span>
+            <span class="visual__scan-tick visual__scan-tick--l"></span>
+           </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ UNIFIED COMMAND ============ -->
+    <section class="unified">
+      <div class="unified__copy">
+        <div class="unified__text">
+          <h2 class="unified__title">Unified command</h2>
+          <p class="unified__desc">One elite dashboard for Facebook, Instagram, and WhatsApp. Centralize your inventory, customer data, and sales analytics into a single source of truth.</p>
+        </div>
+        <a href="https://remlin.up.railway.app/#login" class="btn btn--primary btn--lg">Open the console →</a>
+      </div>
+
+      <div class="channels">
+        <div class="channels__inner">
+          <div class="channel"><img class="channel__icon channel__icon--whatsapp" src="assets/icon-whatsapp.svg" alt="WhatsApp"></div>
+          <div class="channel"><img class="channel__icon channel__icon--messenger" src="assets/icon-messenger.svg" alt="Messenger"></div>
+          <div class="channel"><img class="channel__icon channel__icon--instagram" src="assets/icon-instagram.svg" alt="Instagram"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ PREDICTIVE INVENTORY ============ -->
+  <section class="predictive">
+    <div class="predictive__box">
+      <div class="predictive__copy">
+        <div class="predictive__text">
+          <h2 class="predictive__title">Predictive inventory management</h2>
+          <p class="predictive__desc">Remlin doesn't just talk; it thinks. It analyzes chat trends to predict high-demand items before they go out of stock, giving you a competitive edge.</p>
+        </div>
+        <a href="https://remlin.up.railway.app/#login" class="btn btn--light">Explore Insights →</a>
+      </div>
+      <img class="predictive__chart" src="assets/chart.svg" alt="" aria-hidden="true">
+    </div>
+  </section>
+
+  <!-- ============ FOOTER CTA ============ -->
+  <footer class="footer">
+    <div class="footer__copy">
+      <div class="footer__text">
+        <h2 class="footer__title">Ready to scale your sales?</h2>
+        <p class="footer__desc">No credit card required · 14-day free trial</p>
+      </div>
+      <div class="footer__actions">
+        <a href="https://remlin.up.railway.app/#signup" class="btn btn--primary btn--cta">Get started for free</a>
+        <a href="#" class="btn btn--light btn--cta-light">Schedule a call</a>
+      </div>
+    </div>
+    <div class="footer__landscape" aria-hidden="true">
+      <img src="assets/footer-landscape.png" alt="">
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

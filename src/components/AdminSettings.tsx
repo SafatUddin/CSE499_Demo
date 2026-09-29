@@ -83,7 +83,7 @@ export default function AdminSettings({ merchant, onUpdateProfile, onLogout }: A
 
   return (
     <div className="w-full flex-grow flex flex-col text-left bg-[#0a0a0b]">
-      <DashboardHeader title="ADMIN SETTINGS" />
+      <DashboardHeader title="ADMIN SETTINGS" searchPlaceholder="Search settings…" />
 
       <div className="w-full flex-grow p-6 md:p-8 overflow-y-auto">
         <div className="max-w-4xl mx-auto space-y-6">

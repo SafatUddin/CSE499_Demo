@@ -145,6 +145,7 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
   if (!store || !currentConversation) return;
 
   const persona = {
+    storeName: store.name,
     tone: store.tone,
     style: store.style,
     customInstructions: store.customInstructions,
@@ -307,7 +308,10 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
   const imageProduct = result.showImageForSku ? products.find((p) => p.sku === result.showImageForSku) : undefined;
   const resolvedImageUrl = imageProduct?.imageUrl || undefined;
 
-  await prisma.message.create({
+  // Captured by id (not by text) so every later correction below targets exactly this
+  // message — matching by {conversationId, sender, text} instead would silently rewrite
+  // every earlier AI message with the same (often boilerplate/repeated) text.
+  const aiMessage = await prisma.message.create({
     data: { conversationId: conversation.id, sender: 'AI', text: result.replyText, imageUrl: resolvedImageUrl, meta: result as any, pending: !isAutopilot },
   });
 
@@ -343,6 +347,11 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
     conversationData.orderConfirmed = false;
     conversationData.orderSummaryShown = false;
     await prisma.conversation.update({ where: { id: conversation.id }, data: conversationData });
+    // The model's own reply (generated before this reset was detected) doesn't know the
+    // cart/address/confirmation state just got wiped — replace it so the customer sees an
+    // acknowledgment of the reset instead of a stale, unrelated reply.
+    const freshText = `Done! I've cleared your cart and we're starting fresh. What would you like to shop for?`;
+    await prisma.message.update({ where: { id: aiMessage.id }, data: { text: freshText } });
     return;
   }
 
@@ -439,8 +448,8 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
           });
           conversationData.awaitingQuantityFor = null;
           const cancelOkText = `Your order (#${orderToCancel.id.slice(-8).toUpperCase()}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`;
-          await prisma.message.updateMany({
-            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+          await prisma.message.update({
+            where: { id: aiMessage.id },
             data: { text: cancelOkText },
           });
           result.replyText = cancelOkText;
@@ -451,8 +460,8 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
       } else {
         conversationData.awaitingQuantityFor = null;
         const cancelFailText = `I couldn't safely cancel that order. Please contact the store for help.`;
-        await prisma.message.updateMany({
-          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+        await prisma.message.update({
+          where: { id: aiMessage.id },
           data: { text: cancelFailText },
         });
         result.replyText = cancelFailText;
@@ -476,16 +485,16 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
       conversationData.awaitingQuantityFor = encodeCancelPending(orderToAsk.id);
       const items = ((orderToAsk.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
       const askText = `I found your active order #${orderToAsk.id.slice(-8).toUpperCase()} — ${items || 'items'}, total $${Number(orderToAsk.total).toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`;
-      await prisma.message.updateMany({
-        where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+      await prisma.message.update({
+        where: { id: aiMessage.id },
         data: { text: askText },
       });
       result.replyText = askText;
       result.orderCancelled = false;
     } else {
       const noneText = `I couldn't find an active order to cancel in this conversation. Please share more details if you still need help.`;
-      await prisma.message.updateMany({
-        where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+      await prisma.message.update({
+        where: { id: aiMessage.id },
         data: { text: noneText },
       });
       result.replyText = noneText;
@@ -513,8 +522,8 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
           failReason === 'insufficient_inventory'
             ? `Sorry, that quantity is no longer available. Please choose a different quantity.`
             : `Sorry, we couldn't continue checkout for that item. Please try again.`;
-        await prisma.message.updateMany({
-          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+        await prisma.message.update({
+          where: { id: aiMessage.id },
           data: { text: failText },
         });
         result.replyText = failText;
@@ -577,8 +586,8 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
     if (!finalizeAddress || !cartValid) {
       if (isDetailsState && detailsContactInfo && !cartValid) {
         const errText = `Sorry, we couldn't place that order with the requested items/quantity. Please adjust and try again.`;
-        await prisma.message.updateMany({
-          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+        await prisma.message.update({
+          where: { id: aiMessage.id },
           data: { text: errText },
         });
         await prisma.conversation.update({
@@ -589,8 +598,8 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
     } else if (!autoFinalizeEligible) {
       // H1: not eligible — keep cart/address for merchant review; do not create Order / decrement stock.
       const pendingText = `Thank you! I've saved your order details and notified the store. A team member will finalize your order shortly. Delivery info on file: ${finalizeAddress}`;
-      await prisma.message.updateMany({
-        where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+      await prisma.message.update({
+        where: { id: aiMessage.id },
         data: { text: pendingText },
       });
       await prisma.conversation.update({
@@ -612,16 +621,23 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
         );
         orderCreatedThisTurn = true;
         const placedText = `Thank you! Your order has been placed. We'll deliver to: ${finalizeAddress}. Thank you for shopping with us!`;
-        await prisma.message.updateMany({
-          where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+        await prisma.message.update({
+          where: { id: aiMessage.id },
           data: { text: placedText },
+        });
+        // The order is now a real, separate Order row — the conversation's own cart/
+        // confirmation state must be cleared, otherwise the next message is treated as
+        // still answering a "confirm this order?" question about items already ordered.
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { cart: [], orderConfirmationRequested: false, awaitingQuantityFor: null },
         });
       } catch (err: any) {
         console.error('Auto-finalize order failed for conversation:', conversation.id);
         if (err?.code === 'INSUFFICIENT_STOCK') {
           const errText = `Sorry, we don't have enough stock to complete that order right now. Please adjust your quantity and try again.`;
-          await prisma.message.updateMany({
-            where: { conversationId: conversation.id, sender: 'AI', text: result.replyText },
+          await prisma.message.update({
+            where: { id: aiMessage.id },
             data: { text: errText },
           });
           await prisma.conversation.update({

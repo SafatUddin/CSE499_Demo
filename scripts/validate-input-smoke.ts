@@ -2,6 +2,9 @@
  * Smoke tests for Security Phase 7 input validation helpers.
  * Run: npx tsx scripts/validate-input-smoke.ts
  */
+import dotenv from 'dotenv';
+dotenv.config();
+
 import {
   validateProductInput,
   sanitizeCartInput,
@@ -10,6 +13,7 @@ import {
 } from '../server/inputValidation';
 import { isPasswordStrongEnough, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../server/auth';
 import { isLocalAvatarUrl } from '../server/mediaStorage';
+import { extractDollarAmounts, collectGroundedAmounts, findUngroundedAmounts } from '../server/agent';
 
 let passed = 0;
 let failed = 0;
@@ -67,12 +71,44 @@ assert(isPasswordStrongEnough(12345678) === false, 'non-string password');
 // Avatar URL validation — only our own uploaded-avatar paths are accepted; arbitrary
 // external URLs (including well-formed https:// ones) are rejected outright, since
 // PATCH /api/me no longer accepts anything but a path from POST /api/me/avatar.
-assert(isLocalAvatarUrl('/uploads/avatars/abc123/def456.png') === true, 'valid local avatar path');
+assert(
+  isLocalAvatarUrl(`${process.env.SUPABASE_URL}/storage/v1/object/public/avatars/abc123/def456.png`) === true,
+  'valid local avatar path',
+);
 assert(isLocalAvatarUrl('https://example.com/a.png') === false, 'external https URL rejected');
 assert(isLocalAvatarUrl('javascript:alert(1)') === false, 'javascript URL rejected');
 assert(isLocalAvatarUrl('data:image/png;base64,abc') === false, 'data URL rejected');
 assert(isLocalAvatarUrl('file:///etc/passwd') === false, 'file URL rejected');
 assert(isLocalAvatarUrl('/uploads/avatars/../../etc/passwd') === false, 'traversal rejected');
+
+// Grounding guardrail (CO2 §3.2/§6.3) — pure-logic checks independent of the live model,
+// since Gemini rarely misbehaves in practice, so this verifies the mechanism itself works.
+assert(extractDollarAmounts('It costs $12.99 and shipping is $5') .length === 2, 'extracts multiple dollar amounts');
+assert(extractDollarAmounts('No price mentioned here').length === 0, 'no amounts in plain text');
+assert(extractDollarAmounts('Total: $1,299.50')[0] === 1299.5, 'parses comma-thousands amount');
+
+const testCatalog = [
+  { name: 'Widget', sku: 'W-1', price: 9.99, inventory: 5, status: 'Trained' },
+  { name: 'Gadget', sku: 'G-1', price: 20, inventory: 3, status: 'Trained' },
+];
+const grounded = collectGroundedAmounts(testCatalog, {
+  cartItems: [{ sku: 'W-1', name: 'Widget', quantity: 2 }],
+});
+assert(grounded.has(9.99), 'catalog price is grounded');
+assert(grounded.has(19.98), 'computed line total (price*qty) is grounded');
+assert(grounded.has(19.98), 'cart subtotal is grounded');
+assert(
+  findUngroundedAmounts('That will be $9.99 total.', grounded).length === 0,
+  'a real catalog price is never flagged as ungrounded',
+);
+assert(
+  findUngroundedAmounts('That will be $999.00 total, a totally made-up price.', grounded).length === 1,
+  'a hallucinated price not in the catalog/order-state is flagged',
+);
+assert(
+  findUngroundedAmounts('Widget is $9.99, Gadget is $500 (wrong).', grounded).length === 1,
+  'only the ungrounded amount is flagged, not the grounded one alongside it',
+);
 
 console.log(`\nValidation smoke tests: ${passed} passed, ${failed} failed (min password length: ${MIN_PASSWORD_LENGTH})`);
 process.exit(failed > 0 ? 1 : 0);

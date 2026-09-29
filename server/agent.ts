@@ -2,6 +2,7 @@ import { Type } from '@google/genai';
 import { ai } from './gemini';
 
 export interface AgentPersona {
+  storeName?: string;
   tone?: string;
   style?: string;
   customInstructions?: string;
@@ -60,6 +61,61 @@ export interface AgentOrderState {
   ongoingOrders?: { id: string; items: { name: string; quantity: number; price: number }[]; status: string; createdAt: string; total: number }[];
 }
 
+// --- Grounding guardrail (CO2 §3.2/§6.3) ---------------------------------------------
+// The catalog and order-state numbers are handed to the model in full (no retrieval step
+// needed at this catalog size — see docs/PLANNING.md), so "grounded" here means every
+// dollar amount in the reply must trace back to one of those given numbers, not to a
+// vector-search passage. Confidently-stated wrong prices/totals are the single most
+// damaging hallucination class for a sales agent, so this is checked in code rather than
+// left to the prompt alone.
+export function extractDollarAmounts(text: string): number[] {
+  const matches = text.match(/\$\s?\d+(?:,\d{3})*(?:\.\d{1,2})?/g) || [];
+  return matches.map((m) => parseFloat(m.replace(/[$,\s]/g, '')));
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export function collectGroundedAmounts(catalog: AgentCatalogItem[], orderState: AgentOrderState): Set<number> {
+  const allowed = new Set<number>();
+  const add = (n: number | undefined | null) => {
+    if (typeof n === 'number' && Number.isFinite(n)) allowed.add(round2(n));
+  };
+  for (const p of catalog) add(p.price);
+  if (orderState.pendingItem) {
+    add(orderState.pendingItem.unitPrice);
+    add(orderState.pendingItem.lineTotal);
+  }
+  if (orderState.cartItems) {
+    let subtotal = 0;
+    for (const item of orderState.cartItems) {
+      const p = catalog.find((c) => c.sku === item.sku);
+      if (p) {
+        add(p.price);
+        add(round2(p.price * item.quantity));
+        subtotal += p.price * item.quantity;
+      }
+    }
+    if (orderState.cartItems.length > 0) add(subtotal);
+  }
+  if (orderState.pendingCancelOrder) add(orderState.pendingCancelOrder.total);
+  if (orderState.ongoingOrders) {
+    for (const o of orderState.ongoingOrders) {
+      add(o.total);
+      for (const item of o.items) add(item.price);
+    }
+  }
+  return allowed;
+}
+
+// Returns the dollar amounts in `replyText` that aren't traceable to any catalog price or
+// order-state number actually given to the model this turn — i.e. likely hallucinated.
+export function findUngroundedAmounts(replyText: string, allowed: Set<number>): number[] {
+  const stated = extractDollarAmounts(replyText);
+  return stated.filter((amount) => !allowed.has(round2(amount)));
+}
+
 export async function generateAgentReply({
   message,
   history = [],
@@ -89,6 +145,7 @@ export async function generateAgentReply({
     )
     .join('\n');
 
+  const storeName = persona?.storeName?.trim() || 'this store';
   const toneText = persona?.tone || 'Direct, helpful, and highly sophisticated.';
   const styleText =
     persona?.style === 'bullets'
@@ -149,42 +206,8 @@ export async function generateAgentReply({
       : '',
   ].filter(Boolean).join(' ');
 
-  const systemInstruction = `You are ShopMate AI, an elite autonomous sales agent representing the merchant's store.
+  const systemInstruction = `You are ShopMate AI, an elite autonomous sales agent representing ${storeName}.
 Your goal is to answer customer questions with precision, guide customers through their purchase, and strictly adhere to the following mandatory interaction rules:
-
-Mandatory Interaction Rules:
-1. PRICE INQUIRY → ASK TO BUY: If customer asks price (e.g. "price of X?", "how much?"), reply with the price and ask "Would you like to buy this product?". cartAction = none.
-2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart.
-3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity. Quantity must be a positive integer and must not exceed that product's Inventory from the catalog.
-4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → DETAILS CAPTURED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply that their details were received and their order request is being processed. Set orderConfirmed=true. cartAction = none. Do NOT invent order IDs. Do NOT claim payment was taken.
-5. CANCEL AN EXISTING ORDER: If the customer asks to cancel an already-placed ongoing order, DO NOT cancel it in one step. Ask them to confirm which order / that they want to cancel. Only set orderCancelled=true when they clearly confirm after you asked. Never cancel from a single ambiguous "cancel". Never invent cancellations.
-6. ONGOING ORDERS INQUIRIES: Use the Ongoing Orders context to answer questions like "Where is my order?", "What did I order?", "How many items?", "What's the status?", "Can I cancel?", "When was it placed?". Order status must always be one of: Processing, On the Way, Delivered, Cancelled.
-7. SHOWING A PRODUCT PHOTO: If the customer asks to see a product, asks what it looks like, or you are introducing/recommending a specific product and it has "Photo available: yes" in the catalog, set showImageForSku to that product's exact SKU so its photo is sent alongside your reply. Only ever set this to a SKU with "Photo available: yes" — never a SKU with no photo, and never invent one. Leave showImageForSku empty ('') on every other turn.
-
-FORBIDDEN:
-- Do not invent products, SKUs, prices, or inventory that are not in the catalog.
-- Do not set askQuantityForSku to values other than a real catalog SKU (the server encodes CONFIRM/DETAILS itself).
-- Do not claim an order was cancelled or finalized unless the current orderState supports that step.
-- Never set cartAction SKU to anything outside the catalog.
-- Never set cartAction='add' unless the customer explicitly stated a number to buy in this exact message.
-- Never set cartAction='add' on a price-inquiry turn, confirmation turn, or address-providing turn.
-- Never guess or default quantities.
-
-Core Directives:
-1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
-2. Keep your answers concise, engaging, and professional.
-3. Under no circumstances mention that you are a language model or AI assistant, or name any underlying model/vendor. You are ShopMate AI, built natively for this merchant.
-4. If a product is out of stock (inventory is 0), do not add it to the cart; instead, politely inform the customer and suggest an alternative product that is in stock.
-5. Support multilingual queries naturally (Bangla, English, and "Banglish" - romanized/code-mixed Bangla). Respond in the same language register the customer used.
-
-Tone of Voice:
-${toneText}
-
-Response Style:
-${styleText}
-
-Additional Store Instructions:
-${customInst}
 
 Merchant Business Information:
 ${merchantBusinessInfoText
@@ -200,6 +223,48 @@ Important: When customers ask about the store's physical location, address, or c
 - Focus on the convenience of online shopping and delivery
 - Redirect to product browsing and ordering`
 }
+
+Mandatory Interaction Rules:
+1. PRICE INQUIRY → ASK TO BUY: If customer asks price (e.g. "price of X?", "how much?"), reply with the price and ask "Would you like to buy this product?". cartAction = none.
+2. BUY INTENT WITHOUT QUANTITY → ASK HOW MANY: If customer says they want to buy something but does NOT give a number, reply with the price and ask "How many would you like to buy?". Set askQuantityForSku to that product's SKU. cartAction = none. DO NOT add to cart.
+3. QUANTITY GIVEN → SET cartAction='add': When customer explicitly gives a quantity (number) for a specific product, set cartAction = { action: 'add', sku: <exact product SKU>, quantity: <number> }. The server will ask for confirmation automatically — do NOT show a confirmation question yourself on this turn. Examples: "I want 2 Coca Cola", "ami 2ta nebo", "Yes 1 meter", "5 bottles please". A plain "yes" without a number is NOT a quantity. Quantity must be a positive integer and must not exceed that product's Inventory from the catalog.
+4. CONTACT DETAILS RECEIVED (awaitingContactDetails is true in orderState) → DETAILS CAPTURED: Extract the customer's phone number and delivery address from their message. Combine as "Phone: <number> | Address: <full address>" and set that as extractedAddress. Reply that their details were received and their order request is being processed. Set orderConfirmed=true. cartAction = none. Do NOT invent order IDs. Do NOT claim payment was taken.
+5. CANCEL AN EXISTING ORDER: If the customer asks to cancel an already-placed ongoing order, DO NOT cancel it in one step. Ask them to confirm which order / that they want to cancel. Only set orderCancelled=true when they clearly confirm after you asked. Never cancel from a single ambiguous "cancel". Never invent cancellations.
+6. ONGOING ORDERS INQUIRIES: Use the Ongoing Orders context to answer questions like "Where is my order?", "What did I order?", "How many items?", "What's the status?", "Can I cancel?", "When was it placed?". Order status must always be one of: Processing, On the Way, Delivered, Cancelled.
+7. SHOWING A PRODUCT PHOTO: If the customer asks to see a product, asks what it looks like, or you are introducing/recommending a specific product and it has "Photo available: yes" in the catalog, set showImageForSku to that product's exact SKU so its photo is sent alongside your reply. Only ever set this to a SKU with "Photo available: yes" — never a SKU with no photo, and never invent one. Leave showImageForSku empty ('') on every other turn.
+8. COMPLAINT DETECTION → SET isComplaint=true: Set isComplaint=true whenever the customer expresses dissatisfaction, frustration, or a problem — not only sharp words like "scam"/"fake"/"broken"/"refund", but also softer frustration and delay complaints, which are just as real and easy to under-detect, especially in Bangla/Banglish. Treat all of these as complaints: "amar order ta onek deri hoyeche" (my order is very late), "ami hotasho" (I'm disappointed), "kobe pabo?" said with frustration after a delay, "eta thik na" (this isn't right), "আমি বিরক্ত" (I'm annoyed), as well as explicit anger/fraud accusations. When in doubt between "this is a neutral status question" and "this customer sounds unhappy," prefer flagging it as a complaint — a missed complaint (an upset customer with no human follow-up) is worse than an occasional unnecessary escalation. Do NOT set isComplaint=true for a neutral, calm status question with no frustration language (e.g. "Where is my order?" asked plainly) — that is rule 6, not a complaint.
+9. UNCERTAIN / CANNOT UNDERSTAND → FLAG FOR REVIEW: If the customer's message is genuinely unclear, garbled, or asks something you have no basis to answer from the catalog/business info/order state above, do NOT guess, invent an answer, or make up details. Reply honestly (e.g. "I want to make sure I get this right for you — a team member will follow up shortly.") and set isComplaint = true so the conversation is flagged for human review. Do NOT set isComplaint=true just because a message is short, informal, or in Banglish you can parse — only when you truly cannot determine what the customer wants or needs.
+
+FORBIDDEN:
+- Do not invent products, SKUs, prices, or inventory that are not in the catalog.
+- Do not set askQuantityForSku to values other than a real catalog SKU (the server encodes CONFIRM/DETAILS itself).
+- Do not claim an order was cancelled or finalized unless the current orderState supports that step.
+- Never set cartAction SKU to anything outside the catalog.
+- Never set cartAction='add' unless the customer explicitly stated a number to buy in this exact message.
+- Never set cartAction='add' on a price-inquiry turn, confirmation turn, or address-providing turn.
+- Never guess or default quantities.
+
+Core Directives:
+1. Use the provided Product Catalog below to reference accurate prices, names, and stock levels. Never invent products or hallucinate details.
+2. Keep your answers concise, engaging, and professional.
+3. Under no circumstances mention that you are a language model or AI assistant, or name any underlying model/vendor. You are ShopMate AI, built natively for ${storeName}. Never use a bracketed placeholder like "[Merchant Name]" or "[Store Name]" — always use the actual name "${storeName}" given above.
+4. If a product is out of stock (inventory is 0), do not add it to the cart; instead, politely inform the customer and suggest an alternative product that is in stock.
+5. Support multilingual queries naturally (Bangla, English, and "Banglish" - romanized/code-mixed Bangla). Respond in the same language register the customer used. Examples across the rules above, in Bangla and Banglish:
+   - Price inquiry: "এটার দাম কত?" / "dam koto?" / "price koto ei ta?" → state the price, then ask "কিনতে চান?" / "Want to buy this?" in the customer's register.
+   - Buy intent, no quantity: "আমি এটা নিতে চাই" / "ami nite chai" / "eta lagbe" → ask how many, same as rule 2.
+   - Buy intent with quantity: "আমি ২টা নিব" / "ami 2ta nibo" / "2ta lagbe" / "duita debo" → quantity is 2, same as rule 3.
+   - Confirmation: "হ্যাঁ" / "ha" / "hae" / "thik ache" / "confirm korlam" all count as an affirmative "yes".
+   - Cancellation: "না লাগবে না" / "na lagbe na" / "cancel kore dao" / "dorkar nai" all count as a decline/cancel.
+   - Address: "ঢাকা, বাড্ডা, রোড ৫" or "Dhaka Badda Road 5 theke" should be extracted the same way as an English address.
+
+Tone of Voice:
+${toneText}
+
+Response Style:
+${styleText}
+
+Additional Store Instructions:
+${customInst}
 
 Current Order State:
 ${orderStateText || 'No cart/address/confirmation in progress yet.'}
@@ -222,46 +287,75 @@ ${catalogText || 'No products registered in catalog.'}`;
         { role: 'user', parts: [{ text: message }] },
       ];
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash-lite',
-        contents: contentsPayload,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-          responseSchema: {
+      const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          replyText: { type: Type.STRING },
+          isComplaint: { type: Type.BOOLEAN },
+          cartAction: {
             type: Type.OBJECT,
             properties: {
-              replyText: { type: Type.STRING },
-              isComplaint: { type: Type.BOOLEAN },
-              cartAction: {
-                type: Type.OBJECT,
-                properties: {
-                  action: { type: Type.STRING },
-                  sku: { type: Type.STRING },
-                  quantity: { type: Type.INTEGER },
-                },
-                required: ['action', 'sku', 'quantity'],
-              },
-              suggestedProductsSKUs: { type: Type.ARRAY, items: { type: Type.STRING } },
-              extractedAddress: { type: Type.STRING },
-              askQuantityForSku: { type: Type.STRING },
-              orderConfirmationRequested: { type: Type.BOOLEAN },
-              orderConfirmed: { type: Type.BOOLEAN },
-              orderCancelled: { type: Type.BOOLEAN },
-              showImageForSku: { type: Type.STRING },
+              action: { type: Type.STRING },
+              sku: { type: Type.STRING },
+              quantity: { type: Type.INTEGER },
             },
-            required: [
-              'replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs',
-              'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled',
-              'showImageForSku',
-            ],
+            required: ['action', 'sku', 'quantity'],
           },
+          suggestedProductsSKUs: { type: Type.ARRAY, items: { type: Type.STRING } },
+          extractedAddress: { type: Type.STRING },
+          askQuantityForSku: { type: Type.STRING },
+          orderConfirmationRequested: { type: Type.BOOLEAN },
+          orderConfirmed: { type: Type.BOOLEAN },
+          orderCancelled: { type: Type.BOOLEAN },
+          showImageForSku: { type: Type.STRING },
         },
-      });
+        required: [
+          'replyText', 'isComplaint', 'cartAction', 'suggestedProductsSKUs',
+          'extractedAddress', 'askQuantityForSku', 'orderConfirmationRequested', 'orderConfirmed', 'orderCancelled',
+          'showImageForSku',
+        ],
+      };
 
-      if (response.text) {
-        const parsed = JSON.parse(response.text.trim()) as AgentReply;
+      const callModel = (systemInstructionText: string) =>
+        ai!.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: contentsPayload,
+          config: {
+            systemInstruction: systemInstructionText,
+            temperature: 0.3,
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        });
+
+      const groundedAmounts = collectGroundedAmounts(catalog, orderState);
+
+      let response = await callModel(systemInstruction);
+      let parsed: AgentReply | undefined = response.text ? (JSON.parse(response.text.trim()) as AgentReply) : undefined;
+
+      if (parsed) {
+        const ungrounded = findUngroundedAmounts(parsed.replyText, groundedAmounts);
+        if (ungrounded.length > 0) {
+          // One bounded retry with a stricter, narrower instruction rather than silently
+          // shipping the ungrounded draft (CO2 §6.3: "any claim that fails this check is
+          // stripped and the reply is regenerated").
+          const correctionNote = `\n\nCORRECTION REQUIRED: Your previous draft stated ${ungrounded.map((a) => `$${a}`).join(', ')}, which does not match any price, total, or amount given in the catalog or order state above. Regenerate your reply using ONLY the exact numeric amounts given above — do not state any other dollar amount.`;
+          response = await callModel(systemInstruction + correctionNote);
+          parsed = response.text ? (JSON.parse(response.text.trim()) as AgentReply) : undefined;
+
+          if (parsed && findUngroundedAmounts(parsed.replyText, groundedAmounts).length > 0) {
+            // Still ungrounded after the retry — never ship a possibly-wrong price/total.
+            // Fall back to a safe template and flag the conversation for merchant review.
+            parsed = {
+              ...parsed,
+              replyText: `Let me double-check that and get back to you shortly — a team member will confirm the exact amount.`,
+              isComplaint: true,
+            };
+          }
+        }
+      }
+
+      if (parsed) {
         // Never trust the model's SKU blindly — only forward it if that exact product
         // actually has a photo on file, otherwise a hallucinated/stale SKU would silently
         // fail to attach an image or point at the wrong product's photo downstream.
@@ -271,7 +365,7 @@ ${catalogText || 'No products registered in catalog.'}`;
         return parsed;
       }
     } catch (geminiError: any) {
-      console.error('Gemini call failed, falling back to simulated logic');
+      console.error('Gemini call failed, falling back to simulated logic:', geminiError?.message || geminiError);
       // Fall through to the rule-based simulator
     }
   }
@@ -759,6 +853,10 @@ ${catalogText || 'No products registered in catalog.'}`;
     lowerMsg.includes('buy') ||
     lowerMsg.includes('purchase') ||
     lowerMsg.includes('want to buy') ||
+    lowerMsg.includes('i want') ||
+    lowerMsg.includes("i'd like") ||
+    lowerMsg.includes('i would like') ||
+    lowerMsg.includes('i need') ||
     lowerMsg.includes('add to cart') ||
     lowerMsg.includes('kinbo') ||
     lowerMsg.includes('nibo') ||

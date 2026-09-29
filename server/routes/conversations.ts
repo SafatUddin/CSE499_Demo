@@ -373,6 +373,7 @@ export function createConversationsRouter(): express.Router {
       }
 
       const persona = {
+        storeName: store.name,
         tone: store.tone,
         style: store.style,
         customInstructions: store.customInstructions,

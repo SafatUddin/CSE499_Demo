@@ -25,11 +25,10 @@ export interface PublicStore {
   id: string;
   name: string;
   businessPhone: string | null;
+  businessType: string | null;
   website: string | null;
   streetAddress: string | null;
   city: string | null;
-  province: string | null;
-  postalCode: string | null;
   country: string | null;
 }
 
@@ -111,11 +110,10 @@ export function updateProfile(input: {
 export function updateStoreProfile(input: {
   name?: string;
   businessPhone?: string;
+  businessType?: string;
   website?: string;
   streetAddress?: string;
   city?: string;
-  province?: string;
-  postalCode?: string;
   country?: string;
 }) {
   return request<{ store: PublicStore } & ProfileStatus>('/api/me/store', { method: 'PATCH', body: JSON.stringify(input) });
@@ -126,11 +124,10 @@ export function completeProfile(input: {
   phone: string;
   storeName: string;
   businessPhone: string;
+  businessType: string;
   website?: string;
   streetAddress: string;
   city: string;
-  province: string;
-  postalCode: string;
   country: string;
 }) {
   return request<OnboardingResponse>('/api/me/complete-profile', {
@@ -246,11 +243,10 @@ export interface ApiPersona {
   shareBusinessInfo: boolean;
   businessInfo: {
     businessPhone: string | null;
+    businessType: string | null;
     website: string | null;
     streetAddress: string | null;
     city: string | null;
-    province: string | null;
-    postalCode: string | null;
     country: string | null;
   };
 }

@@ -59,22 +59,20 @@ export function toPublicStore(store: {
   id: string;
   name: string;
   businessPhone?: string | null;
+  businessType?: string | null;
   website?: string | null;
   streetAddress?: string | null;
   city?: string | null;
-  province?: string | null;
-  postalCode?: string | null;
   country?: string | null;
 }) {
   return {
     id: store.id,
     name: store.name,
     businessPhone: store.businessPhone ?? null,
+    businessType: store.businessType ?? null,
     website: store.website ?? null,
     streetAddress: store.streetAddress ?? null,
     city: store.city ?? null,
-    province: store.province ?? null,
-    postalCode: store.postalCode ?? null,
     country: store.country ?? null,
   };
 }
@@ -85,7 +83,7 @@ export function toPublicConversation(c: any) {
     sender: SENDER_TO_FRONTEND[m.sender] || 'customer',
     text: m.text,
     imageUrl: m.imageUrl || undefined,
-    time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    time: m.createdAt.toISOString(), // Send full ISO timestamp so frontend can format and detect day changes
     pending: !!m.pending,
   }));
   const last = messages[messages.length - 1];

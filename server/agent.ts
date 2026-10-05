@@ -8,11 +8,10 @@ export interface AgentPersona {
   customInstructions?: string;
   merchantBusinessInfo?: {
     businessPhone?: string;
+    businessType?: string;
     website?: string;
     streetAddress?: string;
     city?: string;
-    province?: string;
-    postalCode?: string;
     country?: string;
   };
   shareBusinessInfo?: boolean;
@@ -277,18 +276,26 @@ export async function generateAgentReply({
   let merchantBusinessInfoText = '';
   if (shareBusinessInfo && businessInfo) {
     const parts = [];
+    
+    // Natural business description with businessType
+    if (businessInfo.businessType) {
+      const storeName = persona?.storeName || 'We';
+      parts.push(`We are ${storeName}, our business is ${businessInfo.businessType}.`);
+    }
+    
     if (businessInfo.businessPhone) parts.push(`Phone: ${businessInfo.businessPhone}`);
     if (businessInfo.website) parts.push(`Website: ${businessInfo.website}`);
+    
+    // Store location without province/postalCode
     if (businessInfo.streetAddress) {
       const addressParts = [
         businessInfo.streetAddress,
         businessInfo.city,
-        businessInfo.province,
-        businessInfo.postalCode,
         businessInfo.country,
       ].filter(Boolean);
-      parts.push(`Store Location: ${addressParts.join(', ')}`);
+      parts.push(`Our store location is ${addressParts.join(', ')}`);
     }
+    
     merchantBusinessInfoText = parts.join('\n');
   }
 
@@ -378,7 +385,14 @@ UNDERSTANDING INTENT (Most Important):
 - "yes" / "ha" / "haa" / "thik ache" / "confirm" after summary = use confirm_order(true)
 - "no" / "na" / "cancel" / "dorkar nai" after summary = use confirm_order(false)
 - "দোকান কোথায়?" / "shop kothay?" / "where is shop?" = asking for location → share Store Location
+- Simple greetings ("hi", "hello", "hey", "আসসালামু আলাইকুম") = respond warmly, DO NOT flag
 - Frustration words ("hotasho", "deri hoyeche", "birokto", complaints) = use flag_for_human_review
+
+COMPLAINT DETECTION (Be Conservative):
+- DO flag: Clear complaints about product quality, service issues, refund requests, anger/frustration
+- DO NOT flag: Simple greetings, questions, casual conversation, or unclear messages
+- Examples that should NOT be flagged: "hi", "hello", "hey there", "kemon acho?"
+- Only use flag_for_human_review when there is GENUINE complaint or frustration
 
 PRICE ACCURACY:
 - Only state prices from the catalog below

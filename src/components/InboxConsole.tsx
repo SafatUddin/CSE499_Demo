@@ -23,6 +23,57 @@ import { Conversation, ChatMessage, Product } from '../types';
 import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, updateConversationArchived, updateConversationSpam, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
+// Helper function to format timestamp in merchant's local timezone
+function formatMessageTime(timestamp: string | Date): string {
+  const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Helper function to check if two dates are on different days
+function isDifferentDay(date1: string | Date, date2: string | Date): boolean {
+  const d1 = typeof date1 === 'string' ? new Date(date1) : date1;
+  const d2 = typeof date2 === 'string' ? new Date(date2) : date2;
+  return (
+    d1.getFullYear() !== d2.getFullYear() ||
+    d1.getMonth() !== d2.getMonth() ||
+    d1.getDate() !== d2.getDate()
+  );
+}
+
+// Helper function to format date separator (like Messenger)
+function formatDateSeparator(timestamp: string | Date): string {
+  const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  // Check if today
+  if (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  ) {
+    return 'Today';
+  }
+
+  // Check if yesterday
+  if (
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  ) {
+    return 'Yesterday';
+  }
+
+  // Otherwise show full date
+  return date.toLocaleDateString([], { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+}
+
 // Shows the customer's real Facebook/Instagram profile photo when we have one (never
 // available for WhatsApp); falls back to initials on load failure or when there's no
 // avatarUrl at all (e.g. website-widget conversations).
@@ -205,14 +256,13 @@ export default function InboxConsole({
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || !activeChat) return;
 
-    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const isSimulatedCustomerChannel = activeChat.platform === 'websocket';
-
+    // Use ISO string for consistent timezone handling
+    const now = new Date();
     const optimisticMsg: ChatMessage = {
       id: `m-local-${Date.now()}`,
       sender: isSimulatedCustomerChannel ? 'customer' : 'merchant',
       text: textToSend,
-      time: timestamp
+      time: now.toISOString() // Store as ISO string
     };
 
     const discardDraftId = editingDraftId;
@@ -740,66 +790,86 @@ export default function InboxConsole({
                 </div>
               )}
 
-              {activeChat?.messages.map((m) => {
+              {activeChat?.messages.map((m, index) => {
                 const isCustomer = m.sender === 'customer';
                 const isPendingDraft = m.sender === 'ai' && m.pending;
-                return (
-                  <div key={m.id} className={`flex w-full ${isCustomer ? 'justify-start' : 'justify-end'}`}>
-                    {isPendingDraft ? (
-                      <div className="zone-b-grey3 p-4 rounded-2xl max-w-[72%] text-left space-y-3 shadow-xl border border-blue-400/40">
-                        <div className="flex items-center justify-between">
-                          <span className="font-sans text-[11px] font-bold text-[#a9c6ff] tracking-wider flex items-center gap-1.5">
-                            ✦ AI draft reply
-                          </span>
-                          <span className="font-sans text-[10.5px] text-white/50">{m.time}</span>
-                        </div>
-                        <p className="text-[13.5px] text-white leading-relaxed">{m.text.replace(/<[^>]+>/g, '').trim()}</p>
-                        {m.imageUrl && (
-                          <img src={m.imageUrl} alt="" className="rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
-                        )}
+                
+                // Check if we need to show a date separator
+                const showDateSeparator = index === 0 || isDifferentDay(
+                  activeChat.messages[index - 1].time,
+                  m.time
+                );
 
-                        <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
-                          <button
-                            onClick={() => handleApproveDraft(m.id)}
-                            disabled={approvingId === m.id}
-                            className="btn-accent px-4 py-1.5 text-xs cursor-pointer disabled:opacity-50"
-                          >
-                            {approvingId === m.id ? 'Sending…' : 'Send now'}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setInputText(m.text);
-                              setEditingDraftId(m.id);
-                            }}
-                            className="btn-glass px-4 py-1.5 text-xs cursor-pointer"
-                          >
-                            Edit reply
-                          </button>
+                return (
+                  <React.Fragment key={m.id}>
+                    {/* Date Separator (like Messenger) */}
+                    {showDateSeparator && (
+                      <div className="flex items-center justify-center py-2">
+                        <div className="bg-white/[0.08] border border-white/15 rounded-full px-4 py-1.5 backdrop-blur-md">
+                          <span className="font-sans text-[11px] font-semibold text-white/70">
+                            {formatDateSeparator(m.time)}
+                          </span>
                         </div>
-                      </div>
-                    ) : (
-                      /* Message Bubbles matching Picture 1 */
-                      <div className={`flex flex-col ${isCustomer ? 'items-start max-w-[62%]' : 'items-end max-w-[72%]'}`}>
-                        <div className={`p-4 font-sans text-[13.5px] leading-relaxed transition-all ${
-                          isCustomer
-                            ? 'bg-gradient-to-b from-white/[0.08] via-white/[0.03] to-transparent border border-white/15 text-white rounded-[16px] rounded-bl-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]'
-                            : 'bg-gradient-to-b from-white/[0.12] via-[#1a1b22] to-[#121318] border border-white/20 text-white/95 rounded-[16px] rounded-br-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_16px_rgba(0,0,0,0.4)]'
-                        }`}>
-                          {m.sender === 'ai' && (
-                            <div className="flex items-center gap-1.5 mb-1.5 text-white/80">
-                              <span className="text-[11px] text-white">✦</span>
-                              <span className="font-sans text-[10.5px] font-bold tracking-wider text-white uppercase">AI</span>
-                            </div>
-                          )}
-                          <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
-                          {m.imageUrl && (
-                            <img src={m.imageUrl} alt="" className="mt-2 rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
-                          )}
-                        </div>
-                        <span className="text-[10.5px] text-white/40 mt-1 px-1 font-mono">{m.time}</span>
                       </div>
                     )}
-                  </div>
+
+                    <div className={`flex w-full ${isCustomer ? 'justify-start' : 'justify-end'}`}>
+                      {isPendingDraft ? (
+                        <div className="zone-b-grey3 p-4 rounded-2xl max-w-[72%] text-left space-y-3 shadow-xl border border-blue-400/40">
+                          <div className="flex items-center justify-between">
+                            <span className="font-sans text-[11px] font-bold text-[#a9c6ff] tracking-wider flex items-center gap-1.5">
+                              ✦ AI draft reply
+                            </span>
+                            <span className="font-sans text-[10.5px] text-white/50">{formatMessageTime(m.time)}</span>
+                          </div>
+                          <p className="text-[13.5px] text-white leading-relaxed">{m.text.replace(/<[^>]+>/g, '').trim()}</p>
+                          {m.imageUrl && (
+                            <img src={m.imageUrl} alt="" className="rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
+                          )}
+
+                          <div className="flex items-center gap-2 pt-2 border-t border-white/[0.07]">
+                            <button
+                              onClick={() => handleApproveDraft(m.id)}
+                              disabled={approvingId === m.id}
+                              className="btn-accent px-4 py-1.5 text-xs cursor-pointer disabled:opacity-50"
+                            >
+                              {approvingId === m.id ? 'Sending…' : 'Send now'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setInputText(m.text);
+                                setEditingDraftId(m.id);
+                              }}
+                              className="btn-glass px-4 py-1.5 text-xs cursor-pointer"
+                            >
+                              Edit reply
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Message Bubbles matching Picture 1 */
+                        <div className={`flex flex-col ${isCustomer ? 'items-start max-w-[62%]' : 'items-end max-w-[72%]'}`}>
+                          <div className={`p-4 font-sans text-[13.5px] leading-relaxed transition-all ${
+                            isCustomer
+                              ? 'bg-gradient-to-b from-white/[0.08] via-white/[0.03] to-transparent border border-white/15 text-white rounded-[16px] rounded-bl-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]'
+                              : 'bg-gradient-to-b from-white/[0.12] via-[#1a1b22] to-[#121318] border border-white/20 text-white/95 rounded-[16px] rounded-br-[4px] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_16px_rgba(0,0,0,0.4)]'
+                          }`}>
+                            {m.sender === 'ai' && (
+                              <div className="flex items-center gap-1.5 mb-1.5 text-white/80">
+                                <span className="text-[11px] text-white">✦</span>
+                                <span className="font-sans text-[10.5px] font-bold tracking-wider text-white uppercase">AI</span>
+                              </div>
+                            )}
+                            <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
+                            {m.imageUrl && (
+                              <img src={m.imageUrl} alt="" className="mt-2 rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
+                            )}
+                          </div>
+                          <span className="text-[10.5px] text-white/40 mt-1 px-1 font-mono">{formatMessageTime(m.time)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </React.Fragment>
                 );
               })}
 

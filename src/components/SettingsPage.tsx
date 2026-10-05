@@ -352,11 +352,10 @@ function BusinessInfoSection({
 }) {
   const [storeName, setStoreName] = useState(store?.name || '');
   const [businessPhone, setBusinessPhone] = useState(store?.businessPhone || '');
+  const [businessType, setBusinessType] = useState(store?.businessType || '');
   const [website, setWebsite] = useState(store?.website || '');
   const [streetAddress, setStreetAddress] = useState(store?.streetAddress || '');
   const [city, setCity] = useState(store?.city || '');
-  const [province, setProvince] = useState(store?.province || '');
-  const [postalCode, setPostalCode] = useState(store?.postalCode || '');
   const [country, setCountry] = useState(store?.country || '');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackProps | null>(null);
@@ -364,20 +363,18 @@ function BusinessInfoSection({
   useEffect(() => {
     setStoreName(store?.name || '');
     setBusinessPhone(store?.businessPhone || '');
+    setBusinessType(store?.businessType || '');
     setWebsite(store?.website || '');
     setStreetAddress(store?.streetAddress || '');
     setCity(store?.city || '');
-    setProvince(store?.province || '');
-    setPostalCode(store?.postalCode || '');
     setCountry(store?.country || '');
   }, [
     store?.name,
     store?.businessPhone,
+    store?.businessType,
     store?.website,
     store?.streetAddress,
     store?.city,
-    store?.province,
-    store?.postalCode,
     store?.country,
   ]);
 
@@ -402,11 +399,10 @@ function BusinessInfoSection({
       await onUpdateStore({
         name: storeName.trim(),
         businessPhone: businessPhone.trim(),
+        businessType: businessType.trim(),
         website: website.trim(),
         streetAddress: streetAddress.trim(),
         city: city.trim(),
-        province: province.trim(),
-        postalCode: postalCode.trim(),
         country: country.trim(),
       });
       showFeedback({ type: 'success', message: 'Business information saved.' });
@@ -470,6 +466,20 @@ function BusinessInfoSection({
           </div>
         </Field>
 
+        <Field label="Business Type">
+          <div className="relative">
+            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30 pointer-events-none" />
+            <input
+              type="text"
+              value={businessType}
+              onChange={(e) => setBusinessType(e.target.value)}
+              placeholder="e.g., Electronics Retailer, Fashion Boutique, etc."
+              disabled={saving}
+              className="zone-b-input w-full pl-9 pr-4 py-2.5 text-[13px] text-white/90 placeholder-white/20 disabled:opacity-50"
+            />
+          </div>
+        </Field>
+
         <Field label="Street Address">
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30 pointer-events-none" />
@@ -485,7 +495,7 @@ function BusinessInfoSection({
           </div>
         </Field>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="City">
             <Input
               value={city}
@@ -495,35 +505,16 @@ function BusinessInfoSection({
               autoComplete="address-level2"
             />
           </Field>
-          <Field label="Province / State">
+          <Field label="Country">
             <Input
-              value={province}
-              onChange={setProvince}
-              placeholder="NY"
+              value={country}
+              onChange={setCountry}
+              placeholder="United States"
               disabled={saving}
-              autoComplete="address-level1"
-            />
-          </Field>
-          <Field label="Postal / ZIP Code">
-            <Input
-              value={postalCode}
-              onChange={setPostalCode}
-              placeholder="10001"
-              disabled={saving}
-              autoComplete="postal-code"
+              autoComplete="country-name"
             />
           </Field>
         </div>
-
-        <Field label="Country">
-          <Input
-            value={country}
-            onChange={setCountry}
-            placeholder="United States"
-            disabled={saving}
-            autoComplete="country-name"
-          />
-        </Field>
 
         <AnimatePresence mode="wait">
           {feedback && <Feedback key="fb" type={feedback.type} message={feedback.message} />}

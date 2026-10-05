@@ -75,11 +75,10 @@ model Store {
   widgetKey     String         @unique @default(cuid())
   // Business contact & address fields (all optional; set via merchant settings)
   businessPhone String?
+  businessType  String?
   website       String?
   streetAddress String?
   city          String?
-  province      String?
-  postalCode    String?
   country       String?
   // Toggle to control whether AI should share business contact info with customers
   shareBusinessInfo Boolean @default(true)

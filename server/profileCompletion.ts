@@ -14,10 +14,9 @@ export interface MerchantForCompletion {
 export interface StoreForCompletion {
   name: string;
   businessPhone?: string | null;
+  businessType?: string | null;
   streetAddress?: string | null;
   city?: string | null;
-  province?: string | null;
-  postalCode?: string | null;
   country?: string | null;
 }
 
@@ -53,10 +52,9 @@ export function getProfileCompletionStatus(
 
   if (!nonEmpty(store.name)) missing.push('storeName');
   if (!nonEmpty(store.businessPhone)) missing.push('businessPhone');
+  if (!nonEmpty(store.businessType)) missing.push('businessType');
   if (!nonEmpty(store.streetAddress)) missing.push('streetAddress');
   if (!nonEmpty(store.city)) missing.push('city');
-  if (!nonEmpty(store.province)) missing.push('province');
-  if (!nonEmpty(store.postalCode)) missing.push('postalCode');
   if (!nonEmpty(store.country)) missing.push('country');
 
   return { profileComplete: missing.length === 0, missingFields: missing };
@@ -118,10 +116,9 @@ export async function requireProfileComplete(
       select: {
         name: true,
         businessPhone: true,
+        businessType: true,
         streetAddress: true,
         city: true,
-        province: true,
-        postalCode: true,
         country: true,
       },
     });

@@ -173,11 +173,10 @@ export function validateMerchantName(value: unknown): string | null {
 export type ValidatedStoreBusinessInput = {
   name?: string;
   businessPhone?: string;
+  businessType?: string;
   website?: string;
   streetAddress?: string;
   city?: string;
-  province?: string;
-  postalCode?: string;
   country?: string;
 };
 
@@ -188,7 +187,7 @@ export function validateStoreBusinessInput(
 ): ValidatedStoreBusinessInput | null {
   if (!isPlainObject(body)) return null;
 
-  const allowed = new Set(['name', 'businessPhone', 'website', 'streetAddress', 'city', 'province', 'postalCode', 'country']);
+  const allowed = new Set(['name', 'businessPhone', 'businessType', 'website', 'streetAddress', 'city', 'country']);
   for (const key of Object.keys(body)) {
     if (!allowed.has(key)) return null; // reject mass-assignment
   }
@@ -228,10 +227,9 @@ export function validateStoreBusinessInput(
   }
 
   const simpleFields: Array<[string, number]> = [
+    ['businessType', MAX_ADDRESS_FIELD_LENGTH],
     ['streetAddress', MAX_ADDRESS_FIELD_LENGTH],
     ['city', MAX_ADDRESS_FIELD_LENGTH],
-    ['province', MAX_ADDRESS_FIELD_LENGTH],
-    ['postalCode', MAX_POSTAL_CODE_LENGTH],
     ['country', MAX_COUNTRY_LENGTH],
   ];
 
@@ -274,10 +272,9 @@ export type ValidatedOnboardingInput = {
   store: {
     name: string;
     businessPhone: string;
+    businessType: string;
     streetAddress: string;
     city: string;
-    province: string;
-    postalCode: string;
     country: string;
     website: string;
   };
@@ -300,8 +297,8 @@ export function validateOnboardingInput(
 
   const allowed = new Set([
     'name', 'phone',
-    'storeName', 'businessPhone', 'website',
-    'streetAddress', 'city', 'province', 'postalCode', 'country',
+    'storeName', 'businessPhone', 'businessType', 'website',
+    'streetAddress', 'city', 'country',
   ]);
   for (const key of Object.keys(body)) {
     if (!allowed.has(key)) {
@@ -323,17 +320,14 @@ export function validateOnboardingInput(
   const businessPhone = validateRequiredPhone(body.businessPhone);
   if (businessPhone === null) fieldErrors.businessPhone = 'A valid business phone number is required.';
 
+  const businessType = nonEmptyString(body.businessType, MAX_ADDRESS_FIELD_LENGTH);
+  if (businessType === null) fieldErrors.businessType = 'Business type is required.';
+
   const streetAddress = nonEmptyString(body.streetAddress, MAX_ADDRESS_FIELD_LENGTH);
   if (streetAddress === null) fieldErrors.streetAddress = 'Street address is required.';
 
   const city = nonEmptyString(body.city, MAX_ADDRESS_FIELD_LENGTH);
   if (city === null) fieldErrors.city = 'City is required.';
-
-  const province = nonEmptyString(body.province, MAX_ADDRESS_FIELD_LENGTH);
-  if (province === null) fieldErrors.province = 'Province/State is required.';
-
-  const postalCode = validateRequiredPostalCode(body.postalCode);
-  if (postalCode === null) fieldErrors.postalCode = 'A valid postal/ZIP code is required (letters, digits, spaces, hyphens).';
 
   const country = nonEmptyString(body.country, MAX_COUNTRY_LENGTH);
   if (country === null) fieldErrors.country = 'Country is required.';
@@ -376,10 +370,9 @@ export function validateOnboardingInput(
       store: {
         name: storeName!,
         businessPhone: businessPhone!,
+        businessType: businessType!,
         streetAddress: streetAddress!,
         city: city!,
-        province: province!,
-        postalCode: postalCode!,
         country: country!,
         website,
       },

@@ -25,11 +25,10 @@ export function createPersonaRouter(): express.Router {
         shareBusinessInfo: store.shareBusinessInfo,
         businessInfo: {
           businessPhone: store.businessPhone || null,
+          businessType: store.businessType || null,
           website: store.website || null,
           streetAddress: store.streetAddress || null,
           city: store.city || null,
-          province: store.province || null,
-          postalCode: store.postalCode || null,
           country: store.country || null,
         },
       });
@@ -70,11 +69,10 @@ export function createPersonaRouter(): express.Router {
         shareBusinessInfo: store.shareBusinessInfo,
         businessInfo: {
           businessPhone: store.businessPhone || null,
+          businessType: store.businessType || null,
           website: store.website || null,
           streetAddress: store.streetAddress || null,
           city: store.city || null,
-          province: store.province || null,
-          postalCode: store.postalCode || null,
           country: store.country || null,
         },
       });

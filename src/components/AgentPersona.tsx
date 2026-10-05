@@ -241,6 +241,17 @@ export default function AgentPersona({
                   </div>
 
                   <div className="space-y-2">
+                    <label className="text-[12px] text-white/60 font-medium">Business Type</label>
+                    <input
+                      type="text"
+                      value={persona.businessInfo?.businessType || ''}
+                      readOnly
+                      className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 font-sans text-[13px] text-white/70 outline-none"
+                      placeholder="Not set"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <label className="text-[12px] text-white/60 font-medium flex items-center gap-1.5">
                       <MapPin className="h-3.5 w-3.5" /> Street Address
                     </label>
@@ -259,30 +270,6 @@ export default function AgentPersona({
                       <input
                         type="text"
                         value={persona.businessInfo?.city || ''}
-                        readOnly
-                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 font-sans text-[13px] text-white/70 outline-none"
-                        placeholder="Not set"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[12px] text-white/60 font-medium">Province/State</label>
-                      <input
-                        type="text"
-                        value={persona.businessInfo?.province || ''}
-                        readOnly
-                        className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 font-sans text-[13px] text-white/70 outline-none"
-                        placeholder="Not set"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <label className="text-[12px] text-white/60 font-medium">Postal Code</label>
-                      <input
-                        type="text"
-                        value={persona.businessInfo?.postalCode || ''}
                         readOnly
                         className="w-full bg-white/[0.03] border border-white/[0.08] rounded-lg p-2.5 font-sans text-[13px] text-white/70 outline-none"
                         placeholder="Not set"

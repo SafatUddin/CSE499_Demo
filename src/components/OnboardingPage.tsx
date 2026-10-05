@@ -36,11 +36,10 @@ export default function OnboardingPage({
   // Business information
   const [storeName, setStoreName] = useState(store.name || '');
   const [businessPhone, setBusinessPhone] = useState(store.businessPhone || '');
+  const [businessType, setBusinessType] = useState(store.businessType || '');
   const [website, setWebsite] = useState(store.website || '');
   const [streetAddress, setStreetAddress] = useState(store.streetAddress || '');
   const [city, setCity] = useState(store.city || '');
-  const [province, setProvince] = useState(store.province || '');
-  const [postalCode, setPostalCode] = useState(store.postalCode || '');
   const [country, setCountry] = useState(store.country || '');
 
   const [saving, setSaving] = useState(false);
@@ -64,11 +63,10 @@ export default function OnboardingPage({
         phone: phone.trim(),
         storeName: storeName.trim(),
         businessPhone: businessPhone.trim(),
+        businessType: businessType.trim(),
         website: website.trim(),
         streetAddress: streetAddress.trim(),
         city: city.trim(),
-        province: province.trim(),
-        postalCode: postalCode.trim(),
         country: country.trim(),
       });
       onComplete(response);
@@ -246,7 +244,21 @@ export default function OnboardingPage({
                 </div>
               </Field>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Business Type *" error={fieldErrors.businessType}>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={businessType}
+                    onChange={(e) => setBusinessType(e.target.value)}
+                    placeholder="e.g., Electronics Retailer, Fashion Boutique"
+                    disabled={saving}
+                    className="zone-b-input w-full pl-9 pr-4 py-2.5 text-[13px] text-white/90 placeholder-white/20 disabled:opacity-50"
+                  />
+                </div>
+              </Field>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="City *" error={fieldErrors.city}>
                   <Input
                     value={city}
@@ -256,35 +268,16 @@ export default function OnboardingPage({
                     autoComplete="address-level2"
                   />
                 </Field>
-                <Field label="Province / State *" error={fieldErrors.province}>
+                <Field label="Country *" error={fieldErrors.country}>
                   <Input
-                    value={province}
-                    onChange={setProvince}
-                    placeholder="NY"
+                    value={country}
+                    onChange={setCountry}
+                    placeholder="United States"
                     disabled={saving}
-                    autoComplete="address-level1"
-                  />
-                </Field>
-                <Field label="Postal / ZIP Code *" error={fieldErrors.postalCode}>
-                  <Input
-                    value={postalCode}
-                    onChange={setPostalCode}
-                    placeholder="10001"
-                    disabled={saving}
-                    autoComplete="postal-code"
+                    autoComplete="country-name"
                   />
                 </Field>
               </div>
-
-              <Field label="Country *" error={fieldErrors.country}>
-                <Input
-                  value={country}
-                  onChange={setCountry}
-                  placeholder="United States"
-                  disabled={saving}
-                  autoComplete="country-name"
-                />
-              </Field>
             </div>
           </SectionCard>
 

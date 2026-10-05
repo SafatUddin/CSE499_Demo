@@ -134,7 +134,7 @@ export function createProfileRouter(): express.Router {
 
       const store = await prisma.store.findUnique({
         where: { merchantId: updated.id },
-        select: { name: true, businessPhone: true, streetAddress: true, city: true, province: true, postalCode: true, country: true },
+        select: { name: true, businessPhone: true, businessType: true, streetAddress: true, city: true, country: true },
       });
       const { profileComplete, missingFields } = store
         ? getProfileCompletionStatus(updated, store, req.auth!.isAdmin)
@@ -270,10 +270,9 @@ export function createProfileRouter(): express.Router {
           data: {
             name: sData.name,
             businessPhone: sData.businessPhone,
+            businessType: sData.businessType,
             streetAddress: sData.streetAddress,
             city: sData.city,
-            province: sData.province,
-            postalCode: sData.postalCode,
             country: sData.country,
             website: sData.website || null,
           },

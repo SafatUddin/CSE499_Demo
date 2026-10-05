@@ -8,11 +8,10 @@ export interface AgentPersona {
   customInstructions?: string;
   merchantBusinessInfo?: {
     businessPhone?: string;
+    businessType?: string;
     website?: string;
     streetAddress?: string;
     city?: string;
-    province?: string;
-    postalCode?: string;
     country?: string;
   };
   shareBusinessInfo?: boolean;
@@ -143,17 +142,17 @@ const tools: FunctionDeclaration[] = [
   },
   {
     name: 'flag_for_human_review',
-    description: 'Flag this conversation for human merchant review. Use this when: (1) customer complains or expresses frustration/dissatisfaction (both sharp complaints like "scam" and soft frustration like "ami hotasho"), (2) you genuinely cannot understand the customer\'s message, (3) customer needs help beyond your capabilities.',
+    description: 'Flag this conversation for human merchant review. ONLY use when: (1) customer clearly complains about product/service quality or expresses strong frustration/anger (not simple greetings or casual messages), (2) customer requests refund/return, (3) you genuinely cannot understand a complex request. DO NOT flag greetings like "hi", "hello", simple questions, or casual conversation.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         reason: {
           type: Type.STRING,
-          description: 'Brief explanation of why this needs human review (e.g., "customer complaint", "unclear message", "complex request")',
+          description: 'Brief explanation of why this needs human review (e.g., "product quality complaint", "refund request", "complex technical issue")',
         },
         isComplaint: {
           type: Type.BOOLEAN,
-          description: 'True if this is a customer complaint or frustration',
+          description: 'True ONLY if this is a genuine complaint about products/services or refund request. False for unclear messages or complex requests.',
         },
       },
       required: ['reason', 'isComplaint'],
@@ -277,18 +276,26 @@ export async function generateAgentReply({
   let merchantBusinessInfoText = '';
   if (shareBusinessInfo && businessInfo) {
     const parts = [];
+    
+    // Natural business description with businessType
+    if (businessInfo.businessType) {
+      const storeName = persona?.storeName || 'We';
+      parts.push(`We are ${storeName}, our business is ${businessInfo.businessType}.`);
+    }
+    
     if (businessInfo.businessPhone) parts.push(`Phone: ${businessInfo.businessPhone}`);
     if (businessInfo.website) parts.push(`Website: ${businessInfo.website}`);
+    
+    // Store location without province/postalCode
     if (businessInfo.streetAddress) {
       const addressParts = [
         businessInfo.streetAddress,
         businessInfo.city,
-        businessInfo.province,
-        businessInfo.postalCode,
         businessInfo.country,
       ].filter(Boolean);
-      parts.push(`Store Location: ${addressParts.join(', ')}`);
+      parts.push(`Our store location is ${addressParts.join(', ')}`);
     }
+    
     merchantBusinessInfoText = parts.join('\n');
   }
 
@@ -378,7 +385,14 @@ UNDERSTANDING INTENT (Most Important):
 - "yes" / "ha" / "haa" / "thik ache" / "confirm" after summary = use confirm_order(true)
 - "no" / "na" / "cancel" / "dorkar nai" after summary = use confirm_order(false)
 - "দোকান কোথায়?" / "shop kothay?" / "where is shop?" = asking for location → share Store Location
+- Simple greetings ("hi", "hello", "hey", "আসসালামু আলাইকুম") = respond warmly, DO NOT flag
 - Frustration words ("hotasho", "deri hoyeche", "birokto", complaints) = use flag_for_human_review
+
+COMPLAINT DETECTION (Be Conservative):
+- DO flag: Clear complaints about product quality, service issues, refund requests, anger/frustration
+- DO NOT flag: Simple greetings, questions, casual conversation, or unclear messages
+- Examples that should NOT be flagged: "hi", "hello", "hey there", "kemon acho?"
+- Only use flag_for_human_review when there is GENUINE complaint or frustration
 
 PRICE ACCURACY:
 - Only state prices from the catalog below

@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ClipboardList,
   Bot
+  ,CalendarDays
 } from 'lucide-react';
 import { Tab } from '../types';
 
@@ -40,6 +41,7 @@ export default function Sidebar({
     { id: 'catalog', label: 'Product catalog', icon: Package },
     { id: 'persona', label: 'AI Persona', icon: Bot },
     { id: 'orders', label: 'Orders', icon: ClipboardList },
+    { id: 'bookings', label: 'Bookings', icon: CalendarDays },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'integrations', label: 'Integrations', icon: Grid },
   ];

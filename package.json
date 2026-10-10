@@ -9,7 +9,11 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "db:seed": "tsx prisma/seed.ts"
+    "test:image": "tsx scripts/image-recognition-smoke.ts",
+    "test:knowledge": "tsx scripts/knowledge-base-smoke.ts",
+    "test:voice-appointments": "tsx scripts/voice-appointment-smoke.ts",
+    "db:seed": "tsx prisma/seed.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@google/genai": "^2.15.0",

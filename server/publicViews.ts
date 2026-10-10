@@ -83,6 +83,9 @@ export function toPublicConversation(c: any) {
     sender: SENDER_TO_FRONTEND[m.sender] || 'customer',
     text: m.text,
     imageUrl: m.imageUrl || undefined,
+    audioUrl: m.audioUrl || undefined,
+    transcript: m.transcript || undefined,
+    mediaType: m.mediaType || undefined,
     time: m.createdAt.toISOString(), // Send full ISO timestamp so frontend can format and detect day changes
     pending: !!m.pending,
   }));

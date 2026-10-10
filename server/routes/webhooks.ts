@@ -17,9 +17,12 @@ import { claimWebhookEvent } from '../webhookIdempotency';
 import {
   getPageAccessTokenForStore,
   getInstagramCredentialsForStore,
+  getWhatsAppCredentialsForStore,
   generateAndStoreAgentReply,
   sendOpeningGreetingIfNew,
 } from '../conversationEngine';
+import { downloadInboundImage } from '../imageRecognition';
+import { downloadInboundAudio, transcribeVoiceMessage } from '../voiceMessages';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -50,7 +53,7 @@ export function createWebhooksRouter(): express.Router {
   });
 
 
-  async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string) {
+  async function handleIncomingMessengerMessage(pageId: string, senderPsid: string, messageText: string, externalMessageId: string, imageUrl?: string, imageBuffer?: Buffer, audioUrl?: string, audioBuffer?: Buffer) {
     if (!isProduction) {
       console.log('[WEBHOOK] handleIncomingMessengerMessage — messageId:', externalMessageId);
     }
@@ -72,6 +75,16 @@ export function createWebhooksRouter(): express.Router {
       return;
     }
     const storeId = channel.storeId;
+    if (imageUrl && !imageBuffer) {
+      const pageAccessToken = await getPageAccessTokenForStore(storeId);
+      imageBuffer = await downloadInboundImage(imageUrl, pageAccessToken || undefined) || undefined;
+    }
+    if (audioUrl && !audioBuffer) {
+      const pageAccessToken = await getPageAccessTokenForStore(storeId);
+      audioBuffer = await downloadInboundAudio(audioUrl, pageAccessToken || undefined) || undefined;
+    }
+    const transcript = audioBuffer ? await transcribeVoiceMessage(audioBuffer) : null;
+    const agentText = transcript || messageText;
 
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'FACEBOOK', externalUserId: senderPsid },
@@ -98,7 +111,7 @@ export function createWebhooksRouter(): express.Router {
 
     try {
       await prisma.message.create({
-        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, imageUrl, audioUrl, transcript, mediaType: audioUrl ? 'audio' : imageUrl ? 'image' : undefined, externalId: externalMessageId },
       });
     } catch (err: any) {
       if (err.code === 'P2002') {
@@ -111,11 +124,11 @@ export function createWebhooksRouter(): express.Router {
 
     const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
     if (!greetedInstead) {
-      await generateAndStoreAgentReply(conversation, messageText);
+      await generateAndStoreAgentReply(conversation, agentText, imageBuffer);
     }
   }
 
-  async function handleIncomingWhatsAppMessage(phoneNumberId: string, senderWaId: string, messageText: string, externalMessageId: string, customerName?: string) {
+  async function handleIncomingWhatsAppMessage(phoneNumberId: string, senderWaId: string, messageText: string, externalMessageId: string, customerName?: string, imageMediaId?: string, audioMediaId?: string) {
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
     if (alreadyProcessed) {
       console.log('Duplicate WhatsApp webhook event, skipping');
@@ -128,6 +141,50 @@ export function createWebhooksRouter(): express.Router {
       return;
     }
     const storeId = channel.storeId;
+    let imageUrl: string | undefined;
+    let imageBuffer: Buffer | undefined;
+    let audioUrl: string | undefined;
+    let audioBuffer: Buffer | undefined;
+    if (imageMediaId) {
+      const credentials = await getWhatsAppCredentialsForStore(storeId);
+      if (credentials) {
+        try {
+          const mediaResponse = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(imageMediaId)}`, {
+            headers: { Authorization: `Bearer ${credentials.accessToken}` },
+          });
+          if (mediaResponse.ok) {
+            const media = await mediaResponse.json() as { url?: string };
+            if (media.url) {
+              imageUrl = media.url;
+              imageBuffer = await downloadInboundImage(media.url, credentials.accessToken) || undefined;
+            }
+          }
+        } catch {
+          console.error('Failed to fetch WhatsApp image media');
+        }
+      }
+    }
+    if (audioMediaId) {
+      const credentials = await getWhatsAppCredentialsForStore(storeId);
+      if (credentials) {
+        try {
+          const mediaResponse = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(audioMediaId)}`, {
+            headers: { Authorization: `Bearer ${credentials.accessToken}` },
+          });
+          if (mediaResponse.ok) {
+            const media = await mediaResponse.json() as { url?: string };
+            if (media.url) {
+              audioUrl = media.url;
+              audioBuffer = await downloadInboundAudio(media.url, credentials.accessToken) || undefined;
+            }
+          }
+        } catch {
+          console.error('Failed to fetch WhatsApp audio media');
+        }
+      }
+    }
+    const transcript = audioBuffer ? await transcribeVoiceMessage(audioBuffer) : null;
+    const agentText = transcript || messageText;
 
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'WHATSAPP', externalUserId: senderWaId },
@@ -152,7 +209,7 @@ export function createWebhooksRouter(): express.Router {
 
     try {
       await prisma.message.create({
-        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, imageUrl, audioUrl, transcript, mediaType: audioUrl ? 'audio' : imageUrl ? 'image' : undefined, externalId: externalMessageId },
       });
     } catch (err: any) {
       if (err.code === 'P2002') {
@@ -164,11 +221,11 @@ export function createWebhooksRouter(): express.Router {
 
     const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
     if (!greetedInstead) {
-      await generateAndStoreAgentReply(conversation, messageText);
+      await generateAndStoreAgentReply(conversation, agentText, imageBuffer);
     }
   }
 
-  async function handleIncomingInstagramMessage(igAccountId: string, senderIgUserId: string, messageText: string, externalMessageId: string) {
+  async function handleIncomingInstagramMessage(igAccountId: string, senderIgUserId: string, messageText: string, externalMessageId: string, imageUrl?: string, imageBuffer?: Buffer, audioUrl?: string, audioBuffer?: Buffer) {
     const alreadyProcessed = await prisma.message.findUnique({ where: { externalId: externalMessageId } });
     if (alreadyProcessed) {
       console.log('Duplicate Instagram webhook event, skipping');
@@ -181,6 +238,16 @@ export function createWebhooksRouter(): express.Router {
       return;
     }
     const storeId = channel.storeId;
+    if (imageUrl && !imageBuffer) {
+      const igCreds = await getInstagramCredentialsForStore(storeId);
+      imageBuffer = await downloadInboundImage(imageUrl, igCreds?.accessToken) || undefined;
+    }
+    if (audioUrl && !audioBuffer) {
+      const igCreds = await getInstagramCredentialsForStore(storeId);
+      audioBuffer = await downloadInboundAudio(audioUrl, igCreds?.accessToken) || undefined;
+    }
+    const transcript = audioBuffer ? await transcribeVoiceMessage(audioBuffer) : null;
+    const agentText = transcript || messageText;
 
     let conversation = await prisma.conversation.findFirst({
       where: { storeId, channelType: 'INSTAGRAM', externalUserId: senderIgUserId },
@@ -203,7 +270,7 @@ export function createWebhooksRouter(): express.Router {
 
     try {
       await prisma.message.create({
-        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, externalId: externalMessageId },
+        data: { conversationId: conversation.id, sender: 'CUSTOMER', text: messageText, imageUrl, audioUrl, transcript, mediaType: audioUrl ? 'audio' : imageUrl ? 'image' : undefined, externalId: externalMessageId },
       });
     } catch (err: any) {
       if (err.code === 'P2002') {
@@ -215,7 +282,7 @@ export function createWebhooksRouter(): express.Router {
 
     const greetedInstead = await sendOpeningGreetingIfNew(isNewConversation, conversation);
     if (!greetedInstead) {
-      await generateAndStoreAgentReply(conversation, messageText);
+      await generateAndStoreAgentReply(conversation, agentText, imageBuffer);
     }
   }
 
@@ -241,9 +308,11 @@ export function createWebhooksRouter(): express.Router {
             const senderPsid = event.sender?.id;
             const messageText = event.message?.text;
             const messageId = event.message?.mid;
-            if (!senderPsid || !messageText || !messageId || event.message?.is_echo) continue;
+            const imageUrl = event.message?.attachments?.find((attachment: any) => attachment.type === 'image')?.payload?.url;
+            const audioUrl = event.message?.attachments?.find((attachment: any) => attachment.type === 'audio')?.payload?.url;
+            if (!senderPsid || (!messageText && !imageUrl && !audioUrl) || !messageId || event.message?.is_echo) continue;
 
-            await handleIncomingMessengerMessage(pageId, senderPsid, messageText, messageId);
+            await handleIncomingMessengerMessage(pageId, senderPsid, messageText || (audioUrl ? 'Customer sent a voice message.' : 'Customer sent an image.'), messageId, imageUrl, undefined, audioUrl);
           }
 
           // Handle Facebook Post Comment webhooks (feed field)
@@ -318,9 +387,11 @@ export function createWebhooksRouter(): express.Router {
             const senderIgUserId = event.sender?.id;
             const messageText = event.message?.text;
             const messageId = event.message?.mid;
-            if (!senderIgUserId || !messageText || !messageId || event.message?.is_echo) continue;
+            const imageUrl = event.message?.attachments?.find((attachment: any) => attachment.type === 'image')?.payload?.url;
+            const audioUrl = event.message?.attachments?.find((attachment: any) => attachment.type === 'audio')?.payload?.url;
+            if (!senderIgUserId || (!messageText && !imageUrl && !audioUrl) || !messageId || event.message?.is_echo) continue;
 
-            await handleIncomingInstagramMessage(igAccountId, senderIgUserId, messageText, messageId);
+            await handleIncomingInstagramMessage(igAccountId, senderIgUserId, messageText || (audioUrl ? 'Customer sent a voice message.' : 'Customer sent an image.'), messageId, imageUrl, undefined, audioUrl);
           }
 
           // Handle Instagram Post Comment webhooks (comments field)
@@ -387,15 +458,19 @@ export function createWebhooksRouter(): express.Router {
             const messages = value?.messages || [];
 
             for (const msg of messages) {
-              if (msg.type !== 'text' || !msg.text?.body) continue;
+              if (msg.type !== 'text' && msg.type !== 'image' && msg.type !== 'audio') continue;
               const senderWaId = msg.from;
-              const messageText = msg.text.body;
+              const messageText = msg.type === 'text'
+                ? msg.text?.body
+                : msg.type === 'audio'
+                  ? 'Customer sent a voice message.'
+                  : msg.image?.caption || 'Customer sent an image.';
               const externalMessageId = msg.id;
               const contact = contacts.find((c: any) => c.wa_id === senderWaId);
               const customerName = contact?.profile?.name;
 
               if (phoneNumberId && senderWaId && messageText && externalMessageId) {
-                await handleIncomingWhatsAppMessage(phoneNumberId, senderWaId, messageText, externalMessageId, customerName);
+                await handleIncomingWhatsAppMessage(phoneNumberId, senderWaId, messageText, externalMessageId, customerName, msg.type === 'image' ? msg.image?.id : undefined, msg.type === 'audio' ? msg.audio?.id : undefined);
               }
             }
           }

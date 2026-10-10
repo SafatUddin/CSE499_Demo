@@ -1,370 +1,69 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer
-} from 'recharts';
-import { 
-  Sparkles, 
-  Clock, 
-  TrendingUp, 
-  MessageSquare,
-  CheckCircle,
-  AlertTriangle,
-  MoreVertical,
-  ClipboardList
-} from 'lucide-react';
-import { fetchAnalytics, ApiAnalytics, ApiAnalyticsActivity } from '../lib/api';
+import React, { useEffect, useState } from 'react';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Activity, Bot, Clock3, MessageSquare, Users, Zap } from 'lucide-react';
+import { fetchAnalytics, ApiAnalytics } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 2)  return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24)  return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+const COLORS = { blue: '#4d8bff', cyan: '#63d8ff', amber: '#ffcf6b', green: '#7ff0b0', red: '#ff9d92', muted: 'rgba(255,255,255,0.42)' };
+const chartTooltip = { backgroundColor: '#0d0f15', border: '1px solid rgba(255,255,255,0.14)', borderRadius: '10px', color: '#fff', fontSize: '11px' };
+
+type IconType = typeof Activity;
+function MetricCard({ label, value, detail, icon: Icon, accent = COLORS.blue }: { label: string; value: string | number; detail?: string; icon?: IconType; accent?: string }) {
+  return <div className="zone-b-grey3 p-4 rounded-xl border border-white/[0.08] min-h-[92px]"><div className="flex items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-[0.12em] font-bold text-white/45">{label}</span>{Icon && <Icon className="h-3.5 w-3.5" style={{ color: accent }} />}</div><div className="mt-3 flex items-end gap-2"><strong className="text-[25px] leading-none text-white font-bold">{value}</strong>{detail && <span className="text-[10px] text-white/40 mb-0.5">{detail}</span>}</div></div>;
 }
 
-function ActivityIcon({ type }: { type: ApiAnalyticsActivity['type'] }) {
-  if (type === 'complaint') return <AlertTriangle className="h-4 w-4 text-[#ff9d92]" />;
-  if (type === 'inventory')  return <ClipboardList className="h-4 w-4 text-[#ffcf6b]" />;
-  return <CheckCircle className="h-4 w-4 text-[#7ff0b0]" />;
+function Panel({ title, subtitle, children, className = '' }: { title: string; subtitle?: string; children: React.ReactNode; className?: string }) {
+  return <section className={`zone-b-grey2 min-w-0 rounded-xl border border-white/[0.08] p-4 ${className}`}><header className="border-b border-white/[0.07] pb-3"><h3 className="text-[13px] font-bold text-white">{title}</h3>{subtitle && <p className="mt-1 text-[10px] text-white/40">{subtitle}</p>}</header>{children}</section>;
 }
 
-function KpiSkeleton() {
-  return (
-    <div className="zone-b-grey3 p-6 flex flex-col justify-between h-32">
-      <div className="animate-pulse space-y-3">
-        <div className="h-3 w-24 bg-white/10 rounded-full" />
-        <div className="h-9 w-20 bg-white/10 rounded-xl" />
-      </div>
-    </div>
-  );
-}
-
-function ActivitySkeleton() {
-  return (
-    <div className="bg-white/[0.03] border border-white/[0.06] p-3.5 rounded-xl flex gap-3 items-start animate-pulse">
-      <div className="w-8 h-8 rounded-full bg-white/10 shrink-0 mt-0.5" />
-      <div className="flex-grow space-y-2 pt-1">
-        <div className="h-3 w-32 bg-white/10 rounded" />
-        <div className="h-3 w-48 bg-white/10 rounded" />
-      </div>
-    </div>
-  );
+function EmptyPanel({ text = 'No data in this window.' }: { text?: string }) {
+  return <div className="h-[118px] flex items-center justify-center text-[11px] text-white/35">{text}</div>;
 }
 
 export default function AnalyticsDashboard() {
-  const [timeRange, setTimeRange] = useState<'30' | '90'>('30');
-  const [data, setData]           = useState<ApiAnalytics | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState(false);
-  const [dismissedBanner, setDismissedBanner] = useState(false);
+  const [range, setRange] = useState<'7' | '14' | '30'>('30');
+  const [view, setView] = useState<'overview' | 'pipeline'>('overview');
+  const [data, setData] = useState<ApiAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setError(false);
-    fetchAnalytics(timeRange === '90' ? 90 : 30)
-      .then(setData)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [timeRange]);
+    fetchAnalytics(Number(range) as 7 | 14 | 30).then(setData).catch(() => setError(true)).finally(() => setLoading(false));
+  }, [range]);
 
-  const chartData = data?.series ?? [];
+  const series = data?.series ?? [];
+  const split = data ? [
+    { name: 'AI', value: data.currentSplit.aiManaged, color: COLORS.blue },
+    { name: 'Human', value: data.currentSplit.humanActive, color: COLORS.amber },
+    { name: 'Resolved', value: data.currentSplit.closed, color: COLORS.green },
+  ] : [];
+  const firstReplyData = series.map((item) => ({ date: item.date, replies: item.aiReplies + item.humanReplies }));
+  const sourceRows = data?.bySource ?? [];
 
-  return (
-    <div className="w-full flex-grow flex flex-col text-left">
-      <DashboardHeader 
-        searchPlaceholder="Search commands…" 
-      />
+  return <div className="w-full flex-grow flex flex-col text-left">
+    <DashboardHeader searchPlaceholder="Search analytics…" />
+    <main className="w-full flex-grow space-y-4 p-5 md:p-7">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4"><div><p className="text-[10px] uppercase tracking-[0.16em] text-white/40 font-bold">Analytics</p><h1 className="mt-1 text-[23px] font-bold text-white">Analytics</h1><p className="mt-1 text-[11px] text-white/45">Messages handled, how much the AI finished, and where the first reply slows down.</p></div><div className="flex bg-black/40 border border-white/10 p-1 rounded-lg self-start md:self-auto">{(['7', '14', '30'] as const).map((item) => <button key={item} onClick={() => setRange(item)} className={`px-3 py-1.5 rounded-md text-[10px] font-bold cursor-pointer ${range === item ? 'bg-white/15 border border-white/20 text-white' : 'text-white/40 hover:text-white'}`}>{item}d</button>)}</div></header>
+      <nav className="flex gap-1 border-b border-white/[0.08]">{(['overview', 'pipeline'] as const).map((item) => <button key={item} onClick={() => setView(item)} className={`px-3 py-2 text-[10px] font-bold capitalize border-b-2 cursor-pointer ${view === item ? 'text-white border-[#4d8bff]' : 'text-white/40 border-transparent hover:text-white'}`}>{item}</button>)}</nav>
 
-      <div className="w-full flex-grow space-y-6 p-6 md:p-8">
+      {error ? <div className="h-64 flex items-center justify-center text-sm text-white/45">Unable to load analytics data.</div> : view === 'pipeline' ? <div className="zone-b-grey2 rounded-xl border border-white/[0.08] p-8 text-center text-sm text-white/45">Pipeline data will appear when lead stages and follow-up events are configured.</div> : <>
+        <section><div className="flex items-center justify-between mb-2"><h2 className="text-[11px] uppercase tracking-[0.12em] font-bold text-white/60">Conversations</h2><span className="text-[10px] text-white/35">Last {range} days</span></div><div className="grid grid-cols-2 lg:grid-cols-4 gap-2"><MetricCard label="Messages handled" value={loading ? '—' : data?.kpis.customerMessages ?? 0} detail="incoming" icon={MessageSquare} /><MetricCard label="AI replies" value={loading ? '—' : data?.kpis.aiReplies ?? 0} detail="delivered" icon={Bot} accent={COLORS.cyan} /><MetricCard label="Human replies" value={loading ? '—' : data?.kpis.humanReplies ?? 0} detail="delivered" icon={Users} accent={COLORS.amber} /><MetricCard label="People reached" value={loading ? '—' : data?.kpis.peopleReached ?? 0} detail="unique chats" icon={Users} accent={COLORS.green} /></div></section>
 
-        {error && !loading && (
-          <div className="flex items-center justify-center h-64 text-white/50 text-sm font-sans">
-            Unable to load analytics data.
-          </div>
-        )}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3"><Panel title="Messages per day" subtitle="Customer messages, AI replies, and human replies" className="lg:col-span-8"><div className="h-[190px] pt-4"><ResponsiveContainer width="100%" height="100%"><BarChart data={series} margin={{ top: 4, right: 4, left: -25, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="date" stroke={COLORS.muted} fontSize={9} tickLine={false} /><YAxis stroke={COLORS.muted} fontSize={9} tickLine={false} axisLine={false} allowDecimals={false} /><Tooltip contentStyle={chartTooltip} /><Legend wrapperStyle={{ fontSize: '10px', color: COLORS.muted }} /><Bar name="Customer" dataKey="customerMessages" fill={COLORS.amber} radius={[2, 2, 0, 0]} /><Bar name="AI" dataKey="aiReplies" fill={COLORS.blue} radius={[2, 2, 0, 0]} /><Bar name="Human" dataKey="humanReplies" fill={COLORS.green} radius={[2, 2, 0, 0]} /></BarChart></ResponsiveContainer></div></Panel><Panel title="Handled by AI alone" subtitle="Current conversation split" className="lg:col-span-4"><div className="h-[190px] pt-1"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={split} dataKey="value" nameKey="name" innerRadius={48} outerRadius={68} paddingAngle={3} stroke="none">{split.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip contentStyle={chartTooltip} /><Legend verticalAlign="bottom" wrapperStyle={{ fontSize: '10px', color: COLORS.muted }} /></PieChart></ResponsiveContainer></div></Panel></div>
 
-        {!error && (
-          <>
-            {/* 4 Stat Cards (§5.10) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3"><Panel title="WhatsApp messages" subtitle="Message flow over the selected window" className="lg:col-span-6"><div className="h-[145px] pt-4"><ResponsiveContainer width="100%" height="100%"><AreaChart data={series} margin={{ top: 5, right: 4, left: -25, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="date" stroke={COLORS.muted} fontSize={9} tickLine={false} /><YAxis stroke={COLORS.muted} fontSize={9} tickLine={false} axisLine={false} allowDecimals={false} /><Tooltip contentStyle={chartTooltip} /><Area type="monotone" dataKey="customerMessages" name="Messages" stroke={COLORS.cyan} fill="rgba(99,216,255,0.12)" /></AreaChart></ResponsiveContainer></div></Panel><Panel title="How fast the first reply comes" subtitle="Delivered replies after the first customer message" className="lg:col-span-6"><div className="h-[145px] pt-4"><ResponsiveContainer width="100%" height="100%"><AreaChart data={firstReplyData} margin={{ top: 5, right: 4, left: -25, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="date" stroke={COLORS.muted} fontSize={9} tickLine={false} /><YAxis stroke={COLORS.muted} fontSize={9} tickLine={false} axisLine={false} allowDecimals={false} /><Tooltip contentStyle={chartTooltip} /><Area type="monotone" dataKey="replies" name="Replies" stroke={COLORS.green} fill="rgba(127,240,176,0.12)" /></AreaChart></ResponsiveContainer></div></Panel></div>
 
-              {loading ? (
-                <>
-                  <KpiSkeleton />
-                  <KpiSkeleton />
-                  <KpiSkeleton />
-                  <KpiSkeleton />
-                </>
-              ) : (
-                <>
-                  {/* KPI 1: AI automation rate */}
-                  <div className="zone-b-grey3 p-6 flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                      <span className="font-sans text-[11px] text-white/60 font-bold tracking-[0.10em]">AI automation rate</span>
-                      <Sparkles className="h-5 w-5 text-[#4d8bff]" />
-                    </div>
-                    <div className="mt-4 flex items-baseline gap-2">
-                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
-                        {data?.kpis.automationRate ?? 0}%
-                      </h3>
-                      {data?.kpis.automationRateDeltaPoints != null && (
-                        <span className={`px-2 py-0.5 text-[10.5px] font-bold rounded-full ${data.kpis.automationRateDeltaPoints >= 0 ? 'status-success' : 'status-danger'}`}>
-                          {data.kpis.automationRateDeltaPoints >= 0 ? '+' : ''}{data.kpis.automationRateDeltaPoints}pts
-                        </span>
-                      )}
-                    </div>
-                  </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3"><Panel title="What are people asking about?" subtitle="Top conversation source data"><EmptyPanel text={sourceRows.length ? `${sourceRows.reduce((sum, item) => sum + item.conversations, 0)} conversations categorized` : 'No data in this window.'} /></Panel><Panel title="Busiest pages" subtitle="Conversation volume by page"><EmptyPanel text="No data in this window." /></Panel></div>
+        <Panel title="Follow-ups" subtitle="Follow-up activity · selected window"><div className="h-[48px] flex items-center text-[11px] text-white/35">No reminders planned or sent. Configure a channel-safe follow-up rule before sending proactive messages.</div></Panel>
 
-                  {/* KPI 2: Avg response time */}
-                  <div className="zone-b-grey3 p-6 flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                      <span className="font-sans text-[11px] text-white/60 font-bold tracking-[0.10em]">Avg response time</span>
-                      <Clock className="h-5 w-5 text-[#4d8bff]" />
-                    </div>
-                    <div className="mt-4 flex items-baseline gap-2">
-                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
-                        {data?.kpis.averageResponseTimeSeconds != null ? `${data.kpis.averageResponseTimeSeconds}s` : '—'}
-                      </h3>
-                      {data?.kpis.averageResponseTimeSeconds == null && (
-                        <span className="status-neutral px-2 py-0.5 text-[10.5px] font-bold rounded-full">No replies yet</span>
-                      )}
-                    </div>
-                  </div>
+        <section><div className="flex items-center justify-between mb-2"><h2 className="text-[11px] uppercase tracking-[0.12em] font-bold text-white/60">Handoffs</h2><span className="text-[10px] text-white/35">When a person is needed</span></div><div className="grid grid-cols-2 lg:grid-cols-4 gap-2"><MetricCard label="Requests to humans" value={data?.handoffs.requestsToHumans ?? 0} icon={Users} accent={COLORS.amber} /><MetricCard label="Auto-returned" value={data?.handoffs.autoReturned ?? 0} icon={Bot} accent={COLORS.blue} /><MetricCard label="Total events" value={data?.handoffs.totalEvents ?? 0} icon={Activity} /><MetricCard label="Avg events / day" value={data?.handoffs.averageEventsPerDay ?? 0} icon={Zap} accent={COLORS.cyan} /></div></section>
+        <section><div className="flex items-center justify-between mb-2"><h2 className="text-[11px] uppercase tracking-[0.12em] font-bold text-white/60">Response & SLA</h2><span className="text-[10px] text-white/35">First-response target: 15m</span></div><div className="grid grid-cols-2 lg:grid-cols-4 gap-2"><MetricCard label="Avg first response" value={data?.kpis.averageResponseTimeSeconds != null ? `${data.kpis.averageResponseTimeSeconds}s` : '—'} icon={Clock3} /><MetricCard label="SLA breach rate" value={`${data?.kpis.slaBreachRate ?? 0}%`} icon={Activity} accent={COLORS.red} /><MetricCard label="Avg handling time" value={data?.kpis.averageHandlingTimeSeconds != null ? `${data.kpis.averageHandlingTimeSeconds}s` : '—'} icon={Clock3} /><MetricCard label="Longest wait now" value={data?.kpis.longestWaitingSeconds != null ? `${Math.floor(data.kpis.longestWaitingSeconds / 60)}m` : '—'} detail={`${data?.kpis.waitingConversations ?? 0} waiting`} icon={Clock3} accent={COLORS.amber} /></div></section>
 
-                  {/* KPI 3: Order uplift */}
-                  <div className="zone-b-grey3 p-6 flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                      <span className="font-sans text-[11px] text-white/60 font-bold tracking-[0.10em]">Order uplift</span>
-                      <TrendingUp className="h-5 w-5 text-[#4d8bff]" />
-                    </div>
-                    <div className="mt-4 flex items-baseline gap-2">
-                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
-                        {data?.kpis.orderUpliftPercent != null
-                          ? `${data.kpis.orderUpliftPercent >= 0 ? '+' : ''}${data.kpis.orderUpliftPercent}%`
-                          : data?.kpis.orderCount || 0}
-                      </h3>
-                      <span className="status-success px-2 py-0.5 text-[10.5px] font-bold rounded-full">
-                        {data?.kpis.orderUpliftPercent != null ? 'vs. prior period' : 'orders'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* KPI 4: AI messages used */}
-                  <div className="zone-b-grey3 p-6 flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                      <span className="font-sans text-[11px] text-white/60 font-bold tracking-[0.10em]">AI messages used</span>
-                      <MessageSquare className="h-5 w-5 text-[#4d8bff]" />
-                    </div>
-                    <div className="mt-4">
-                      <h3 className="text-[34px] font-[750] tracking-[-0.02em] text-white leading-none">
-                        {(data?.kpis.aiMessages ?? 0).toLocaleString()}
-                      </h3>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Main Chart + Activity Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Curve Chart (8 Cols) */}
-              <div className="lg:col-span-8 zone-b-grey2 p-6 flex flex-col justify-between space-y-4">
-                <header className="flex justify-between items-center pb-4 border-b border-white/[0.07]">
-                  <div>
-                    <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">Conversations vs. sales</h3>
-                    <p className="text-[13px] text-white/55 mt-0.5">
-                      Operational performance metrics over the last {timeRange} days.
-                    </p>
-                  </div>
-
-                  {/* 30/90-day Segmented Control (§5.8) */}
-                  <div className="flex bg-black/45 border border-white/10 p-1 rounded-[13px]">
-                    <button
-                      onClick={() => setTimeRange('30')}
-                      className={`px-3.5 py-1.5 rounded-lg font-sans text-xs font-semibold cursor-pointer transition-all ${
-                        timeRange === '30' 
-                          ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md' 
-                          : 'text-white/50 hover:text-white'
-                      }`}
-                    >
-                      30 days
-                    </button>
-                    <button
-                      onClick={() => setTimeRange('90')}
-                      className={`px-3.5 py-1.5 rounded-lg font-sans text-xs font-semibold cursor-pointer transition-all ${
-                        timeRange === '90' 
-                          ? 'bg-gradient-to-b from-white/20 to-white/[0.07] border border-white/20 text-white shadow-md' 
-                          : 'text-white/50 hover:text-white'
-                      }`}
-                    >
-                      90 days
-                    </button>
-                  </div>
-                </header>
-
-                {/* Catmull-Rom smooth curve styling (§5.10) */}
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={chartData}
-                      margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                    >
-                      <defs>
-                        <linearGradient id="colorConversations" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4d8bff" stopOpacity={0.38}/>
-                          <stop offset="95%" stopColor="#4d8bff" stopOpacity={0}/>
-                        </linearGradient>
-                        <linearGradient id="colorConverted" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ffffff" stopOpacity={0.16}/>
-                          <stop offset="95%" stopColor="#ffffff" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" vertical={false} />
-                      <XAxis 
-                        dataKey="date" 
-                        stroke="rgba(255,255,255,0.35)" 
-                        fontSize={10.5} 
-                        fontFamily="Inter" 
-                        tickLine={false} 
-                        dy={10}
-                      />
-                      <YAxis 
-                        stroke="rgba(255,255,255,0.35)" 
-                        fontSize={10.5} 
-                        fontFamily="Inter" 
-                        tickLine={false} 
-                        axisLine={false} 
-                      />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#0c0c0e', 
-                          border: '1px solid rgba(255, 255, 255, 0.15)', 
-                          borderRadius: '12px',
-                          fontFamily: 'Inter',
-                          fontSize: '12px'
-                        }}
-                        itemStyle={{ color: '#ffffff' }}
-                        labelStyle={{ color: 'rgba(255,255,255,0.6)', fontSize: '10px', fontWeight: 'bold' }}
-                      />
-                      <Area 
-                        name="Conversations"
-                        type="monotone" 
-                        dataKey="conversations" 
-                        stroke="#4d8bff" 
-                        strokeWidth={2.75}
-                        fillOpacity={1} 
-                        fill="url(#colorConversations)" 
-                      />
-                      <Area 
-                        name="Converted sales"
-                        type="monotone" 
-                        dataKey="convertedSales" 
-                        stroke="rgba(255,255,255,0.50)" 
-                        strokeWidth={2}
-                        fillOpacity={1} 
-                        fill="url(#colorConverted)" 
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="flex gap-6 pt-4 border-t border-white/[0.07] text-xs font-sans text-white/60">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#4d8bff]" />
-                    <span>Conversations</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-white/50" />
-                    <span>Converted sales</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent activity feed (4 Cols) */}
-              <div className="lg:col-span-4 zone-b-grey2 p-6 flex flex-col h-[460px]">
-                <header className="flex justify-between items-center pb-4 border-b border-white/[0.07] mb-4">
-                  <h3 className="font-sans font-bold text-[19px] text-white tracking-tight">
-                    Recent activity
-                  </h3>
-                  <button className="text-white/40 hover:text-white transition-colors cursor-pointer p-1">
-                    <MoreVertical className="h-5 w-5" />
-                  </button>
-                </header>
-
-                <div className="flex-grow overflow-y-auto space-y-3 pr-1 scrollbar-thin scrollbar-thumb-white/10">
-                  {loading ? (
-                    <>
-                      <ActivitySkeleton />
-                      <ActivitySkeleton />
-                      <ActivitySkeleton />
-                    </>
-                  ) : (
-                    (data?.recentActivity ?? []).map(item => (
-                      <div
-                        key={item.id}
-                        className="zone-b-grey3 p-3.5 rounded-xl flex gap-3 text-left items-start hover:bg-white/[0.06] transition-all"
-                      >
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
-                          <ActivityIcon type={item.type} />
-                        </div>
-                        <div className="flex-grow space-y-1">
-                          <div className="flex justify-between items-center text-[11px] font-sans font-bold">
-                            <span className="text-white">{item.title}</span>
-                            <span className="text-white/40 font-normal">{relativeTime(item.time)}</span>
-                          </div>
-                          <p className="text-xs text-white/65 leading-relaxed">{item.body}</p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <button className="w-full mt-4 btn-glass py-2.5 font-sans font-bold text-xs cursor-pointer">
-                  View all history
-                </button>
-              </div>
-            </div>
-
-            {/* AI sales strategy update banner (§8) */}
-            {!dismissedBanner && (
-              <div className="zone-b-grey3 p-5 rounded-2xl border border-white/14 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4 text-left">
-                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#4d8bff]/30 to-[#183aa7]/20 border border-[#7aa8ff]/40 flex items-center justify-center text-[#7aa8ff] shrink-0 shadow-lg">
-                    <Sparkles className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h4 className="font-sans font-bold text-base text-white">AI sales strategy update</h4>
-                    <p className="text-xs text-white/60 mt-0.5">
-                      Based on performance trends, Remlin recommends a promotional bundle for high-converting items.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 w-full md:w-auto shrink-0">
-                  <button className="btn-light-primary px-5 py-2.5 text-xs font-bold cursor-pointer">
-                    Apply insight
-                  </button>
-                  <button 
-                    onClick={() => setDismissedBanner(true)}
-                    className="btn-glass px-4 py-2.5 text-xs font-bold cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3"><Panel title="Activity over time" subtitle="Incoming messages and delivered replies" className="lg:col-span-8"><div className="h-[175px] pt-4"><ResponsiveContainer width="100%" height="100%"><AreaChart data={series} margin={{ top: 4, right: 4, left: -25, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} /><XAxis dataKey="date" stroke={COLORS.muted} fontSize={9} tickLine={false} /><YAxis stroke={COLORS.muted} fontSize={9} tickLine={false} axisLine={false} allowDecimals={false} /><Tooltip contentStyle={chartTooltip} /><Area type="monotone" dataKey="customerMessages" name="Customer" stroke={COLORS.amber} fill="rgba(255,207,107,0.1)" /><Area type="monotone" dataKey="aiReplies" name="Auto-replies" stroke={COLORS.blue} fill="rgba(77,139,255,0.1)" /></AreaChart></ResponsiveContainer></div></Panel><Panel title="Current split" subtitle="All conversations" className="lg:col-span-4"><div className="h-[175px] pt-1"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={split} dataKey="value" nameKey="name" innerRadius={42} outerRadius={62} paddingAngle={3} stroke="none">{split.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip contentStyle={chartTooltip} /><Legend verticalAlign="bottom" wrapperStyle={{ fontSize: '10px', color: COLORS.muted }} /></PieChart></ResponsiveContainer></div></Panel></div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3"><Panel title="Busiest pages" subtitle="No handoffs in this window"><EmptyPanel /></Panel><Panel title="By source" subtitle="Connected channels"><div className="min-h-[118px] py-3">{sourceRows.length ? sourceRows.map((item) => <div key={item.source} className="flex justify-between py-2 border-b border-white/[0.07] text-[11px] text-white/55"><span className="capitalize">{item.source}</span><strong className="text-white">{item.conversations}</strong></div>) : <EmptyPanel />}</div></Panel></div>
+  </>}
+    </main>
+  </div>;
 }

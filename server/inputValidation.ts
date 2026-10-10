@@ -16,6 +16,13 @@ export const MAX_PERSONA_TONE_LENGTH = 500;
 export const MAX_PERSONA_STYLE_LENGTH = 50;
 export const MAX_PERSONA_INSTRUCTIONS_LENGTH = 10_000;
 export const MAX_OPENING_TEXT_LENGTH = 2000;
+export const MAX_KNOWLEDGE_TITLE_LENGTH = 200;
+export const MAX_KNOWLEDGE_BODY_LENGTH = 20_000;
+export const MAX_APPOINTMENT_NAME_LENGTH = 200;
+export const MAX_APPOINTMENT_PHONE_LENGTH = 30;
+export const MAX_APPOINTMENT_SERVICE_LENGTH = 200;
+export const MAX_APPOINTMENT_NOTES_LENGTH = 2000;
+export const MAX_ADVANCE_TRANSACTION_ID_LENGTH = 200;
 
 // Profile / merchant settings limits
 export const MAX_MERCHANT_NAME_LENGTH = 200;
@@ -39,6 +46,24 @@ export type ValidatedProductInput = {
   status: 'PENDING' | 'TRAINED';
 };
 
+export type ValidatedKnowledgeInput = {
+  title: string;
+  body: string;
+  enabled?: boolean;
+};
+
+export type ValidatedAppointmentInput = {
+  customerName: string;
+  customerPhone?: string;
+  service: string;
+  startsAt: Date;
+  endsAt: Date;
+  advanceAmount?: number;
+  advancePaymentMethod?: string;
+  advanceTransactionId?: string;
+  notes?: string;
+};
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -55,6 +80,71 @@ function optionalString(value: unknown, maxLen: number): string | null | undefin
   if (typeof value !== 'string') return null;
   if (value.length > maxLen) return null;
   return value;
+}
+
+export function validateKnowledgeInput(body: unknown, partial = false): ValidatedKnowledgeInput | null {
+  if (!isPlainObject(body)) return null;
+  const result: ValidatedKnowledgeInput = { title: '', body: '' };
+
+  if (!partial || body.title !== undefined) {
+    const title = nonEmptyString(body.title, MAX_KNOWLEDGE_TITLE_LENGTH);
+    if (title === null) return null;
+    result.title = title;
+  }
+  if (!partial || body.body !== undefined) {
+    const text = nonEmptyString(body.body, MAX_KNOWLEDGE_BODY_LENGTH);
+    if (text === null) return null;
+    result.body = text;
+  }
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') return null;
+    result.enabled = body.enabled;
+  }
+  return result;
+}
+
+export function validateAppointmentInput(body: unknown): ValidatedAppointmentInput | null {
+  if (!isPlainObject(body)) return null;
+  const customerName = nonEmptyString(body.customerName, MAX_APPOINTMENT_NAME_LENGTH);
+  const service = nonEmptyString(body.service, MAX_APPOINTMENT_SERVICE_LENGTH);
+  const startsAt = typeof body.startsAt === 'string' ? new Date(body.startsAt) : null;
+  const endsAt = typeof body.endsAt === 'string' ? new Date(body.endsAt) : null;
+  if (!customerName || !service || !startsAt || !endsAt || !Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime())) return null;
+  if (startsAt.getTime() <= Date.now() || endsAt.getTime() <= startsAt.getTime() || endsAt.getTime() - startsAt.getTime() > 24 * 60 * 60 * 1000) return null;
+
+  const customerPhone = optionalString(body.customerPhone, MAX_APPOINTMENT_PHONE_LENGTH);
+  const notes = optionalString(body.notes, MAX_APPOINTMENT_NOTES_LENGTH);
+  const advancePaymentMethod = optionalString(body.advancePaymentMethod, 50);
+  const advanceTransactionId = optionalString(body.advanceTransactionId, MAX_ADVANCE_TRANSACTION_ID_LENGTH);
+  if (customerPhone === null || notes === null || advancePaymentMethod === null || advanceTransactionId === null) return null;
+
+  let advanceAmount: number | undefined;
+  if (body.advanceAmount !== undefined && body.advanceAmount !== null && body.advanceAmount !== '') {
+    advanceAmount = typeof body.advanceAmount === 'number' ? body.advanceAmount : Number(body.advanceAmount);
+    if (!Number.isFinite(advanceAmount) || advanceAmount < 0 || advanceAmount > 1_000_000) return null;
+  }
+
+  return {
+    customerName,
+    ...(customerPhone !== undefined ? { customerPhone } : {}),
+    service,
+    startsAt,
+    endsAt,
+    ...(advanceAmount !== undefined ? { advanceAmount } : {}),
+    ...(advancePaymentMethod !== undefined ? { advancePaymentMethod } : {}),
+    ...(advanceTransactionId !== undefined ? { advanceTransactionId } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+  };
+}
+
+export function canTransitionAppointmentStatus(current: string, next: string): boolean {
+  const transitions: Record<string, Set<string>> = {
+    REQUESTED: new Set(['REQUESTED', 'CONFIRMED', 'CANCELLED']),
+    CONFIRMED: new Set(['CONFIRMED', 'COMPLETED', 'CANCELLED']),
+    CANCELLED: new Set(['CANCELLED']),
+    COMPLETED: new Set(['COMPLETED']),
+  };
+  return transitions[current]?.has(next) ?? false;
 }
 
 export function parseValidatedPrice(price: unknown): number | null {

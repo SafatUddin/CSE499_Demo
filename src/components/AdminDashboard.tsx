@@ -10,11 +10,10 @@ interface MerchantAnalytics {
   merchantAvatarUrl: string | null;
   storeName: string;
   storeBusinessPhone: string | null;
+  storeBusinessType: string | null;
   storeWebsite: string | null;
   storeStreetAddress: string | null;
   storeCity: string | null;
-  storeProvince: string | null;
-  storePostalCode: string | null;
   storeCountry: string | null;
   totalConversations: number;
   convertedConversations: number;
@@ -436,16 +435,21 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
-                  {(selectedMerchant.storeStreetAddress ||
+                  {(selectedMerchant.storeBusinessType ||
+                    selectedMerchant.storeStreetAddress ||
                     selectedMerchant.storeCity ||
-                    selectedMerchant.storeProvince ||
-                    selectedMerchant.storePostalCode ||
                     selectedMerchant.storeCountry) && (
                     <div className="flex items-start gap-3">
                       <MapPin className="h-4 w-4 text-white/40 mt-0.5" />
                       <div className="flex-1">
-                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Address</p>
+                        <p className="text-[11px] text-white/40 uppercase tracking-wider mb-1">Business Details</p>
                         <p className="text-[14px] text-white font-medium leading-relaxed">
+                          {selectedMerchant.storeBusinessType && (
+                            <>
+                              {selectedMerchant.storeBusinessType}
+                              <br />
+                            </>
+                          )}
                           {selectedMerchant.storeStreetAddress && (
                             <>
                               {selectedMerchant.storeStreetAddress}
@@ -453,11 +457,6 @@ export default function AdminDashboard() {
                             </>
                           )}
                           {selectedMerchant.storeCity && `${selectedMerchant.storeCity}, `}
-                          {selectedMerchant.storeProvince && `${selectedMerchant.storeProvince} `}
-                          {selectedMerchant.storePostalCode}
-                          {(selectedMerchant.storeCity ||
-                            selectedMerchant.storeProvince ||
-                            selectedMerchant.storePostalCode) && <br />}
                           {selectedMerchant.storeCountry}
                         </p>
                       </div>

@@ -55,7 +55,7 @@ Priority order, per that pass's own reasoning:
 2. ~~Grounding guardrail~~ — done, see above.
 3. **Order flow as a real state machine.** `AI_AGENT_ORDER_MANAGEMENT_RULES.md`'s never/always rules are currently enforced piecemeal across `checkoutSecurity.ts` + a ~300-line orchestration block in `conversationEngine.ts`, using a stringly-encoded `Conversation.awaitingQuantityFor` (`CONFIRM:sku:qty` / `DETAILS:sku:qty` / `CANCEL_PENDING:id`) rather than a named enum. Note for whoever picks this up: there are actually **two coexisting confirmation mechanisms** today — the per-item guided flow (`ask_qty → confirm → details`) and a separate "cart+address already exist, show summary" flow (`orderConfirmationRequested`) — a real state-machine refactor needs to either unify these or explicitly model both, not just rename the existing states. Higher risk/reward than the other open items since this file has already had several real bugs fixed in it (2026-09-29) and isn't small.
 4. Real analytics from logged AI metadata (`Message.meta`: model, latency, tokens, fallback path) — replaces the last fully-mock screen (Analytics).
-5. Image understanding (customer sends a photo, model matches it to a catalog SKU) — the main feature gap vs. LazyChat.
+5. ~~Image understanding~~ — inbound Messenger/Instagram/WhatsApp photos are validated, compared against catalog images with Gemini, and passed through a catalog-SKU-bound exact/ambiguous/no-match flow. See `server/imageRecognition.ts` and `scripts/image-recognition-smoke.ts`.
 6. Tiered model routing (cheap model for language-ID/intent/complaint, stronger model only for the final customer-facing reply; skip the LLM reply entirely on a complaint).
 7. LLM-narrated insights (compute the "AI sales strategy update" numbers in SQL, let the model only write the explanation).
 8. Cart-abandonment follow-ups (scheduled job; cart state already exists on `Conversation.cart`).
@@ -76,7 +76,7 @@ Not scheduled yet — surfaced 2026-08-14 comparing against LazyChat (Bangladesh
 - ❌ Team/multi-user management — ShopMate is single-merchant/single-user per store; LazyChat's paid tiers scale by team seats.
 - ❌ Broadcast/campaign messaging — personalized order confirmations, restock alerts, promotional blasts to segmented audiences. ShopMate only ever reacts to inbound messages.
 - ❌ Cart abandonment automation — no proactive follow-up on stalled carts (cart state already exists on `Conversation.cart`, so this is mostly a scheduled-job problem, not a new data model).
-- ❌ Reverse image recognition — a customer sending a product photo isn't understood; ShopMate can only send photos outward (built 2026-08-14), not interpret incoming ones.
+- ✅ Reverse image recognition — inbound Messenger/Instagram/WhatsApp images are accepted, provider media is validated by size and magic bytes, and Gemini results are constrained to the authenticated store's catalog. Ambiguous results never auto-select a SKU.
 - ❌ Live-agent escalation with full context — only the Copilot Active/Managed toggle exists today, not a dedicated handoff flow.
 - ❌ Real website chat widget — `Store.widgetKey` exists in schema but nothing implements it; came up when scoping the opening-greeting feature.
 - ❌ WooCommerce integration — still a mock toggle (Shopify sync is real, per teammate's recent commits).

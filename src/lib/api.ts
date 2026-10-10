@@ -288,6 +288,9 @@ export interface ApiChatMessage {
   sender: 'customer' | 'ai' | 'merchant';
   text: string;
   imageUrl?: string;
+  audioUrl?: string;
+  transcript?: string;
+  mediaType?: string;
   time: string;
   pending?: boolean;
 }
@@ -505,6 +508,45 @@ export function updateOrderStatus(id: string, status: 'Processing' | 'On the Way
   return request<ApiOrder>(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
 }
 
+export interface ApiAppointment {
+  id: string;
+  conversationId: string | null;
+  customerName: string;
+  customerPhone: string | null;
+  service: string;
+  startsAt: string;
+  endsAt: string;
+  status: 'REQUESTED' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
+  advanceAmount: number | null;
+  advancePaymentMethod: string | null;
+  advanceTransactionId: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listAppointments() {
+  return request<{ appointments: ApiAppointment[] }>('/api/appointments');
+}
+
+export function createAppointment(input: {
+  customerName: string;
+  customerPhone?: string;
+  service: string;
+  startsAt: string;
+  endsAt: string;
+  advanceAmount?: number;
+  advancePaymentMethod?: string;
+  advanceTransactionId?: string;
+  notes?: string;
+}) {
+  return request<ApiAppointment>('/api/appointments', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateAppointmentStatus(id: string, status: ApiAppointment['status']) {
+  return request<ApiAppointment>(`/api/appointments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+}
+
 export function createOrderFromConversation(conversationId: string, input: { customerName?: string; address: string }) {
   return request<ApiOrder>(`/api/conversations/${conversationId}/orders`, {
     method: 'POST',
@@ -521,8 +563,8 @@ export interface ApiAnalyticsActivity {
 }
 
 export interface ApiAnalytics {
-  range: 30 | 90;
-  series: { date: string; conversations: number; convertedSales: number }[];
+  range: 7 | 14 | 30 | 90;
+  series: { date: string; conversations: number; convertedSales: number; customerMessages: number; aiReplies: number; humanReplies: number }[];
   kpis: {
     automationRate: number;
     automationRateDeltaPoints: number | null;
@@ -532,10 +574,31 @@ export interface ApiAnalytics {
     revenue: number;
     aiMessages: number;
     complaints: number;
+    customerMessages: number;
+    aiReplies: number;
+    humanReplies: number;
+    peopleReached: number;
+    averageAiResponseTimeSeconds: number | null;
+    averageHumanResponseTimeSeconds: number | null;
+    longestWaitingSeconds: number | null;
+    waitingConversations: number;
+    slaBreachRate: number;
+    averageHandlingTimeSeconds: number | null;
+  };
+  currentSplit: { aiManaged: number; humanActive: number; closed: number };
+  handoffs: { requestsToHumans: number; autoReturned: number; totalEvents: number; averageEventsPerDay: number };
+  busiestPages: { page: string; conversations: number }[];
+  bySource: { source: string; conversations: number }[];
+  aiHealth: {
+    totalMessages: number;
+    averageLatencyMs: number | null;
+    fallbackRate: number;
+    tokensUsed: number;
+    modelBreakdown: { model: string; count: number; percentage: number }[];
   };
   recentActivity: ApiAnalyticsActivity[];
 }
 
-export function fetchAnalytics(range: 30 | 90 = 30) {
+export function fetchAnalytics(range: 7 | 14 | 30 | 90 = 30) {
   return request<ApiAnalytics>(`/api/analytics?range=${range}`);
 }

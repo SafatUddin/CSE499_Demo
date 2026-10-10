@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Archive,
   AlertOctagon
+  ,Mic2
 } from 'lucide-react';
 import { Conversation, ChatMessage, Product } from '../types';
 import { sendConversationMessage, approveDraftMessage, createOrderFromConversation, updateConversationCart, updateConversationComplaint, updateConversationArchived, updateConversationSpam, listOrders, updateOrderStatus, ApiOrder } from '../lib/api';
@@ -260,7 +261,7 @@ export default function InboxConsole({
     const now = new Date();
     const optimisticMsg: ChatMessage = {
       id: `m-local-${Date.now()}`,
-      sender: isSimulatedCustomerChannel ? 'customer' : 'merchant',
+      sender: 'merchant',
       text: textToSend,
       time: now.toISOString() // Store as ISO string
     };
@@ -275,15 +276,13 @@ export default function InboxConsole({
     });
     setInputText('');
 
-    if (isSimulatedCustomerChannel) {
-      setIsTyping(true);
-    }
+    setIsTyping(false);
 
     try {
       const updated = await sendConversationMessage(
         activeChat.id,
         textToSend,
-        isSimulatedCustomerChannel ? 'customer' : 'merchant',
+        'merchant',
         discardDraftId || undefined
       );
       onUpdateConversation(activeChat.id, updated);
@@ -861,6 +860,20 @@ export default function InboxConsole({
                               </div>
                             )}
                             <p>{m.text.replace(/<[^>]+>/g, '').trim()}</p>
+                            {m.audioUrl && (
+                              <div className="mt-2 space-y-2">
+                                <div className="flex items-center gap-2 text-[11px] text-white/60">
+                                  <Mic2 className="h-3.5 w-3.5" />
+                                  <span>Voice message</span>
+                                </div>
+                                <audio controls preload="none" src={m.audioUrl} className="w-full max-w-[240px] h-8" />
+                                {m.transcript && (
+                                  <div className="border-l-2 border-white/20 pl-2 text-[11px] text-white/60 leading-relaxed">
+                                    Transcript: {m.transcript}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             {m.imageUrl && (
                               <img src={m.imageUrl} alt="" className="mt-2 rounded-xl max-w-[220px] max-h-[220px] object-cover border border-white/10" />
                             )}

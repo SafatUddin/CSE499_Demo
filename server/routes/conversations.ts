@@ -32,6 +32,18 @@ import {
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// The shared database may temporarily lag behind additive message migrations. Keep
+// core conversation reads limited to columns present before voice-message support;
+// the voice migration enables the richer media fields once deployed.
+const legacyInboxMessageSelect = {
+  id: true,
+  sender: true,
+  text: true,
+  imageUrl: true,
+  pending: true,
+  createdAt: true,
+} as const;
+
 export function createConversationsRouter(): express.Router {
   const router = express.Router();
 
@@ -44,7 +56,7 @@ export function createConversationsRouter(): express.Router {
       const [conversations, lowStockProducts] = await Promise.all([
         prisma.conversation.findMany({
           where: { storeId },
-          include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'desc' }, take: 1 } },
           orderBy: { lastMessageAt: 'desc' },
           take: 20,
         }),
@@ -96,7 +108,14 @@ export function createConversationsRouter(): express.Router {
     try {
       const conversations = await prisma.conversation.findMany({
         where: { storeId: req.auth!.storeId },
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: {
+          // Keep the inbox readable while the additive voice-message migration is
+          // waiting for deployment on a shared database.
+          messages: {
+            select: legacyInboxMessageSelect,
+            orderBy: { createdAt: 'asc' },
+          },
+        },
         orderBy: { lastMessageAt: 'desc' },
       });
       res.json(conversations.map(toPublicConversation));
@@ -172,7 +191,7 @@ export function createConversationsRouter(): express.Router {
       const updated = await prisma.conversation.update({
         where: { id: conversation.id },
         data: dataToUpdate,
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
@@ -265,7 +284,7 @@ export function createConversationsRouter(): express.Router {
 
         const updated = await prisma.conversation.findUnique({
           where: { id: conversation.id },
-          include: { messages: { orderBy: { createdAt: 'asc' } } },
+          include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
         });
         return res.json(toPublicConversation(updated));
       }
@@ -276,7 +295,7 @@ export function createConversationsRouter(): express.Router {
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
@@ -339,7 +358,7 @@ export function createConversationsRouter(): express.Router {
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
@@ -379,11 +398,10 @@ export function createConversationsRouter(): express.Router {
         customInstructions: store.customInstructions,
         merchantBusinessInfo: {
           businessPhone: store.businessPhone || undefined,
+          businessType: store.businessType || undefined,
           website: store.website || undefined,
           streetAddress: store.streetAddress || undefined,
           city: store.city || undefined,
-          province: store.province || undefined,
-          postalCode: store.postalCode || undefined,
           country: store.country || undefined,
         },
         shareBusinessInfo: store.shareBusinessInfo,

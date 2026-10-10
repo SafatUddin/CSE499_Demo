@@ -2,6 +2,7 @@ import express from 'express';
 import { prisma } from '../db';
 import { requireAuth, AuthedRequest } from '../auth';
 import { requireProfileComplete } from '../profileCompletion';
+import { normalizeAiMeta } from '../agent';
 
 export function createAnalyticsRouter(): express.Router {
   const router = express.Router();
@@ -17,9 +18,9 @@ export function createAnalyticsRouter(): express.Router {
     try {
       const storeId = req.auth!.storeId;
 
-      // Accept 30 or 90; anything else (including missing) defaults to 30.
+      // Accept the ranges shown in the analytics workspace; invalid values default to 30.
       const rawRange = Number(req.query.range);
-      const range: 30 | 90 = rawRange === 90 ? 90 : 30;
+      const range: 7 | 14 | 30 | 90 = rawRange === 7 || rawRange === 14 || rawRange === 90 ? rawRange : 30;
 
       // Inclusive start boundary: midnight `range` days ago in UTC.
       const start = new Date();
@@ -39,17 +40,19 @@ export function createAnalyticsRouter(): express.Router {
         conversationsInRange,
         ordersInRange,
         aiMessageCount,
+        aiMessages,
         recentOrders,
         recentComplaints,
         lowStockProducts,
         responseTimeMessages,
+        allConversationStatuses,
         prevPeriodOrderCount,
         prevPeriodConversations,
       ] = await Promise.all([
         // Slim conversation rows: only the fields needed for series + KPIs.
         prisma.conversation.findMany({
           where: { storeId, createdAt: { gte: start } },
-          select: { createdAt: true, status: true, isComplaint: true },
+          select: { createdAt: true, status: true, isComplaint: true, channelType: true },
         }),
 
         // Slim order rows: enough for series bucketing + revenue aggregation.
@@ -66,6 +69,15 @@ export function createAnalyticsRouter(): express.Router {
             createdAt: { gte: start },
             conversation: { storeId },
           },
+        }),
+
+        prisma.message.findMany({
+          where: {
+            sender: 'AI',
+            createdAt: { gte: start },
+            conversation: { storeId },
+          },
+          select: { meta: true },
         }),
 
         // Activity feed: recent orders (not range-filtered — latest overall).
@@ -102,6 +114,11 @@ export function createAnalyticsRouter(): express.Router {
           select: { conversationId: true, sender: true, createdAt: true, pending: true },
         }),
 
+        prisma.conversation.findMany({
+          where: { storeId },
+          select: { status: true, channelType: true },
+        }),
+
         prisma.order.count({ where: { storeId, createdAt: { gte: prevStart, lt: start } } }),
 
         prisma.conversation.findMany({
@@ -130,15 +147,15 @@ export function createAnalyticsRouter(): express.Router {
         return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
       };
 
-      let series: { date: string; conversations: number; convertedSales: number }[] = [];
+      let series: { date: string; conversations: number; convertedSales: number; customerMessages: number; aiReplies: number; humanReplies: number }[] = [];
 
       if (hasData) {
         // Build a map of all days in the window → zero counts.
-        const dayMap = new Map<string, { conversations: number; convertedSales: number }>();
+        const dayMap = new Map<string, { conversations: number; convertedSales: number; customerMessages: number; aiReplies: number; humanReplies: number }>();
         const cursor = new Date(start);
         const today = new Date();
         while (cursor <= today) {
-          dayMap.set(dayKey(cursor), { conversations: 0, convertedSales: 0 });
+          dayMap.set(dayKey(cursor), { conversations: 0, convertedSales: 0, customerMessages: 0, aiReplies: 0, humanReplies: 0 });
           cursor.setUTCDate(cursor.getUTCDate() + 1);
         }
 
@@ -156,6 +173,14 @@ export function createAnalyticsRouter(): express.Router {
             const entry = dayMap.get(key);
             if (entry) entry.convertedSales += 1;
           }
+        }
+
+        for (const message of responseTimeMessages) {
+          const entry = dayMap.get(dayKey(message.createdAt));
+          if (!entry || message.pending) continue;
+          if (message.sender === 'CUSTOMER') entry.customerMessages += 1;
+          if (message.sender === 'AI') entry.aiReplies += 1;
+          if (message.sender === 'MERCHANT') entry.humanReplies += 1;
         }
 
         series = Array.from(dayMap.entries()).map(([key, counts]) => ({
@@ -187,6 +212,15 @@ export function createAnalyticsRouter(): express.Router {
       // have both. Conversations with no reply yet (or a reply still awaiting
       // merchant approval) are excluded rather than counted as instant/zero.
       const responseTimesMs: number[] = [];
+      const aiResponseTimesMs: number[] = [];
+      const humanResponseTimesMs: number[] = [];
+      let longestWaitingMs = 0;
+      let waitingConversations = 0;
+      const customerConversationIds = new Set<string>();
+      let customerMessageCount = 0;
+      let aiReplyCount = 0;
+      let humanReplyCount = 0;
+      let slaBreaches = 0;
       {
         let i = 0;
         while (i < responseTimeMessages.length) {
@@ -195,6 +229,17 @@ export function createAnalyticsRouter(): express.Router {
           while (j < responseTimeMessages.length && responseTimeMessages[j].conversationId === conversationId) j++;
           const thread = responseTimeMessages.slice(i, j);
 
+          for (const message of thread) {
+            if (message.sender === 'CUSTOMER') {
+              customerMessageCount += 1;
+              customerConversationIds.add(conversationId);
+            } else if (!message.pending && message.sender === 'AI') {
+              aiReplyCount += 1;
+            } else if (!message.pending && message.sender === 'MERCHANT') {
+              humanReplyCount += 1;
+            }
+          }
+
           const firstCustomerMsg = thread.find(m => m.sender === 'CUSTOMER');
           if (firstCustomerMsg) {
             const reply = thread.find(m =>
@@ -202,13 +247,30 @@ export function createAnalyticsRouter(): express.Router {
             );
             if (reply) {
               responseTimesMs.push(reply.createdAt.getTime() - firstCustomerMsg.createdAt.getTime());
+              if (reply.createdAt.getTime() - firstCustomerMsg.createdAt.getTime() > 15 * 60 * 1000) slaBreaches += 1;
+              if (reply.sender === 'AI') aiResponseTimesMs.push(reply.createdAt.getTime() - firstCustomerMsg.createdAt.getTime());
+              if (reply.sender === 'MERCHANT') humanResponseTimesMs.push(reply.createdAt.getTime() - firstCustomerMsg.createdAt.getTime());
             }
+          }
+
+          const lastCustomer = [...thread].reverse().find(m => m.sender === 'CUSTOMER');
+          const hasReplyAfterLastCustomer = lastCustomer && thread.some(m => m.sender !== 'CUSTOMER' && !m.pending && m.createdAt > lastCustomer.createdAt);
+          if (lastCustomer && !hasReplyAfterLastCustomer) {
+            const waitMs = Math.max(0, Date.now() - lastCustomer.createdAt.getTime());
+            longestWaitingMs = Math.max(longestWaitingMs, waitMs);
+            waitingConversations += 1;
           }
           i = j;
         }
       }
       const averageResponseTimeSeconds = responseTimesMs.length > 0
         ? Math.round((responseTimesMs.reduce((sum, ms) => sum + ms, 0) / responseTimesMs.length) / 1000)
+        : null;
+      const averageAiResponseTimeSeconds = aiResponseTimesMs.length > 0
+        ? Math.round((aiResponseTimesMs.reduce((sum, ms) => sum + ms, 0) / aiResponseTimesMs.length) / 1000)
+        : null;
+      const averageHumanResponseTimeSeconds = humanResponseTimesMs.length > 0
+        ? Math.round((humanResponseTimesMs.reduce((sum, ms) => sum + ms, 0) / humanResponseTimesMs.length) / 1000)
         : null;
 
       const orderCount = ordersInRange.length;
@@ -225,6 +287,59 @@ export function createAnalyticsRouter(): express.Router {
       const revenue = ordersInRange.reduce((sum, o) => sum + Number(o.total), 0);
 
       const complaints = conversationsInRange.filter(c => c.isComplaint).length;
+      const currentSplit = {
+        aiManaged: allConversationStatuses.filter(c => c.status === 'AI_MANAGED').length,
+        humanActive: allConversationStatuses.filter(c => c.status === 'ACTIVE').length,
+        closed: allConversationStatuses.filter(c => c.status === 'CLOSED').length,
+      };
+      const handoffRequests = conversationsInRange.filter(c => c.status === 'ACTIVE' || c.isComplaint).length;
+      const bySource = new Map<string, number>();
+      for (const conversation of conversationsInRange) {
+        const source = conversation.channelType.toLowerCase();
+        bySource.set(source, (bySource.get(source) ?? 0) + 1);
+      }
+
+      const aiMetaSamples = aiMessages.map((m) => normalizeAiMeta((m.meta as Record<string, any>) ?? undefined));
+      const aiHealth = aiMetaSamples.length > 0
+        ? (() => {
+            let totalLatencyMs = 0;
+            let latencyCount = 0;
+            let fallbackCount = 0;
+            let totalTokens = 0;
+            const modelCounts = new Map<string, number>();
+
+            for (const item of aiMetaSamples) {
+              if (item.latencyMs > 0) {
+                totalLatencyMs += item.latencyMs;
+                latencyCount += 1;
+              }
+              if (item.fallback) fallbackCount += 1;
+              totalTokens += item.responseTokens;
+              const key = item.model || 'unknown';
+              modelCounts.set(key, (modelCounts.get(key) ?? 0) + 1);
+            }
+
+            const payload = Array.from(modelCounts.entries()).map(([model, count]) => ({
+              model,
+              count,
+              percentage: aiMetaSamples.length > 0 ? Math.round((count / aiMetaSamples.length) * 100) : 0,
+            }));
+
+            return {
+              totalMessages: aiMetaSamples.length,
+              averageLatencyMs: latencyCount > 0 ? Math.round(totalLatencyMs / latencyCount) : null,
+              fallbackRate: aiMetaSamples.length > 0 ? Math.round((fallbackCount / aiMetaSamples.length) * 100) : 0,
+              tokensUsed: totalTokens,
+              modelBreakdown: payload,
+            };
+          })()
+        : {
+            totalMessages: 0,
+            averageLatencyMs: null,
+            fallbackRate: 0,
+            tokensUsed: 0,
+            modelBreakdown: [],
+          };
 
       // ------------------------------------------------------------------
       // Recent activity: merge orders, complaints, and low-stock alerts
@@ -292,7 +407,27 @@ export function createAnalyticsRouter(): express.Router {
           revenue: Math.round(revenue * 100) / 100,
           aiMessages: aiMessageCount,
           complaints,
+          customerMessages: customerMessageCount,
+          aiReplies: aiReplyCount,
+          humanReplies: humanReplyCount,
+          peopleReached: customerConversationIds.size,
+          averageAiResponseTimeSeconds,
+          averageHumanResponseTimeSeconds,
+          longestWaitingSeconds: longestWaitingMs > 0 ? Math.round(longestWaitingMs / 1000) : null,
+          waitingConversations,
+          slaBreachRate: responseTimesMs.length > 0 ? Math.round((slaBreaches / responseTimesMs.length) * 100) : 0,
+          averageHandlingTimeSeconds: null,
         },
+        aiHealth,
+        currentSplit,
+        handoffs: {
+          requestsToHumans: handoffRequests,
+          autoReturned: 0,
+          totalEvents: handoffRequests,
+          averageEventsPerDay: range > 0 ? Math.round((handoffRequests / range) * 10) / 10 : 0,
+        },
+        busiestPages: [],
+        bySource: Array.from(bySource.entries()).map(([source, conversations]) => ({ source, conversations })),
         recentActivity,
       });
     } catch (err: any) {

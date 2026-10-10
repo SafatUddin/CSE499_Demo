@@ -28,8 +28,24 @@ import {
   MAX_CHECKOUT_QUANTITY,
 } from './checkoutSecurity';
 import { createOrderForConversation } from './orderCreation';
+import { recognizeCatalogImage } from './imageRecognition';
+import { formatKnowledgeForPrompt, selectRelevantKnowledge } from './knowledgeBase';
 
 const isProduction = process.env.NODE_ENV === 'production';
+
+async function loadEnabledKnowledgeDocuments(storeId: string) {
+  try {
+    return await prisma.knowledgeDocument.findMany({
+      where: { storeId, enabled: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  } catch (err) {
+    // Knowledge migrations may be deployed after the application code on a shared
+    // database. Keep the core agent usable without unconfigured knowledge context.
+    if (!isProduction) console.warn('[AGENT] Knowledge base unavailable; continuing without it');
+    return [];
+  }
+}
 
 // Only the real self-serve OAuth connection's per-store token is used — there is no
 // manual/env-var fallback, so a store with no completed Facebook connection simply
@@ -121,17 +137,27 @@ export function selectRelevantCatalog<T extends { name: string; sku: string }>(
 // Generates an AI reply for a conversation and either delivers it immediately (Copilot
 // on / AI_MANAGED) or stores it as a pending draft awaiting merchant approval (Copilot
 // off / manual). Only delivers externally (e.g. Messenger) when actually sent.
-export async function generateAndStoreAgentReply(conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean }, customerText: string) {
+export async function generateAndStoreAgentReply(
+  conversation: { id: string; storeId: string; status: string; channelType: string; externalUserId: string | null; isComplaint: boolean },
+  customerText: string,
+  customerImage?: Buffer,
+) {
   if (!isProduction) {
     console.log('[AGENT REPLY] generateAndStoreAgentReply — conversationId:', conversation.id, '| storeId:', conversation.storeId);
   }
-  const [store, products, recentMessages, currentConversation, conversationOrders] = await Promise.all([
+  const [store, products, knowledgeDocuments, recentMessages, currentConversation, conversationOrders] = await Promise.all([
     prisma.store.findUnique({ where: { id: conversation.storeId } }),
     prisma.product.findMany({ where: { storeId: conversation.storeId } }),
+    loadEnabledKnowledgeDocuments(conversation.storeId),
     // Only the last 11 are ever used below (10 for history + the just-inserted customer
     // message that gets dropped) — fetching the whole thread wastes DB work on long-running
     // conversations. desc + take, then reversed in JS, to get "last N in chronological order".
-    prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'desc' }, take: 11 }),
+    prisma.message.findMany({
+      where: { conversationId: conversation.id },
+      select: { id: true, sender: true, text: true, createdAt: true, pending: true },
+      orderBy: { createdAt: 'desc' },
+      take: 11,
+    }),
     prisma.conversation.findUnique({ where: { id: conversation.id } }),
     prisma.order.findMany({
       where: {
@@ -149,13 +175,13 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
     tone: store.tone,
     style: store.style,
     customInstructions: store.customInstructions,
+    knowledgeContext: '',
     merchantBusinessInfo: {
       businessPhone: store.businessPhone || undefined,
+      businessType: store.businessType || undefined,
       website: store.website || undefined,
       streetAddress: store.streetAddress || undefined,
       city: store.city || undefined,
-      province: store.province || undefined,
-      postalCode: store.postalCode || undefined,
       country: store.country || undefined,
     },
     shareBusinessInfo: store.shareBusinessInfo,
@@ -168,6 +194,24 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
     status: p.status === 'TRAINED' ? 'Trained' : 'Pending',
     imageUrl: p.imageUrl || undefined,
   }));
+  const knowledge = selectRelevantKnowledge(
+    knowledgeDocuments,
+    customerText,
+    recentMessages.slice().reverse().map((message) => message.text),
+  );
+  persona.knowledgeContext = formatKnowledgeForPrompt(knowledge);
+  let agentCustomerText = customerText;
+  if (customerImage) {
+    const imageMatch = await recognizeCatalogImage(customerImage, catalog);
+    if (imageMatch.match === 'exact' && imageMatch.sku) {
+      const matchedProduct = catalog.find((item) => item.sku === imageMatch.sku);
+      agentCustomerText += `\n[Verified customer-image match: SKU ${imageMatch.sku}, product ${matchedProduct?.name || imageMatch.sku}, confidence ${imageMatch.confidence.toFixed(2)}. Answer using this catalog item only.]`;
+    } else if (imageMatch.match === 'ambiguous' && imageMatch.candidates.length > 0) {
+      agentCustomerText += `\n[Customer sent a product image. Possible catalog matches: ${imageMatch.candidates.map((item) => `${item.sku} (${item.confidence.toFixed(2)})`).join(', ')}. Ask the customer to choose; do not claim an exact match.]`;
+    } else {
+      agentCustomerText += '\n[Customer sent a product image, but no safe catalog match was found. Ask for a product name or clarification.]';
+    }
+  }
   // Cap history sent to the model — an unbounded prompt grows with every message in a
   // long-running conversation, which slows down local LLM inference noticeably.
   const history = recentMessages.slice().reverse().slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
@@ -255,7 +299,7 @@ export async function generateAndStoreAgentReply(conversation: { id: string; sto
   if (pendingEncodedSku) pinnedCatalogSkus.add(pendingEncodedSku);
   const promptCatalog = selectRelevantCatalog(
     catalog,
-    customerText,
+    agentCustomerText,
     history.map((h) => h.text),
     pinnedCatalogSkus
   );

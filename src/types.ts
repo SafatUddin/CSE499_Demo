@@ -7,6 +7,7 @@ export type Tab =
   | 'catalog'
   | 'persona'
   | 'orders'
+  | 'bookings'
   | 'analytics'
   | 'integrations'
   | 'settings'
@@ -32,6 +33,9 @@ export interface ChatMessage {
   time: string;
   isImage?: boolean;
   imageUrl?: string;
+  audioUrl?: string;
+  transcript?: string;
+  mediaType?: string;
   pending?: boolean;
 }
 
@@ -77,11 +81,10 @@ export interface AIPersona {
   shareBusinessInfo: boolean;
   businessInfo: {
     businessPhone: string | null;
+    businessType: string | null;
     website: string | null;
     streetAddress: string | null;
     city: string | null;
-    province: string | null;
-    postalCode: string | null;
     country: string | null;
   };
 }

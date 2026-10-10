@@ -11,6 +11,14 @@ import { generateAndStoreAgentReply, sendOpeningGreetingIfNew } from '../convers
 // server/auth.ts). CORS is opened wide (Access-Control-Allow-Origin: *) since any site is a
 // legitimate embedder and no credentials/cookies are ever involved.
 const MAX_WIDGET_MESSAGE_LENGTH = 4000;
+const legacyWidgetMessageSelect = {
+  id: true,
+  sender: true,
+  text: true,
+  imageUrl: true,
+  pending: true,
+  createdAt: true,
+} as const;
 
 function applyWidgetCors(res: Response) {
   res.header('Access-Control-Allow-Origin', '*');
@@ -73,7 +81,7 @@ export function createWidgetRouter(): express.Router {
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: legacyWidgetMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicWidgetConversation(updated));
     } catch (err: any) {
@@ -98,7 +106,7 @@ export function createWidgetRouter(): express.Router {
 
       const conversation = await prisma.conversation.findFirst({
         where: { storeId: store.id, channelType: 'WIDGET', externalUserId: visitorId },
-        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: legacyWidgetMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       if (!conversation) {
         return res.json({ messages: [] });

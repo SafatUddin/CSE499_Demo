@@ -6,6 +6,7 @@ export interface AgentPersona {
   tone?: string;
   style?: string;
   customInstructions?: string;
+  knowledgeContext?: string;
   merchantBusinessInfo?: {
     businessPhone?: string;
     businessType?: string;
@@ -42,6 +43,41 @@ export interface AgentReply {
   orderConfirmed: boolean;
   orderCancelled: boolean;
   showImageForSku?: string;
+  model?: string;
+  latencyMs?: number;
+  responseTokens?: number;
+  promptTokens?: number;
+  fallback?: boolean;
+  fallbackReason?: string;
+}
+
+export interface AiMetaSummary {
+  model: string;
+  latencyMs: number;
+  responseTokens: number;
+  promptTokens: number;
+  fallback: boolean;
+  fallbackReason?: string;
+}
+
+export function normalizeAiMeta(raw: Record<string, any> | null | undefined): AiMetaSummary {
+  const model = typeof raw?.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unknown';
+  const fallback = !!raw?.fallback || model === 'fallback';
+  const latencyMs = Number.isFinite(Number(raw?.latencyMs)) ? Number(raw.latencyMs) : 0;
+  const responseTokens = Number.isFinite(Number(raw?.responseTokens)) ? Number(raw.responseTokens) : 0;
+  const promptTokens = Number.isFinite(Number(raw?.promptTokens)) ? Number(raw.promptTokens) : 0;
+  const fallbackReason = typeof raw?.fallbackReason === 'string' && raw.fallbackReason.trim()
+    ? raw.fallbackReason.trim()
+    : undefined;
+
+  return {
+    model,
+    latencyMs,
+    responseTokens,
+    promptTokens,
+    fallback,
+    fallbackReason,
+  };
 }
 
 export interface AgentOrderState {
@@ -254,6 +290,7 @@ export async function generateAgentReply({
   promptCatalog?: AgentCatalogItem[];
   orderState?: AgentOrderState;
 }): Promise<AgentReply> {
+  const startedAt = Date.now();
   const catalogText = (promptCatalog ?? catalog)
     .map(
       (p) =>
@@ -409,11 +446,22 @@ TONE: ${toneText}
 STYLE: ${styleText}
 CUSTOM INSTRUCTIONS: ${customInst}
 
+BUSINESS KNOWLEDGE (use only when relevant; never invent details not present here):
+${persona?.knowledgeContext || 'No additional business knowledge is configured.'}
+
 PRODUCT CATALOG:
 ${catalogText || 'No products available.'}`;
 
   if (!ai) {
     // Fallback to simple response if Gemini not available
+    const fallbackMeta = normalizeAiMeta({
+      model: 'fallback',
+      latencyMs: Date.now() - startedAt,
+      responseTokens: 0,
+      promptTokens: 0,
+      fallback: true,
+      fallbackReason: 'gemini_unavailable',
+    });
     return {
       replyText: "I'm currently unable to process your request. A team member will assist you shortly.",
       isComplaint: true,
@@ -425,6 +473,7 @@ ${catalogText || 'No products available.'}`;
       orderConfirmed: false,
       orderCancelled: false,
       showImageForSku: '',
+      ...fallbackMeta,
     };
   }
 
@@ -477,7 +526,23 @@ ${catalogText || 'No products available.'}`;
       orderConfirmed: false,
       orderCancelled: false,
       showImageForSku: '',
+      model: 'gemini-3.5-flash-lite',
+      latencyMs: 0,
+      responseTokens: 0,
+      promptTokens: 0,
+      fallback: false,
     };
+
+    const usageMetadata = (response as any)?.usageMetadata ?? {};
+    const detectedResponseTokens = Number(
+      usageMetadata.candidatesTokenCount ?? usageMetadata.outputTokenCount ?? usageMetadata.totalTokenCount ?? 0,
+    );
+    const detectedPromptTokens = Number(
+      usageMetadata.promptTokenCount ?? usageMetadata.inputTokenCount ?? 0,
+    );
+    result.responseTokens = Number.isFinite(detectedResponseTokens) ? detectedResponseTokens : 0;
+    result.promptTokens = Number.isFinite(detectedPromptTokens) ? detectedPromptTokens : 0;
+    result.latencyMs = Date.now() - startedAt;
 
     // Process each tool call
     for (const toolCall of toolCalls) {
@@ -548,10 +613,22 @@ ${catalogText || 'No products available.'}`;
       result.isComplaint = true;
     }
 
+    result.model = 'gemini-3.5-flash-lite';
+    result.fallback = false;
+    result.fallbackReason = undefined;
+
     return result;
 
   } catch (error: any) {
     console.error('Error in generateAgentReply with tools:', error?.message || error);
+    const fallbackMeta = normalizeAiMeta({
+      model: 'fallback',
+      latencyMs: Date.now() - startedAt,
+      responseTokens: 0,
+      promptTokens: 0,
+      fallback: true,
+      fallbackReason: 'gemini_error',
+    });
     
     // Fallback response
     return {
@@ -565,6 +642,7 @@ ${catalogText || 'No products available.'}`;
       orderConfirmed: false,
       orderCancelled: false,
       showImageForSku: '',
+      ...fallbackMeta,
     };
   }
 }

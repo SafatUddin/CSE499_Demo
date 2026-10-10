@@ -41,6 +41,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
 model Merchant {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -86,7 +93,22 @@ model Store {
   channels      Channel[]
   conversations Conversation[]
   orders        Order[]
+  appointments  Appointment[]
+  knowledgeDocuments KnowledgeDocument[]
   createdAt     DateTime       @default(now())
+}
+
+model KnowledgeDocument {
+  id        String   @id @default(cuid())
+  store     Store    @relation(fields: [storeId], references: [id])
+  storeId   String
+  title     String
+  body      String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([storeId, enabled])
 }
 
 model Product {
@@ -187,6 +209,9 @@ model Message {
   text           String
   // Set when this message includes a product photo (AI-sent or merchant-sent).
   imageUrl       String?
+  audioUrl       String?
+  transcript     String?
+  mediaType      String?
   // True for an AI-drafted reply awaiting merchant approval (Copilot off / manual mode) —
   // not yet delivered to the real customer. False for anything already sent/delivered.
   pending        Boolean      @default(false)
@@ -195,6 +220,28 @@ model Message {
   externalId     String?      @unique
   meta           Json?
   createdAt      DateTime     @default(now())
+}
+
+model Appointment {
+  id                   String            @id @default(cuid())
+  store                Store             @relation(fields: [storeId], references: [id])
+  storeId              String
+  conversationId       String?
+  customerName         String
+  customerPhone        String?
+  service              String
+  startsAt             DateTime
+  endsAt               DateTime
+  status               AppointmentStatus @default(REQUESTED)
+  advanceAmount        Decimal?
+  advancePaymentMethod String?
+  advanceTransactionId String?
+  notes                String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([storeId, startsAt])
+  @@index([storeId, status])
 }
 
 model Order {

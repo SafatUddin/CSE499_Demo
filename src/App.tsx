@@ -46,6 +46,7 @@ import AgentPersona from './components/AgentPersona';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IntegrationsHub from './components/IntegrationsHub';
 import OrdersPage from './components/OrdersPage';
+import BookingsPage from './components/BookingsPage';
 import SettingsPage from './components/SettingsPage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminSettings from './components/AdminSettings';
@@ -79,7 +80,7 @@ export default function App() {
   const isAuthenticatedRef = useRef(false);
 
   const navigateTo = (tab: Tab, replace = false) => {
-    const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+    const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'bookings', 'analytics', 'integrations', 'settings', 'support'];
     const effectiveTab: Tab =
       isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(tab)
         ? 'onboarding'
@@ -102,7 +103,7 @@ export default function App() {
     }
     const handlePopState = (e: PopStateEvent) => {
       const requested = (e.state?.tab as Tab) || 'landing';
-      const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'analytics', 'integrations', 'settings', 'support'];
+      const dashboard_tabs: Tab[] = ['inbox', 'catalog', 'persona', 'orders', 'bookings', 'analytics', 'integrations', 'settings', 'support'];
       const tab: Tab =
         isAuthenticatedRef.current && !profileCompleteRef.current && dashboard_tabs.includes(requested)
           ? 'onboarding'
@@ -353,10 +354,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, [merchant, profileComplete]);
 
-  // Conversations belonging to a channel that isn't currently connected shouldn't appear
-  // in the Inbox — connection state (Integrations Hub) is the source of truth for whether
-  // a channel's chat interface should be visible at all.
-  const visibleConversations = conversations.filter((c) => connectedPlatforms.has(c.platform));
+  // Keep stored conversations visible even when a provider is disconnected or its
+  // connection check is temporarily unavailable. Connection state controls whether new
+  // provider messages can arrive/send, not whether the merchant can inspect history.
+  const visibleConversations = conversations;
 
   // Navigation controller
   const handleNavigate = (tab: Tab) => {
@@ -494,7 +495,7 @@ export default function App() {
   // component, passing it the relevant domain state + handlers as props.
   // Shared by the 'inbox' tab and the authenticated default fallback below.
   const renderInbox = () => {
-    if (connectedPlatforms.size === 0) {
+    if (connectedPlatforms.size === 0 && conversations.length === 0) {
       return (
         <div className="w-full flex-grow flex flex-col items-center justify-center text-center px-6 h-full overflow-x-hidden">
           <h3 className="font-sans font-bold text-sm text-white uppercase tracking-wider">No Channels Connected</h3>
@@ -598,6 +599,8 @@ export default function App() {
         );
       case 'orders':
         return <OrdersPage />;
+      case 'bookings':
+        return <BookingsPage />;
       case 'analytics':
         return <AnalyticsDashboard />;
       case 'integrations':

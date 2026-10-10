@@ -98,6 +98,29 @@
   border-radius: 22px;
 }
 
+/* Analytics keeps fixed chart tracks at desktop sizes so empty datasets still
+   preserve the same composition as the reference dashboard. */
+@media (min-width: 1024px) {
+  [class~="lg:grid-cols-12"] > [class~="lg:col-span-8"] {
+    grid-column: span 8 / span 8;
+    min-width: 0;
+  }
+
+  [class~="lg:grid-cols-12"] > [class~="lg:col-span-6"] {
+    grid-column: span 6 / span 6;
+    min-width: 0;
+  }
+
+  [class~="lg:grid-cols-12"] > [class~="lg:col-span-4"] {
+    grid-column: span 4 / span 4;
+    min-width: 0;
+  }
+}
+
+[class~="h-[190px]"] { height: 190px !important; min-height: 190px !important; }
+[class~="h-[145px]"] { height: 145px !important; min-height: 145px !important; }
+[class~="h-[175px]"] { height: 175px !important; min-height: 175px !important; }
+
 .zone-b-aside {
   background: radial-gradient(120% 80% at 100% 0%, rgba(255,255,255,0.09), transparent 46%),
               linear-gradient(160deg, rgba(28,28,31,0.90), rgba(8,8,9,0.96));

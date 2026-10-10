@@ -454,11 +454,10 @@ export const DEFAULT_AI_PERSONA: AIPersona = {
   shareBusinessInfo: true,
   businessInfo: {
     businessPhone: null,
+    businessType: null,
     website: null,
     streetAddress: null,
     city: null,
-    province: null,
-    postalCode: null,
     country: null,
   },
 };

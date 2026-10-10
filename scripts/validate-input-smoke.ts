@@ -5,6 +5,10 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+if (!process.env.SUPABASE_URL) {
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+}
+
 import {
   validateProductInput,
   sanitizeCartInput,
@@ -13,7 +17,12 @@ import {
 } from '../server/inputValidation';
 import { isPasswordStrongEnough, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from '../server/auth';
 import { isLocalAvatarUrl } from '../server/mediaStorage';
-import { extractDollarAmounts, collectGroundedAmounts, findUngroundedAmounts } from '../server/agent';
+import {
+  extractDollarAmounts,
+  collectGroundedAmounts,
+  findUngroundedAmounts,
+  normalizeAiMeta,
+} from '../server/agent';
 
 let passed = 0;
 let failed = 0;
@@ -108,6 +117,26 @@ assert(
 assert(
   findUngroundedAmounts('Widget is $9.99, Gadget is $500 (wrong).', grounded).length === 1,
   'only the ungrounded amount is flagged, not the grounded one alongside it',
+);
+
+assert(
+  normalizeAiMeta({
+    model: 'gemini-3.5-flash-lite',
+    latencyMs: 1250,
+    responseTokens: 420,
+    fallback: false,
+  }).model === 'gemini-3.5-flash-lite',
+  'live-model metadata is normalized without a fallback label',
+);
+assert(
+  normalizeAiMeta({
+    model: 'fallback',
+    latencyMs: 44,
+    responseTokens: 0,
+    fallback: true,
+    fallbackReason: 'gemini_unavailable',
+  }).fallback === true,
+  'fallback metadata is marked as a fallback path',
 );
 
 console.log(`\nValidation smoke tests: ${passed} passed, ${failed} failed (min password length: ${MIN_PASSWORD_LENGTH})`);

@@ -89,6 +89,8 @@ model Store {
   country       String?
   // Toggle to control whether AI should share business contact info with customers
   shareBusinessInfo Boolean @default(true)
+  // Exactly one catalog source may be active at a time. CUSTOM means manual entry.
+  catalogSource String  @default("CUSTOM")
   products      Product[]
   channels      Channel[]
   conversations Conversation[]

@@ -34,6 +34,7 @@ import {
   CHANNEL_ALREADY_CONNECTED_MESSAGE,
 } from '../channelSecurity';
 import { CHANNEL_TYPE_TO_FRONTEND } from '../publicViews';
+import { assertCatalogSourceAvailable, getCatalogSource, isCatalogSource, setCatalogSource } from '../catalogSource';
 
 export function createChannelsRouter(): express.Router {
   const router = express.Router();
@@ -132,10 +133,31 @@ export function createChannelsRouter(): express.Router {
         where: { storeId: req.auth!.storeId, type: type as any },
         data: { connected: false, credentials: null, externalId: null },
       });
+      if (type === 'SHOPIFY' || type === 'WOOCOMMERCE') {
+        await prisma.store.update({ where: { id: req.auth!.storeId }, data: { catalogSource: 'CUSTOM' } });
+      }
       res.json({ success: true });
     } catch (err: any) {
       console.error('Disconnect channel error:', err);
       res.status(500).json({ error: 'Failed to disconnect channel' });
+    }
+  });
+
+  router.get('/api/catalog/source', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    res.json({ catalogSource: await getCatalogSource(req.auth!.storeId) });
+  });
+
+  router.put('/api/catalog/source', requireAuth, requireProfileComplete, async (req: AuthedRequest, res) => {
+    const source = req.body?.catalogSource;
+    if (!isCatalogSource(source)) return res.status(400).json({ error: 'Invalid catalog source.' });
+    try {
+      await setCatalogSource(req.auth!.storeId, source);
+      res.json({ catalogSource: source });
+    } catch (err: any) {
+      if (String(err?.message).startsWith('CATALOG_SOURCE_CONNECTED:')) {
+        return res.status(409).json({ error: 'Disconnect the current catalog connector before choosing another source.' });
+      }
+      res.status(500).json({ error: 'Unable to change catalog source.' });
     }
   });
 
@@ -205,6 +227,8 @@ export function createChannelsRouter(): express.Router {
         return res.status(400).json({ error: 'Store domain and Admin API access token are required' });
       }
 
+      await assertCatalogSourceAvailable(req.auth!.storeId, 'SHOPIFY');
+
       const shop = await verifyShopifyStore(domain, accessToken);
       const normalizedDomain = normalizeShopifyDomain(domain);
       await assertChannelExternalIdAvailable('SHOPIFY', normalizedDomain, req.auth!.storeId);
@@ -220,6 +244,7 @@ export function createChannelsRouter(): express.Router {
         update: { connected: true, externalId: normalizedDomain, credentials },
         create: { storeId: req.auth!.storeId, type: 'SHOPIFY', connected: true, externalId: normalizedDomain, credentials },
       });
+      await setCatalogSource(req.auth!.storeId, 'SHOPIFY');
 
       res.json({ success: true, name: shop.name });
     } catch (err: any) {
@@ -239,6 +264,8 @@ export function createChannelsRouter(): express.Router {
         return res.status(400).json({ error: 'Store URL, Consumer Key, and Consumer Secret are required' });
       }
 
+      await assertCatalogSourceAvailable(req.auth!.storeId, 'WOOCOMMERCE');
+
       const shop = await verifyWooCommerceStore(url, consumerKey, consumerSecret);
       const normalizedUrl = normalizeWooUrl(url);
       await assertChannelExternalIdAvailable('WOOCOMMERCE', normalizedUrl, req.auth!.storeId);
@@ -255,6 +282,7 @@ export function createChannelsRouter(): express.Router {
         update: { connected: true, externalId: normalizedUrl, credentials },
         create: { storeId: req.auth!.storeId, type: 'WOOCOMMERCE', connected: true, externalId: normalizedUrl, credentials },
       });
+      await setCatalogSource(req.auth!.storeId, 'WOOCOMMERCE');
 
       res.json({ success: true, name: shop.name });
     } catch (err: any) {
@@ -272,6 +300,9 @@ export function createChannelsRouter(): express.Router {
       const channel = await prisma.channel.findUnique({
         where: { storeId_type: { storeId: req.auth!.storeId, type: 'WOOCOMMERCE' } },
       });
+      if ((await getCatalogSource(req.auth!.storeId)) !== 'WOOCOMMERCE') {
+        return res.status(409).json({ error: 'Select WooCommerce as the catalog source before syncing.' });
+      }
       if (!channel?.connected || !channel.credentials) {
         return res.status(400).json({ error: 'WooCommerce is not connected' });
       }
@@ -335,6 +366,9 @@ export function createChannelsRouter(): express.Router {
       const channel = await prisma.channel.findUnique({
         where: { storeId_type: { storeId: req.auth!.storeId, type: 'SHOPIFY' } },
       });
+      if ((await getCatalogSource(req.auth!.storeId)) !== 'SHOPIFY') {
+        return res.status(409).json({ error: 'Select Shopify as the catalog source before syncing.' });
+      }
       if (!channel?.connected || !channel.credentials) {
         return res.status(400).json({ error: 'Shopify is not connected' });
       }

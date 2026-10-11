@@ -37,6 +37,9 @@ import {
   getShopifyConnectUrl,
   connectWooCommerceChannel,
   syncWooCommerceChannel,
+  getCatalogSource,
+  setCatalogSource,
+  CatalogSource,
 } from '../lib/api';
 import DashboardHeader from './DashboardHeader';
 
@@ -49,6 +52,8 @@ interface IntegrationsHubProps {
 export default function IntegrationsHub({ integrations, onToggleConnection, onRefreshAll }: IntegrationsHubProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [catalogSource, setCatalogSourceState] = useState<CatalogSource>('CUSTOM');
+  const [catalogSourceError, setCatalogSourceError] = useState('');
 
   // Setup Wizard states
   const [activeWizardId, setActiveWizardId] = useState<string | null>(null);
@@ -99,6 +104,10 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
 
   const handleExcelUpload = async (file: File | undefined) => {
     if (!file) return;
+    if (catalogSource !== 'CSV') {
+      setExcelErrorMsg('Select CSV as your product catalog source before uploading.');
+      return;
+    }
     setExcelFile(file);
     setExcelUploading(true);
     setExcelSuccessMsg('');
@@ -179,6 +188,7 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
             description,
             rawAttributes: Object.keys(rawAttributes).length > 0 ? rawAttributes : undefined,
             status: 'Trained',
+            catalogSource: 'CSV',
           });
           count++;
         } catch (e) {
@@ -207,6 +217,9 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
   const [wooSyncResult, setWooSyncResult] = useState<{ created: number; updated: number; total: number } | null>(null);
 
   const refreshChannelsStatus = () => {
+    getCatalogSource()
+      .then((result) => setCatalogSourceState(result.catalogSource))
+      .catch((err) => console.error('Failed to load catalog source:', err));
     listChannels()
       .then((channels) => {
         const facebook = channels.find((c) => c.type === 'facebook');
@@ -233,6 +246,16 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         setWidgetConnected(!!widget?.connected);
       })
       .catch((err) => console.error('Failed to load channel status:', err));
+  };
+
+  const handleCatalogSourceSelect = async (source: CatalogSource) => {
+    setCatalogSourceError('');
+    try {
+      const result = await setCatalogSource(source);
+      setCatalogSourceState(result.catalogSource);
+    } catch (err: any) {
+      setCatalogSourceError(err.message || 'Disconnect the current catalog connector before switching.');
+    }
   };
 
   useEffect(() => {
@@ -735,156 +758,423 @@ export default function IntegrationsHub({ integrations, onToggleConnection, onRe
         </p>
       </div>
 
-      {/* Grid of Connections (§8) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
-        {filteredIntegrations.map((item) => {
-          const isWhatsApp = item.id === 'int-wa';
-          const isNotConnected = !item.connected;
-          const isWhatsAppError = isWhatsApp && !waConnected;
-          
-          return (
-            <div 
-              key={item.id}
-              className={`flex flex-col justify-between h-[260px] p-6 rounded-2xl transition-all duration-300 relative group overflow-hidden ${
-                isWhatsAppError 
-                  ? 'status-danger border-red-500/30' 
-                  : isNotConnected 
-                    ? 'zone-b-grey2 border border-dashed border-white/16 hover:border-white/30' 
-                    : 'zone-b-grey2 hover:border-white/24'
-              }`}
-            >
-              <div>
-                <div className="flex justify-between items-start">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105 duration-300 ${
-                    item.id === 'int-fb'
-                      ? 'bg-[#1877f2]/15 border border-[#1877f2]/30 text-[#1877f2]'
-                      : item.id === 'int-ig'
-                        ? 'bg-gradient-to-tr from-[#fdf497]/20 via-[#fd5949]/20 to-[#d6249f]/20 border border-[#fd5949]/30 text-white'
-                        : item.id === 'int-wa'
-                          ? 'bg-[#25D366]/15 border border-[#25D366]/30 text-[#25D366]'
-                          : item.id === 'int-shopify'
-                            ? 'bg-[#96bf48]/15 border border-[#96bf48]/30 text-[#96bf48]'
-                            : 'bg-white/10 border border-white/15 text-white/90'
-                  }`}>
-                    {renderIcon(item.logoType, "h-6 w-6")}
-                  </div>
-
-                  <div>
-                    {item.connected ? (
-                      <span className="status-success px-2.5 py-1 text-[11px] font-bold rounded-full">
-                        Connected
-                      </span>
-                    ) : isWhatsAppError ? (
-                      <span className="status-danger px-2.5 py-1 text-[11px] font-bold rounded-full">
-                        Action required
-                      </span>
-                    ) : (
-                      <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
-                        Not connected
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
-                  {item.name}
-                </h3>
-                
-                <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
-                  {item.description}
-                </p>
-              </div>
-
-              <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
-                <span className="font-sans text-xs text-white/50">
-                  {item.statusText}
-                </span>
-
-                <button
-                  onClick={() => {
-                    if (item.id === 'int-fb') {
-                      handleFacebookCardClick();
-                    } else if (item.id === 'int-ig') {
-                      handleInstagramCardClick();
-                    } else if (item.id === 'int-wa') {
-                      if (waConnected) {
-                        handleWhatsAppDisconnect();
-                      } else {
-                        handleConnectClick(item);
-                      }
-                    } else {
-                      handleConnectClick(item);
-                    }
-                  }}
-                  className={`font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer ${
-                    isWhatsAppError
-                      ? 'btn-light-primary'
-                      : item.connected
-                        ? 'btn-glass'
-                        : 'btn-accent'
-                  }`}
-                >
-                  {item.id === 'int-fb' ? (item.connected ? 'Disconnect' : 'Connect') : item.id === 'int-ig' ? (item.connected ? 'Disconnect' : 'Connect') : isWhatsApp ? (waConnected ? 'Disconnect' : 'Connect') : item.id === 'int-shopify' ? (shopifyConnected ? 'Manage' : 'Connect') : item.id === 'int-woo' ? (wooConnected ? 'Manage' : 'Connect') : item.id === 'int-widget' ? (widgetConnected ? 'Manage' : 'Connect') : 'Manage'}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Excel/CSV Catalog Upload Card matching other cards */}
-        <div className="zone-b-grey2 border border-dashed border-white/20 hover:border-white/35 p-6 rounded-2xl flex flex-col justify-between h-[260px] transition-all duration-300 relative group overflow-hidden">
-          <div>
-            <div className="flex justify-between items-start">
-              <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center transition-transform group-hover:scale-105 duration-300">
-                <FileSpreadsheet className="h-6 w-6" />
-              </div>
-              <div>
-                <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
-                  CSV / Excel
-                </span>
-              </div>
-            </div>
-
-            <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
-              Upload Excel/CSV product sheet
-            </h3>
-            
-            <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
-              Don't have a website? Upload your product catalog excel/csv file and continue your business
-            </p>
-
-            {excelSuccessMsg && (
-              <div className="status-success text-[11px] p-2 rounded-xl font-sans mt-2">
-                {excelSuccessMsg}
-              </div>
-            )}
-
-            {excelErrorMsg && (
-              <div className="status-danger text-[11px] p-2 rounded-xl font-sans mt-2">
-                {excelErrorMsg}
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
-            <span className="font-sans text-xs text-white/50">
-              Bulk SKU import
-            </span>
-
-            <label className="btn-accent font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-md hover:scale-105">
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                className="hidden"
-                disabled={excelUploading}
-                onChange={(e) => handleExcelUpload(e.target.files?.[0])}
-              />
-              <Upload className="h-3.5 w-3.5" />
-              {excelUploading ? 'Uploading…' : 'Upload'}
-            </label>
-          </div>
+      {/* Messaging Channels Section */}
+      <div className="space-y-4">
+        <div className="px-1">
+          <h3 className="text-sm font-bold text-white uppercase tracking-[0.12em]">Connect your customer channels</h3>
+          <p className="text-xs text-white/50 mt-1">Connect Facebook, Instagram, WhatsApp or add a website widget</p>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredIntegrations
+            .filter((item) => ['int-fb', 'int-ig', 'int-wa', 'int-widget'].includes(item.id))
+            .map((item) => {
+              const isWhatsApp = item.id === 'int-wa';
+              const isNotConnected = !item.connected;
+              const isWhatsAppError = isWhatsApp && !waConnected;
+              
+              return (
+                <div 
+                  key={item.id}
+                  className={`flex flex-col justify-between h-[260px] p-6 rounded-2xl transition-all duration-300 relative group overflow-hidden ${
+                    isWhatsAppError 
+                      ? 'status-danger border-red-500/30' 
+                      : isNotConnected 
+                        ? 'zone-b-grey2 border border-dashed border-white/16 hover:border-white/30' 
+                        : 'zone-b-grey2 hover:border-white/24'
+                  }`}
+                >
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105 duration-300 ${
+                        item.id === 'int-fb'
+                          ? 'bg-[#1877f2]/15 border border-[#1877f2]/30 text-[#1877f2]'
+                          : item.id === 'int-ig'
+                            ? 'bg-gradient-to-tr from-[#fdf497]/20 via-[#fd5949]/20 to-[#d6249f]/20 border border-[#fd5949]/30 text-white'
+                            : item.id === 'int-wa'
+                              ? 'bg-[#25D366]/15 border border-[#25D366]/30 text-[#25D366]'
+                              : 'bg-white/10 border border-white/15 text-white/90'
+                      }`}>
+                        {renderIcon(item.logoType, "h-6 w-6")}
+                      </div>
+
+                      <div>
+                        {item.connected ? (
+                          <span className="status-success px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Connected
+                          </span>
+                        ) : isWhatsAppError ? (
+                          <span className="status-danger px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Action required
+                          </span>
+                        ) : (
+                          <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Not connected
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
+                      {item.name}
+                    </h3>
+                    
+                    <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
+                      {item.description}
+                    </p>
+                  </div>
+
+                  <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
+                    <span className="font-sans text-xs text-white/50">
+                      {item.statusText}
+                    </span>
+
+                    <button
+                      onClick={() => {
+                        if (item.id === 'int-fb') {
+                          handleFacebookCardClick();
+                        } else if (item.id === 'int-ig') {
+                          handleInstagramCardClick();
+                        } else if (item.id === 'int-wa') {
+                          if (waConnected) {
+                            handleWhatsAppDisconnect();
+                          } else {
+                            handleConnectClick(item);
+                          }
+                        } else if (item.id === 'int-widget') {
+                          if (widgetConnected) {
+                            handleConnectClick(item);
+                          } else {
+                            handleConnectClick(item);
+                          }
+                        } else {
+                          handleConnectClick(item);
+                        }
+                      }}
+                      className={`font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer ${
+                        isWhatsAppError
+                          ? 'btn-light-primary'
+                          : item.connected
+                            ? 'btn-glass'
+                            : 'btn-accent'
+                      }`}
+                    >
+                      {item.id === 'int-fb' 
+                        ? (item.connected ? 'Disconnect' : 'Connect') 
+                        : item.id === 'int-ig' 
+                          ? (item.connected ? 'Disconnect' : 'Connect') 
+                          : isWhatsApp 
+                            ? (waConnected ? 'Disconnect' : 'Connect') 
+                            : item.id === 'int-widget' 
+                              ? (widgetConnected ? 'Manage' : 'Connect') 
+                              : 'Manage'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
+      {/* Dotted separator with Beta label */}
+      <div className="flex items-center gap-3 py-4">
+        <div className="flex-1 border-t border-dotted border-white/25" />
+        <span className="text-[9px] uppercase tracking-[0.14em] text-white/40 font-bold">Beta · Product Catalog Connectors</span>
+        <div className="flex-1 border-t border-dotted border-white/25" />
+      </div>
+
+      {/* Minimal Single-Line Catalog Source Selector */}
+      <div className="zone-b-grey2 p-4 rounded-xl border border-white/10">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Database className="h-4 w-4 text-white/50" />
+            <span className="text-xs font-bold text-white/70">Catalog Source:</span>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleCatalogSourceSelect('CUSTOM')}
+              disabled={catalogSource !== 'CUSTOM' && (shopifyConnected || wooConnected)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                catalogSource === 'CUSTOM'
+                  ? 'bg-[#4d8bff]/20 border border-[#4d8bff]/50 text-white'
+                  : 'bg-white/5 border border-white/15 text-white/50 hover:border-white/30 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              Custom
+            </button>
+            
+            <button
+              onClick={() => handleCatalogSourceSelect('SHOPIFY')}
+              disabled={catalogSource !== 'CUSTOM' && catalogSource !== 'SHOPIFY'}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                catalogSource === 'SHOPIFY'
+                  ? 'bg-[#96bf48]/20 border border-[#96bf48]/50 text-white'
+                  : 'bg-white/5 border border-white/15 text-white/50 hover:border-white/30 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              Shopify
+            </button>
+            
+            <button
+              onClick={() => handleCatalogSourceSelect('WOOCOMMERCE')}
+              disabled={catalogSource !== 'CUSTOM' && catalogSource !== 'WOOCOMMERCE'}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                catalogSource === 'WOOCOMMERCE'
+                  ? 'bg-[#7F54B3]/20 border border-[#7F54B3]/50 text-white'
+                  : 'bg-white/5 border border-white/15 text-white/50 hover:border-white/30 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              WooCommerce
+            </button>
+            
+            <button
+              onClick={() => handleCatalogSourceSelect('CSV')}
+              disabled={catalogSource !== 'CUSTOM' && catalogSource !== 'CSV'}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                catalogSource === 'CSV'
+                  ? 'bg-blue-500/20 border border-blue-500/50 text-white'
+                  : 'bg-white/5 border border-white/15 text-white/50 hover:border-white/30 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              CSV
+            </button>
+          </div>
+        </div>
+        
+        {catalogSourceError && (
+          <div className="status-danger text-[11px] p-2 rounded-lg font-sans mt-3">
+            {catalogSourceError}
+          </div>
+        )}
+      </div>
+
+      {/* Product Catalog Connectors Section */}
+      <div className="space-y-4">
+        <div className="px-1">
+          <h3 className="text-sm font-bold text-white uppercase tracking-[0.12em]">Sync your product catalog</h3>
+          <p className="text-xs text-white/50 mt-1">Connect your store platform or upload a CSV file</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Shopify Card */}
+          {filteredIntegrations
+            .filter((item) => item.id === 'int-shopify')
+            .map((item) => {
+              const sourceLocked = catalogSource !== 'CUSTOM' && catalogSource !== 'SHOPIFY';
+              
+              return (
+                <div 
+                  key={item.id}
+                  className={`flex flex-col justify-between h-[260px] p-6 rounded-2xl transition-all duration-300 relative group overflow-hidden ${
+                    sourceLocked
+                      ? 'zone-b-grey2 border border-white/10 opacity-45'
+                      : shopifyConnected
+                        ? 'zone-b-grey2 hover:border-white/24'
+                        : 'zone-b-grey2 border border-dashed border-white/16 hover:border-white/30'
+                  }`}
+                >
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <div className="w-12 h-12 rounded-xl bg-[#96bf48]/15 border border-[#96bf48]/30 text-[#96bf48] flex items-center justify-center transition-transform group-hover:scale-105 duration-300">
+                        {renderIcon(item.logoType, "h-6 w-6")}
+                      </div>
+
+                      <div>
+                        {sourceLocked ? (
+                          <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Locked
+                          </span>
+                        ) : shopifyConnected ? (
+                          <span className="status-success px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Connected
+                          </span>
+                        ) : (
+                          <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Not connected
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
+                      {item.name}
+                    </h3>
+                    
+                    <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
+                      {sourceLocked ? `Select "Shopify" as catalog source first` : item.description}
+                    </p>
+                  </div>
+
+                  <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
+                    <span className="font-sans text-xs text-white/50">
+                      {sourceLocked ? 'Source locked' : item.statusText}
+                    </span>
+
+                    <button
+                      onClick={() => !sourceLocked && handleConnectClick(item)}
+                      disabled={sourceLocked}
+                      className={`font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all ${
+                        sourceLocked
+                          ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                          : shopifyConnected
+                            ? 'btn-glass cursor-pointer'
+                            : 'btn-accent cursor-pointer'
+                      }`}
+                    >
+                      {sourceLocked ? 'Locked' : shopifyConnected ? 'Manage' : 'Connect'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+          {/* WooCommerce Card */}
+          {filteredIntegrations
+            .filter((item) => item.id === 'int-woo')
+            .map((item) => {
+              const sourceLocked = catalogSource !== 'CUSTOM' && catalogSource !== 'WOOCOMMERCE';
+              
+              return (
+                <div 
+                  key={item.id}
+                  className={`flex flex-col justify-between h-[260px] p-6 rounded-2xl transition-all duration-300 relative group overflow-hidden ${
+                    sourceLocked
+                      ? 'zone-b-grey2 border border-white/10 opacity-45'
+                      : wooConnected
+                        ? 'zone-b-grey2 hover:border-white/24'
+                        : 'zone-b-grey2 border border-dashed border-white/16 hover:border-white/30'
+                  }`}
+                >
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <div className="w-12 h-12 rounded-xl bg-[#7F54B3]/15 border border-[#7F54B3]/30 text-[#7F54B3] flex items-center justify-center transition-transform group-hover:scale-105 duration-300">
+                        {renderIcon(item.logoType, "h-6 w-6")}
+                      </div>
+
+                      <div>
+                        {sourceLocked ? (
+                          <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Locked
+                          </span>
+                        ) : wooConnected ? (
+                          <span className="status-success px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Connected
+                          </span>
+                        ) : (
+                          <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                            Not connected
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
+                      {item.name}
+                    </h3>
+                    
+                    <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
+                      {sourceLocked ? `Select "WooCommerce" as catalog source first` : item.description}
+                    </p>
+                  </div>
+
+                  <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
+                    <span className="font-sans text-xs text-white/50">
+                      {sourceLocked ? 'Source locked' : item.statusText}
+                    </span>
+
+                    <button
+                      onClick={() => !sourceLocked && handleConnectClick(item)}
+                      disabled={sourceLocked}
+                      className={`font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all ${
+                        sourceLocked
+                          ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                          : wooConnected
+                            ? 'btn-glass cursor-pointer'
+                            : 'btn-accent cursor-pointer'
+                      }`}
+                    >
+                      {sourceLocked ? 'Locked' : wooConnected ? 'Manage' : 'Connect'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+          {/* Excel/CSV Catalog Upload Card */}
+          {(() => {
+            const csvLocked = catalogSource !== 'CUSTOM' && catalogSource !== 'CSV';
+            
+            return (
+              <div className={`flex flex-col justify-between h-[260px] p-6 rounded-2xl transition-all duration-300 relative group overflow-hidden ${
+                csvLocked
+                  ? 'zone-b-grey2 border border-white/10 opacity-45'
+                  : 'zone-b-grey2 border border-dashed border-white/20 hover:border-white/35'
+              }`}>
+                <div>
+                  <div className="flex justify-between items-start">
+                    <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center transition-transform group-hover:scale-105 duration-300">
+                      <FileSpreadsheet className="h-6 w-6" />
+                    </div>
+                    <div>
+                      {csvLocked ? (
+                        <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                          Locked
+                        </span>
+                      ) : (
+                        <span className="status-neutral px-2.5 py-1 text-[11px] font-bold rounded-full">
+                          CSV / Excel
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <h3 className="font-sans font-bold text-[19px] text-white tracking-tight mt-5">
+                    Upload Excel/CSV product sheet
+                  </h3>
+                  
+                  <p className="text-white/60 text-xs leading-relaxed mt-1 font-sans line-clamp-3">
+                    {csvLocked ? `Select "CSV" as catalog source first` : `Don't have a website? Upload your product catalog excel/csv file and continue your business`}
+                  </p>
+
+                  {excelSuccessMsg && !csvLocked && (
+                    <div className="status-success text-[11px] p-2 rounded-xl font-sans mt-2">
+                      {excelSuccessMsg}
+                    </div>
+                  )}
+
+                  {excelErrorMsg && !csvLocked && (
+                    <div className="status-danger text-[11px] p-2 rounded-xl font-sans mt-2">
+                      {excelErrorMsg}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-white/[0.07] pt-4 flex justify-between items-center">
+                  <span className="font-sans text-xs text-white/50">
+                    {csvLocked ? 'Source locked' : 'Bulk SKU import'}
+                  </span>
+
+                  <label className={`font-sans text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 ${
+                    csvLocked
+                      ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                      : 'btn-accent cursor-pointer shadow-md hover:scale-105'
+                  }`}>
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      className="hidden"
+                      disabled={excelUploading || csvLocked}
+                      onChange={(e) => handleExcelUpload(e.target.files?.[0])}
+                    />
+                    <Upload className="h-3.5 w-3.5" />
+                    {csvLocked ? 'Locked' : excelUploading ? 'Uploading…' : 'Upload'}
+                  </label>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
       </div>
 
       {/* SETUP WIZARDS DIALOGS OVERLAY */}

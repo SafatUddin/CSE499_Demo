@@ -4,6 +4,7 @@ import { requireAuth, AuthedRequest } from '../auth';
 import { requireProfileComplete } from '../profileCompletion';
 import { validateProductInput } from '../inputValidation';
 import { productImageUpload, saveProductImageFile, deleteProductImageFile } from '../mediaStorage';
+import { getCatalogSource } from '../catalogSource';
 
 const toPublicProduct = (p: { id: string; name: string; sku: string; price: any; inventory: number; status: string; description?: string | null; imageUrl?: string | null; rawAttributes?: any }) => ({
   id: p.id,
@@ -41,6 +42,7 @@ export function createProductsRouter(): express.Router {
         products: products.map(toPublicProduct),
         isWebsiteConnected,
         connectedChannels: connectedTypes,
+        catalogSource: await getCatalogSource(req.auth!.storeId),
       });
     } catch (err: any) {
       console.error('List products error:', err);
@@ -54,6 +56,11 @@ export function createProductsRouter(): express.Router {
       const validated = validateProductInput(req.body);
       if (!validated) {
         return res.status(400).json({ error: 'Invalid product data.' });
+      }
+
+      const catalogSource = await getCatalogSource(req.auth!.storeId);
+      if (catalogSource !== 'CUSTOM' && req.body.catalogSource !== catalogSource) {
+        return res.status(409).json({ error: `Catalog is managed by ${catalogSource}. Select Custom before adding products manually.` });
       }
 
       const existing = await prisma.product.findUnique({

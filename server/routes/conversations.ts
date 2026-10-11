@@ -32,14 +32,14 @@ import {
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-// The shared database may temporarily lag behind additive message migrations. Keep
-// core conversation reads limited to columns present before voice-message support;
-// the voice migration enables the richer media fields once deployed.
-const legacyInboxMessageSelect = {
+const inboxMessageSelect = {
   id: true,
   sender: true,
   text: true,
   imageUrl: true,
+  audioUrl: true,
+  transcript: true,
+  mediaType: true,
   pending: true,
   createdAt: true,
 } as const;
@@ -56,7 +56,7 @@ export function createConversationsRouter(): express.Router {
       const [conversations, lowStockProducts] = await Promise.all([
         prisma.conversation.findMany({
           where: { storeId },
-          include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'desc' }, take: 1 } },
+          include: { messages: { select: inboxMessageSelect, orderBy: { createdAt: 'desc' }, take: 1 } },
           orderBy: { lastMessageAt: 'desc' },
           take: 20,
         }),
@@ -112,7 +112,7 @@ export function createConversationsRouter(): express.Router {
           // Keep the inbox readable while the additive voice-message migration is
           // waiting for deployment on a shared database.
           messages: {
-            select: legacyInboxMessageSelect,
+            select: inboxMessageSelect,
             orderBy: { createdAt: 'asc' },
           },
         },
@@ -191,7 +191,7 @@ export function createConversationsRouter(): express.Router {
       const updated = await prisma.conversation.update({
         where: { id: conversation.id },
         data: dataToUpdate,
-        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: inboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
@@ -284,7 +284,7 @@ export function createConversationsRouter(): express.Router {
 
         const updated = await prisma.conversation.findUnique({
           where: { id: conversation.id },
-          include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
+          include: { messages: { select: inboxMessageSelect, orderBy: { createdAt: 'asc' } } },
         });
         return res.json(toPublicConversation(updated));
       }
@@ -295,7 +295,7 @@ export function createConversationsRouter(): express.Router {
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
-        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: inboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {
@@ -358,7 +358,7 @@ export function createConversationsRouter(): express.Router {
 
       const updated = await prisma.conversation.findUnique({
         where: { id: conversation.id },
-        include: { messages: { select: legacyInboxMessageSelect, orderBy: { createdAt: 'asc' } } },
+        include: { messages: { select: inboxMessageSelect, orderBy: { createdAt: 'asc' } } },
       });
       res.json(toPublicConversation(updated));
     } catch (err: any) {

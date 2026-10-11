@@ -186,6 +186,7 @@ export interface ProductsResponse {
   products: ApiProduct[];
   isWebsiteConnected?: boolean;
   connectedChannels?: string[];
+  catalogSource?: 'CUSTOM' | 'SHOPIFY' | 'WOOCOMMERCE' | 'CSV';
 }
 
 export async function listProducts(): Promise<ProductsResponse> {
@@ -196,7 +197,7 @@ export async function listProducts(): Promise<ProductsResponse> {
   return res;
 }
 
-export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending'; description?: string; rawAttributes?: Record<string, any> }) {
+export function createProduct(input: { name: string; sku: string; price: number; inventory: number; status?: 'Trained' | 'Pending'; description?: string; rawAttributes?: Record<string, any>; catalogSource?: 'CSV' }) {
   return request<ApiProduct>('/api/products', { method: 'POST', body: JSON.stringify(input) });
 }
 
@@ -385,6 +386,19 @@ export function listChannels() {
 
 export function disconnectChannel(type: string) {
   return request<{ success: boolean }>(`/api/channels/${type}`, { method: 'DELETE' });
+}
+
+export type CatalogSource = 'CUSTOM' | 'SHOPIFY' | 'WOOCOMMERCE' | 'CSV';
+
+export function getCatalogSource() {
+  return request<{ catalogSource: CatalogSource }>('/api/catalog/source');
+}
+
+export function setCatalogSource(catalogSource: CatalogSource) {
+  return request<{ catalogSource: CatalogSource }>('/api/catalog/source', {
+    method: 'PUT',
+    body: JSON.stringify({ catalogSource }),
+  });
 }
 
 export function connectWhatsAppChannel(input: { phoneNumberId: string; accessToken: string; phoneNumber?: string }) {

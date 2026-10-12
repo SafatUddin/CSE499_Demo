@@ -185,14 +185,14 @@ export function isCancelDeclineMessage(text: string): boolean {
 const CHECKOUT_YES = new Set([
   'yes', 'y', 'yes please', 'yeah', 'yep', 'ha', 'haa', 'haan', 'hae', 'ji', 'jee', 'ok', 'okay', 'sure',
   'confirm', 'confirmed', 'proceed', 'correct', 'right', 'place it', 'place the order', 'place order',
-  'thik ache', 'thik', 'ঠিক আছে', 'হ্যাঁ', 'হ্যা', 'হা', 'জি', 'জ্বি', 'ঠিক', 'কনফার্ম',
+  'thik ache', 'thik ase', 'thik', 'ji ha', 'ji haa', 'hya', 'hoo', 'confirm koren', 'order koren', 'ঠিক আছে', 'হ্যাঁ', 'হ্যা', 'হা', 'জি', 'জ্বি', 'ঠিক', 'কনফার্ম',
 ]);
 
 /** Plain "yes" to a checkout question — never matches anything mentioning cancel/no. */
 export function isCheckoutAffirmative(text: string): boolean {
   const lower = text.toLowerCase().trim().replace(/[.!,?।\s]+$/u, '');
   if (!lower || /cancel|\bno\b|\bna\b|\bnah?\b|না/u.test(lower)) return false;
-  return CHECKOUT_YES.has(lower) || /^(?:yes|ha+|ji|ok(?:ay)?|sure|হ্যাঁ|জি)[\s,]+(?:please|correct|thik ache|place (?:it|the order)|confirm|ঠিক আছে)$/u.test(lower);
+  return CHECKOUT_YES.has(lower) || /^(?:yes|ha+|ji|ok(?:ay)?|sure|হ্যাঁ|জি)[\s,]+(?:please|correct|thik ache|thik ase|place (?:it|the order)|confirm|confirm koren|order koren|ঠিক আছে)$/u.test(lower);
 }
 
 /** Customer abandoning an in-progress checkout (before an order exists). */

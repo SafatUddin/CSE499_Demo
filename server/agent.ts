@@ -1,5 +1,6 @@
-import { Type, FunctionDeclaration } from '@google/genai';
+import { Type, FunctionDeclaration, FunctionCallingConfigMode, type Content } from '@google/genai';
 import { ai } from './gemini';
+import { detectReplyLanguage, replyTexts, type ReplyLanguage } from './replyLanguage';
 
 export interface AgentPersona {
   storeName?: string;
@@ -64,9 +65,9 @@ export interface AiMetaSummary {
 export function normalizeAiMeta(raw: Record<string, any> | null | undefined): AiMetaSummary {
   const model = typeof raw?.model === 'string' && raw.model.trim() ? raw.model.trim() : 'unknown';
   const fallback = !!raw?.fallback || model === 'fallback';
-  const latencyMs = Number.isFinite(Number(raw?.latencyMs)) ? Number(raw.latencyMs) : 0;
-  const responseTokens = Number.isFinite(Number(raw?.responseTokens)) ? Number(raw.responseTokens) : 0;
-  const promptTokens = Number.isFinite(Number(raw?.promptTokens)) ? Number(raw.promptTokens) : 0;
+  const latencyMs = Number.isFinite(Number(raw?.latencyMs)) ? Number(raw?.latencyMs) : 0;
+  const responseTokens = Number.isFinite(Number(raw?.responseTokens)) ? Number(raw?.responseTokens) : 0;
+  const promptTokens = Number.isFinite(Number(raw?.promptTokens)) ? Number(raw?.promptTokens) : 0;
   const fallbackReason = typeof raw?.fallbackReason === 'string' && raw.fallbackReason.trim()
     ? raw.fallbackReason.trim()
     : undefined;
@@ -282,6 +283,43 @@ export function findUngroundedAmounts(replyText: string, allowed: Set<number>): 
   return stated.filter((amount) => !allowed.has(round2(amount)));
 }
 
+// Tool results handed back to the model so it can write the customer-facing reply.
+function describeToolResult(call: { name?: string; args?: Record<string, any> }, catalog: AgentCatalogItem[]): Record<string, unknown> {
+  const args = call.args || {};
+  const product = args.sku ? catalog.find((p) => p.sku === args.sku) : undefined;
+  const productInfo = product ? { productName: product.name, price: product.price, inStock: product.inventory } : {};
+  switch (call.name) {
+    case 'ask_for_quantity':
+      return { status: 'ok', ...productInfo, instruction: 'Tell the customer the price and ask how many units they want.' };
+    case 'add_to_cart':
+      return { status: 'ok', ...productInfo, quantity: args.quantity, instruction: 'The system will show the order summary and ask the customer to confirm.' };
+    case 'show_product_image':
+      return { status: 'ok', ...productInfo, instruction: 'The product photo is being sent. Briefly describe the product.' };
+    case 'capture_contact_details':
+      return { status: 'saved', instruction: 'Thank the customer for the details. Do not say the order is placed.' };
+    case 'flag_for_human_review':
+      return { status: 'flagged', instruction: 'Respond empathetically and tell the customer a team member will help shortly.' };
+    default:
+      return { status: 'ok', instruction: 'Reply to the customer naturally. Do not say the order is placed.' };
+  }
+}
+
+// Last-resort reply if the model still returns no text after the tool round trip.
+function toolFallbackText(
+  toolCalls: { name?: string; args?: Record<string, any> }[],
+  catalog: AgentCatalogItem[],
+  lang: ReplyLanguage,
+): string {
+  const texts = replyTexts(lang);
+  for (const call of toolCalls) {
+    const product = call.args?.sku ? catalog.find((p) => p.sku === call.args!.sku) : undefined;
+    if (call.name === 'ask_for_quantity' && product) return texts.askQuantity(product.name, product.price);
+    if (call.name === 'show_product_image' && product) return texts.showProduct(product.name, product.price);
+    if (call.name === 'flag_for_human_review') return texts.flaggedForReview();
+  }
+  return DEFAULT_REPLY_TEXT;
+}
+
 // --- Main Agent Function ---
 export async function generateAgentReply({
   message,
@@ -403,7 +441,7 @@ When customers ask about the shop location, address, contact details, or "where 
   : `The merchant operates online only.
 
 When customers ask about physical location or address:
-- Explain: "We operate entirely online to bring you the best selection directly to your doorstep"
+- Explain, in the customer's language/script, that we operate entirely online and deliver directly to their doorstep
 - Redirect to browsing products and placing orders through chat`
 }
 
@@ -456,7 +494,12 @@ MULTILINGUAL SUPPORT:
 - Bangla: দাম, কত, টাকা, নিব, চাই, ঠিক আছে
 - Banglish: dam, koto, taka, nibo, kinbo, lagbe, chai, thik ache
 - English: price, buy, want, need, okay, confirm
-- Respond in the same language the customer uses
+- REPLY LANGUAGE — always mirror the script and language of the customer's latest message:
+  - Bangla script (e.g. "দাম কত?") → reply in Bangla script.
+  - Banglish = Bangla words typed in English letters (e.g. "ami 2ta nibo", "dam koto?", "snowboard ta kinte chai") → reply in Banglish, written in English letters. Never switch to English or Bangla script for a Banglish customer.
+    Example: customer "multi managed snowboard ta nite chai" → "Multi-managed Snowboard er dam $629.95. Apni koyta nite chan?"
+  - English → reply in English.
+- Product names, SKUs and prices stay exactly as written in the catalog in every language.
 
 TONE: ${toneText}
 STYLE: ${styleText}
@@ -495,7 +538,7 @@ ${catalogText || 'No products available.'}`;
   }
 
   try {
-    const contentsPayload = [
+    const contentsPayload: Content[] = [
       ...history.map((h) => ({
         role: h.sender === 'customer' ? 'user' : 'model',
         parts: [{ text: h.text }],
@@ -513,8 +556,8 @@ ${catalogText || 'No products available.'}`;
       },
     });
 
-    const candidate = response.candidates?.[0];
-    if (!candidate) {
+    const candidateContent = response.candidates?.[0]?.content;
+    if (!candidateContent) {
       throw new Error('No response candidate from Gemini');
     }
 
@@ -522,12 +565,46 @@ ${catalogText || 'No products available.'}`;
     const toolCalls: any[] = [];
 
     // Extract text and function calls
-    for (const part of candidate.content.parts) {
+    for (const part of candidateContent.parts ?? []) {
       if (part.text) {
         replyText += part.text;
       }
       if (part.functionCall) {
         toolCalls.push(part.functionCall);
+      }
+    }
+
+    // The model often answers with only a tool call (e.g. ask_for_quantity) and no text.
+    // Complete the function-calling round trip — hand it the tool results and ask for the
+    // customer-facing reply with tools disabled — instead of falling back to a canned line.
+    if (toolCalls.length > 0 && !replyText.trim()) {
+      try {
+        const followUp = await ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: [
+            ...contentsPayload,
+            candidateContent,
+            {
+              role: 'user',
+              parts: toolCalls.map((call) => ({
+                functionResponse: { id: call.id, name: call.name, response: describeToolResult(call, catalog) },
+              })),
+            },
+          ],
+          config: {
+            systemInstruction,
+            temperature: 0.4,
+            tools: [{ functionDeclarations: tools }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } },
+          },
+        });
+        replyText = followUp.text || '';
+      } catch (err: any) {
+        console.error('Follow-up reply generation failed:', err?.message || err);
+      }
+      if (!replyText.trim()) {
+        const lang = detectReplyLanguage(message, history.filter((h) => h.sender === 'customer').map((h) => h.text));
+        replyText = toolFallbackText(toolCalls, catalog, lang);
       }
     }
 

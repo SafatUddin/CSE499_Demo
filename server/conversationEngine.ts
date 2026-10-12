@@ -32,6 +32,7 @@ import {
 } from './checkoutSecurity';
 import { createOrderForConversation } from './orderCreation';
 import { extractPhone, splitContactDetails } from './contactDetails';
+import { detectReplyLanguage, replyTexts } from './replyLanguage';
 import { recognizeCatalogImage } from './imageRecognition';
 import { formatKnowledgeForPrompt, selectRelevantKnowledge } from './knowledgeBase';
 
@@ -224,6 +225,8 @@ export async function generateAndStoreAgentReply(
   // Cap history sent to the model — an unbounded prompt grows with every message in a
   // long-running conversation, which slows down local LLM inference noticeably.
   const history = recentMessages.slice().reverse().slice(0, -1).map((m) => ({ sender: m.sender.toLowerCase(), text: m.text }));
+  // Server-written replies follow the customer's language: Bangla script, Banglish, or English.
+  const texts = replyTexts(detectReplyLanguage(customerText, history.filter((h) => h.sender === 'customer').map((h) => h.text)));
 
   const existingCart: { sku: string; quantity: number }[] = (currentConversation.cart as any) || [];
 
@@ -362,7 +365,7 @@ export async function generateAndStoreAgentReply(
     if (validated.ok) {
       const price = Number(validated.product.price);
       const total = price * validated.qty;
-      setReply(`You'd like ${validated.qty}x ${validated.product.name} at $${price.toFixed(2)} each — total $${total.toFixed(2)}. Would you like to confirm this order?`);
+      setReply(texts.cartAddConfirm(validated.qty, validated.product.name, price.toFixed(2), total.toFixed(2)));
       result.cartAction = { action: 'none', sku: '', quantity: 0 };
       result.askQuantityForSku = encodeConfirm(validated.sku, validated.qty);
       result.orderConfirmationRequested = false;
@@ -376,14 +379,14 @@ export async function generateAndStoreAgentReply(
         const p = products.find((x) => x.sku === requestedSku);
         setReply(
           p
-            ? `Sorry, we only have ${p.inventory} unit(s) of ${p.name} available. How many would you like (up to ${Math.min(p.inventory, MAX_CHECKOUT_QUANTITY)})?`
-            : `Sorry, that quantity isn't available. Please choose another amount.`,
+            ? texts.onlyAvailable(p.inventory, p.name, Math.min(p.inventory, MAX_CHECKOUT_QUANTITY))
+            : texts.quantityUnavailable(),
         );
         if (p && p.inventory > 0) result.askQuantityForSku = p.sku;
       } else if (failReason === 'invalid_qty') {
-        setReply(`Please choose a quantity between 1 and ${MAX_CHECKOUT_QUANTITY}.`);
+        setReply(texts.quantityRange(MAX_CHECKOUT_QUANTITY));
       } else {
-        setReply(`Sorry, I couldn't find that product in our catalog. Which item would you like?`);
+        setReply(texts.productNotFound());
         result.askQuantityForSku = '';
       }
     }
@@ -435,7 +438,7 @@ export async function generateAndStoreAgentReply(
     // The model's own reply (generated before this reset was detected) doesn't know the
     // cart/address/confirmation state just got wiped — replace it so the customer sees an
     // acknowledgment of the reset instead of a stale, unrelated reply.
-    setReply(`Done! I've cleared your cart and we're starting fresh. What would you like to shop for?`);
+    setReply(texts.startFresh());
     await prisma.message.update({ where: { id: aiMessage.id }, data: { text: result.replyText, imageUrl: null } });
     if (isAutopilot) await deliverAgentReply(conversation, result.replyText);
     return;
@@ -546,14 +549,14 @@ export async function generateAndStoreAgentReply(
             });
           });
           conversationData.awaitingQuantityFor = null;
-          setReply(`Your order (#${orderToCancel.id.slice(-8).toUpperCase()}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`);
+          setReply(texts.cancelOk(orderToCancel.id.slice(-8).toUpperCase()));
         } catch {
           console.error('[ORDER CANCEL] Failed to cancel confirmed order');
           conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
         }
       } else {
         conversationData.awaitingQuantityFor = null;
-        setReply(`I couldn't safely cancel that order. Please contact the store for help.`);
+        setReply(texts.cancelFail());
       }
     } else if (isCancelDeclineMessage(customerText)) {
       conversationData.awaitingQuantityFor = null;
@@ -572,10 +575,10 @@ export async function generateAndStoreAgentReply(
     if (orderToAsk && orderToAsk.storeId === conversation.storeId) {
       conversationData.awaitingQuantityFor = encodeCancelPending(orderToAsk.id);
       const items = ((orderToAsk.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
-      setReply(`I found your active order #${orderToAsk.id.slice(-8).toUpperCase()} — ${items || 'items'}, total $${Number(orderToAsk.total).toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`);
+      setReply(texts.cancelAsk(orderToAsk.id.slice(-8).toUpperCase(), items || '-', Number(orderToAsk.total).toFixed(2)));
       result.orderCancelled = false;
     } else {
-      setReply(`I couldn't find an active order to cancel in this conversation. Please share more details if you still need help.`);
+      setReply(texts.noOrderToCancel());
       result.orderCancelled = false;
     }
   } else if (isCancelPendingState && !cancelPendingValid) {
@@ -592,17 +595,16 @@ export async function generateAndStoreAgentReply(
       .filter((x) => !!x.product);
     if (lines.length === 0) return '';
     const total = lines.reduce((sum, x) => sum + Number(x.product!.price) * x.line.quantity, 0);
-    return `${lines.map((x) => `${x.line.quantity}x ${x.product!.name}`).join(', ')} — total $${total.toFixed(2)}`;
+    return `${lines.map((x) => `${x.line.quantity}x ${x.product!.name}`).join(', ')} — $${total.toFixed(2)}`;
   };
   const contactConfirmText = (cart: { sku: string; quantity: number }[]) => {
-    const summary = cartSummary(cart);
-    return `Before I place your order${summary ? ` (${summary})` : ''}, please confirm your delivery details:\n• Phone: ${contact.phone}\n• Address: ${contact.address}\nIs this your phone number and address, and would you like your order delivered here? Reply "yes" to place the order, or send the correct phone number/address.`;
+    return texts.contactConfirm(cartSummary(cart), contact.phone, contact.address);
   };
   const contactMissingText = () => {
-    if (!contact.phone && !contact.address) return `Great! To place your order, please share your phone number and full delivery address.`;
-    if (!contact.phone) return `Thanks! I have your delivery address as: ${contact.address}. Please also share your phone number.`;
-    if (!contact.address) return `Thanks! I have your phone number as: ${contact.phone}. Please also share your full delivery address.`;
-    return `No problem! Please send the correct phone number and delivery address for this order.`;
+    if (!contact.phone && !contact.address) return texts.askPhoneAndAddress();
+    if (!contact.phone) return texts.askPhone(contact.address);
+    if (!contact.address) return texts.askAddress(contact.phone);
+    return texts.askCorrectContact();
   };
   const promptForContact = (cart: { sku: string; quantity: number }[]) => {
     if (contact.phone && contact.address) {
@@ -614,7 +616,7 @@ export async function generateAndStoreAgentReply(
     }
   };
   const customerSaidYes = (result.orderConfirmed && !result.orderCancelled) || isCheckoutAffirmative(customerText);
-  const customerSaidNo = result.orderCancelled || /^(?:no|na|nah|nope|wrong|incorrect|না|ভুল)(?![\p{L}])/iu.test(customerText.trim());
+  const customerSaidNo = result.orderCancelled || /^(?:no|na|naa|nah|nope|wrong|incorrect|vul|bhul|thik na|না|ভুল)(?![\p{L}])/iu.test(customerText.trim());
   let finalizeCart: { sku: string; quantity: number }[] | null = null;
 
   if (isConfirmState && confirmDetailsValid) {
@@ -631,8 +633,8 @@ export async function generateAndStoreAgentReply(
         conversationData.cart = [];
         setReply(
           failReason === 'insufficient_inventory'
-            ? `Sorry, that quantity is no longer available. Please choose a different quantity.`
-            : `Sorry, we couldn't continue checkout for that item. Please try again.`,
+            ? texts.quantityNoLongerAvailable()
+            : texts.checkoutContinueFailed(),
         );
       }
     } else if (result.orderCancelled) {
@@ -648,7 +650,7 @@ export async function generateAndStoreAgentReply(
       conversationData.awaitingQuantityFor = null;
       conversationData.cart = [];
       conversationData.orderConfirmationRequested = false;
-      setReply(`Okay, I've cancelled this checkout — no order was placed. Let me know if you'd like anything else!`);
+      setReply(texts.checkoutCancelled());
     } else if (isContactDetailsState) {
       if (contact.phone && contact.address && (sharedContactThisTurn || customerSaidYes)) {
         conversationData.awaitingQuantityFor = CONTACT_CONFIRM_STATE;
@@ -664,7 +666,7 @@ export async function generateAndStoreAgentReply(
       else promptForContact(contactFlowCart);
     } else if (customerSaidNo) {
       conversationData.awaitingQuantityFor = CONTACT_DETAILS_STATE;
-      setReply(`No problem! Please send the correct phone number and delivery address for this order.`);
+      setReply(texts.askCorrectContact());
     } else {
       conversationData.awaitingQuantityFor = CONTACT_CONFIRM_STATE;
       if (result.replyText === DEFAULT_REPLY_TEXT) setReply(contactConfirmText(contactFlowCart));
@@ -690,20 +692,19 @@ export async function generateAndStoreAgentReply(
   // Order only when the merchant is eligible (AI Managed, or autoFinalizeOrdersAlways).
   // Otherwise preserve cart + contact details for the merchant "Generate Order" workflow.
   if (finalizeCart) {
-    const contactLines = `• Phone: ${contact.phone}\n• Address: ${contact.address}`;
     const cartValid =
       finalizeCart.length > 0 &&
       finalizeCart.every((line) => validateSkuAndQuantity(products, line.sku, line.quantity).ok);
 
     if (!cartValid) {
-      setReply(`Sorry, we couldn't place that order with the requested items/quantity. Please adjust and try again.`);
+      setReply(texts.orderInvalidItems());
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { awaitingQuantityFor: null },
       });
     } else if (!autoFinalizeEligible) {
       // H1: not eligible — keep cart/contact for merchant review; do not create Order / decrement stock.
-      setReply(`Thank you! I've saved your order details and notified the store. A team member will finalize your order shortly.\n${contactLines}`);
+      setReply(texts.savedForMerchant(contact.phone, contact.address));
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
@@ -722,17 +723,17 @@ export async function generateAndStoreAgentReply(
           finalizeCart,
           contact,
         );
-        setReply(`Thank you! Your order has been placed.\n${contactLines}\nWe'll deliver to this address. Thank you for shopping with us!`);
+        setReply(texts.orderPlaced(contact.phone, contact.address));
       } catch (err: any) {
         console.error('Auto-finalize order failed for conversation:', conversation.id);
         if (err?.code === 'INSUFFICIENT_STOCK') {
-          setReply(`Sorry, we don't have enough stock to complete that order right now. Please adjust your quantity and try again.`);
+          setReply(texts.outOfStock());
           await prisma.conversation.update({
             where: { id: conversation.id },
             data: { awaitingQuantityFor: null },
           });
         } else {
-          setReply(`Sorry, something went wrong while placing your order. Please reply "yes" to try again, or a team member will follow up shortly.`);
+          setReply(texts.orderPlaceError());
         }
       }
     }

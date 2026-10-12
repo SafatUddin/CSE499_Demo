@@ -18,7 +18,7 @@ export type EncodedAwaitingState =
   | { kind: 'confirm'; sku: string; qty: number }
   | { kind: 'details'; sku: string; qty: number }
   | { kind: 'ask_qty'; sku: string }
-  | { kind: 'cancel_pending'; orderId: string }
+  | { kind: 'cancel_pending'; orderIds: string[] }
   | { kind: 'contact_details' }
   | { kind: 'contact_confirm' }
   | { kind: 'none' };
@@ -40,9 +40,9 @@ export function parseAwaitingQuantityFor(raw: string | null | undefined): Encode
   if (trimmed === CONTACT_CONFIRM_STATE) return { kind: 'contact_confirm' };
 
   if (trimmed.startsWith('CANCEL_PENDING:')) {
-    const orderId = trimmed.slice('CANCEL_PENDING:'.length).trim();
-    if (!orderId || orderId.includes(':')) return { kind: 'none' };
-    return { kind: 'cancel_pending', orderId };
+    const orderIds = trimmed.slice('CANCEL_PENDING:'.length).split(',').map((id) => id.trim());
+    if (orderIds.length === 0 || orderIds.some((id) => !id || id.includes(':'))) return { kind: 'none' };
+    return { kind: 'cancel_pending', orderIds };
   }
 
   if (trimmed.startsWith('CONFIRM:') || trimmed.startsWith('DETAILS:')) {
@@ -68,8 +68,8 @@ export function encodeDetails(sku: string, qty: number): string {
   return `DETAILS:${sku}:${qty}`;
 }
 
-export function encodeCancelPending(orderId: string): string {
-  return `CANCEL_PENDING:${orderId}`;
+export function encodeCancelPending(orderIds: string[]): string {
+  return `CANCEL_PENDING:${orderIds.join(',')}`;
 }
 
 export function normalizeCheckoutQuantity(raw: unknown): number | null {
@@ -228,6 +228,11 @@ export function isOngoingOrderCancelIntent(text: string): boolean {
     lower.includes('please cancel') ||
     lower.includes('i want to cancel') ||
     lower.includes('cancel kore') ||
-    lower.includes('order cancel')
+    lower.includes('cancel korte') ||
+    lower.includes('cancel koren') ||
+    lower.includes('order cancel') ||
+    lower.includes('ক্যান্সেল') ||
+    lower.includes('ক্যানসেল') ||
+    lower.includes('বাতিল')
   );
 }

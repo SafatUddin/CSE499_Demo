@@ -113,12 +113,12 @@ export function replyTexts(lang: ReplyLanguage) {
         `Done! Apnar cart clear kore dilam, notun kore shuru korchi. Ki kinte chan?`,
         `হয়ে গেছে! আপনার কার্ট খালি করে দিয়েছি, নতুন করে শুরু করছি। কী কিনতে চান?`,
       ),
-    cancelOk: (ref: string) =>
+    cancelOk: (refs: string[]) =>
       pick(
         lang,
-        `Your order (#${ref}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`,
-        `Apnar order (#${ref}) successfully cancel kora hoyeche. Dhonnobad!`,
-        `আপনার অর্ডার (#${ref}) সফলভাবে বাতিল করা হয়েছে। ধন্যবাদ!`,
+        `Done! ${refs.length > 1 ? `Orders ${refs.join(', ')} have` : `Order ${refs[0]} has`} been cancelled successfully. Thank you!`,
+        `Done! ${refs.length > 1 ? `${refs.join(', ')} order gulo` : `${refs[0]} order ta`} successfully cancel kora hoyeche. Dhonnobad!`,
+        `হয়ে গেছে! ${refs.length > 1 ? `${refs.join(', ')} অর্ডারগুলো` : `${refs[0]} অর্ডারটি`} সফলভাবে বাতিল করা হয়েছে। ধন্যবাদ!`,
       ),
     cancelFail: () =>
       pick(
@@ -127,12 +127,19 @@ export function replyTexts(lang: ReplyLanguage) {
         `Oi order ta cancel kora gelo na. Doya kore store er sathe jogajog korun.`,
         `ওই অর্ডারটি বাতিল করা গেল না। অনুগ্রহ করে স্টোরের সাথে যোগাযোগ করুন।`,
       ),
-    cancelAsk: (ref: string, items: string, total: string) =>
+    cancelAsk: (ordersText: string, count: number) =>
       pick(
         lang,
-        `I found your active order #${ref} — ${items}, total $${total}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`,
-        `Apnar active order #${ref} pailam — ${items}, mot $${total}. Order ta ki cancel korbo? Confirm korte "yes, cancel it" likhun, ar rakhte chaile "no" likhun.`,
-        `আপনার চলমান অর্ডার #${ref} পেয়েছি — ${items}, মোট $${total}। অর্ডারটি কি বাতিল করব? নিশ্চিত করতে "yes, cancel it" লিখুন, আর রাখতে চাইলে "no" লিখুন।`,
+        `I found ${count > 1 ? 'these orders' : 'this order'}:\n${ordersText}\nDo you want me to cancel ${count > 1 ? 'them' : 'it'}? Reply "yes" to confirm, or "no" to keep ${count > 1 ? 'them' : 'it'}.`,
+        `${count > 1 ? 'Ei order gulo' : 'Ei order ta'} pailam:\n${ordersText}\nCancel korbo? Confirm korte "ha" likhun, ar rakhte chaile "na" likhun.`,
+        `${count > 1 ? 'এই অর্ডারগুলো' : 'এই অর্ডারটি'} পেয়েছি:\n${ordersText}\nবাতিল করব? নিশ্চিত করতে "হ্যাঁ" লিখুন, আর রাখতে চাইলে "না" লিখুন।`,
+      ),
+    cancelKept: (count: number) =>
+      pick(
+        lang,
+        `No problem — ${count > 1 ? 'your orders stay' : 'your order stays'} active. Anything else I can help with?`,
+        `Thik ache — ${count > 1 ? 'order gulo' : 'order ta'} active thakbe. Ar kichu lagbe?`,
+        `ঠিক আছে — ${count > 1 ? 'অর্ডারগুলো' : 'অর্ডারটি'} চালু থাকবে। আর কিছু লাগবে?`,
       ),
     noOrderToCancel: () =>
       pick(

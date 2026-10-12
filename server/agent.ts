@@ -44,6 +44,8 @@ export interface AgentReply {
   orderConfirmationRequested: boolean;
   orderConfirmed: boolean;
   orderCancelled: boolean;
+  // #REF codes (last 8 chars of the order id) of ongoing orders the customer asked to cancel.
+  cancelOrderRefs: string[];
   showImageForSku?: string;
   model?: string;
   latencyMs?: number;
@@ -93,7 +95,7 @@ export interface AgentOrderState {
   awaitingContactDetails?: boolean;
   awaitingContactConfirmation?: boolean;
   contactOnFile?: { phone: string; address: string };
-  pendingCancelOrder?: { id: string; status: string; total: number } | null;
+  pendingCancelOrders?: { id: string; status: string; total: number }[];
   ongoingOrders?: { id: string; items: { name: string; quantity: number; price: number }[]; status: string; createdAt: string; total: number }[];
 }
 
@@ -173,16 +175,17 @@ const tools: FunctionDeclaration[] = [
   },
   {
     name: 'cancel_order',
-    description: 'Cancel an ongoing order. Use this only after explicitly confirming with the customer that they want to cancel a specific order.',
+    description: 'Request cancellation of one or more of the customer\'s ongoing orders (in any language, e.g. "cancel my order", "order ta cancel koren", "অর্ডার বাতিল করুন"). The system will ask the customer to confirm before anything is cancelled.',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        orderId: {
-          type: Type.STRING,
-          description: 'The order ID to cancel (from ongoingOrders)',
+        orderRefs: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'The #REF codes of the orders to cancel, from "Customer\'s Ongoing Orders". Include every order the customer wants cancelled (e.g. "cancel two of the three" → two refs). If they don\'t say which ones, choose the most recently placed matching orders.',
         },
       },
-      required: ['orderId'],
+      required: ['orderRefs'],
     },
   },
   {
@@ -268,7 +271,7 @@ export function collectGroundedAmounts(catalog: AgentCatalogItem[], orderState: 
     }
     if (orderState.cartItems.length > 0) add(subtotal);
   }
-  if (orderState.pendingCancelOrder) add(orderState.pendingCancelOrder.total);
+  for (const o of orderState.pendingCancelOrders || []) add(o.total);
   if (orderState.ongoingOrders) {
     for (const o of orderState.ongoingOrders) {
       add(o.total);
@@ -295,6 +298,8 @@ function describeToolResult(call: { name?: string; args?: Record<string, any> },
       return { status: 'ok', ...productInfo, quantity: args.quantity, instruction: 'The system will show the order summary and ask the customer to confirm.' };
     case 'show_product_image':
       return { status: 'ok', ...productInfo, instruction: 'The product photo is being sent. Briefly describe the product.' };
+    case 'cancel_order':
+      return { status: 'awaiting_customer_confirmation', instruction: 'The system will list the orders and ask the customer to confirm. Do not say anything was cancelled.' };
     case 'capture_contact_details':
       return { status: 'saved', instruction: 'Thank the customer for the details. Do not say the order is placed.' };
     case 'flag_for_human_review':
@@ -390,7 +395,7 @@ export async function generateAgentReply({
     ? orderState.ongoingOrders
         .map(
           (o) =>
-            `- Order ID: ${o.id}, Status: ${o.status}, Placed: ${o.createdAt}, Total: $${o.total.toFixed(
+            `- Order #${o.id.slice(-8).toUpperCase()}, Status: ${o.status}, Placed: ${o.createdAt}, Total: $${o.total.toFixed(
               2
             )}, Items: ${o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}`
         )
@@ -413,8 +418,8 @@ export async function generateAgentReply({
   if (orderState.awaitingContactConfirmation && orderState.contactOnFile) {
     orderStateDescription.push(`Waiting for the customer to confirm the delivery details — Phone: ${orderState.contactOnFile.phone}, Address: ${orderState.contactOnFile.address}. If they say yes, call confirm_order(true). If they give a different phone number or address, call capture_contact_details. Do NOT say the order is placed — the system confirms that.`);
   }
-  if (orderState.pendingCancelOrder) {
-    orderStateDescription.push(`Waiting for customer to confirm cancelling order #${orderState.pendingCancelOrder.id.slice(-8).toUpperCase()}.`);
+  if (orderState.pendingCancelOrders && orderState.pendingCancelOrders.length > 0) {
+    orderStateDescription.push(`Waiting for the customer to confirm cancelling order(s) ${orderState.pendingCancelOrders.map((o) => `#${o.id.slice(-8).toUpperCase()}`).join(', ')}. If they agree, call confirm_order(true). If they decline, call confirm_order(false). If they want different orders cancelled, call cancel_order with those refs. Do NOT say anything has been cancelled — the system confirms that.`);
   }
   if (orderState.orderConfirmationRequested) {
     orderStateDescription.push(`You showed an order summary. Waiting for customer to confirm or cancel.`);
@@ -448,7 +453,7 @@ When customers ask about physical location or address:
 CURRENT CONTEXT:
 ${orderStateDescription.length > 0 ? orderStateDescription.join('\n') : 'No active order flow.'}
 
-Customer's Ongoing Orders:
+Customer's Ongoing Orders (refer to orders only by their short #REF code; never show any other internal ID):
 ${ongoingOrdersText}
 
 AVAILABLE TOOLS:
@@ -457,7 +462,7 @@ AVAILABLE TOOLS:
 3. show_product_image - When customer asks to see product or you recommend one with photo
 4. capture_contact_details - When customer provides phone/address
 5. confirm_order - When customer confirms after seeing summary
-6. cancel_order - When customer confirms they want to cancel an order
+6. cancel_order - When the customer wants to cancel one or more ongoing orders (the system asks them to confirm)
 7. flag_for_human_review - For complaints, frustration, or unclear messages
 8. request_order_confirmation - When ready to show checkout summary
 
@@ -532,6 +537,7 @@ ${catalogText || 'No products available.'}`;
       orderConfirmationRequested: false,
       orderConfirmed: false,
       orderCancelled: false,
+      cancelOrderRefs: [],
       showImageForSku: '',
       ...fallbackMeta,
     };
@@ -620,6 +626,7 @@ ${catalogText || 'No products available.'}`;
       orderConfirmationRequested: false,
       orderConfirmed: false,
       orderCancelled: false,
+      cancelOrderRefs: [],
       showImageForSku: '',
       model: 'gemini-3.5-flash-lite',
       latencyMs: 0,
@@ -676,9 +683,13 @@ ${catalogText || 'No products available.'}`;
           }
           break;
 
-        case 'cancel_order':
-          result.orderCancelled = true;
+        case 'cancel_order': {
+          const refs: unknown[] = Array.isArray(args.orderRefs) ? args.orderRefs : [args.orderRefs ?? args.orderId];
+          result.cancelOrderRefs = refs
+            .filter((r): r is string => typeof r === 'string' && !!r.trim())
+            .map((r) => r.replace(/^#/, '').trim().slice(-8).toUpperCase());
           break;
+        }
 
         case 'flag_for_human_review':
           result.isComplaint = args.isComplaint || false;
@@ -733,6 +744,7 @@ ${catalogText || 'No products available.'}`;
       orderConfirmationRequested: false,
       orderConfirmed: false,
       orderCancelled: false,
+      cancelOrderRefs: [],
       showImageForSku: '',
       ...fallbackMeta,
     };

@@ -38,6 +38,9 @@ import { formatKnowledgeForPrompt, selectRelevantKnowledge } from './knowledgeBa
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Short customer-facing order reference (#XXXXXXXX), also used by the agent's cancel_order tool.
+const orderRef = (id: string) => id.slice(-8).toUpperCase();
+
 async function loadEnabledKnowledgeDocuments(storeId: string) {
   try {
     return await prisma.knowledgeDocument.findMany({
@@ -240,7 +243,7 @@ export async function generateAndStoreAgentReply(
 
   let pendingEncodedSku: string | null = null;
   let pendingEncodedQty = 0;
-  let pendingCancelOrderId: string | null = null;
+  let pendingCancelOrders: typeof conversationOrders = [];
 
   if (parsedAWQ.kind === 'confirm' || parsedAWQ.kind === 'details') {
     const validated = validateSkuAndQuantity(products, parsedAWQ.sku, parsedAWQ.qty);
@@ -249,15 +252,15 @@ export async function generateAndStoreAgentReply(
       pendingEncodedQty = validated.qty;
     }
   } else if (parsedAWQ.kind === 'cancel_pending') {
-    const owned = conversationOrders.find((o) => o.id === parsedAWQ.orderId);
-    if (owned) pendingCancelOrderId = owned.id;
+    // Only orders that really belong to this conversation and are still active.
+    pendingCancelOrders = conversationOrders.filter((o) => parsedAWQ.orderIds.includes(o.id));
   }
 
   // Drop corrupt / cross-SKU / over-inventory encodings so they cannot drive checkout.
   const pendingProduct = pendingEncodedSku ? products.find((p) => p.sku === pendingEncodedSku) : null;
   const confirmDetailsValid =
     (isConfirmState || isDetailsState) && !!pendingProduct && pendingEncodedQty > 0;
-  const cancelPendingValid = isCancelPendingState && !!pendingCancelOrderId;
+  const cancelPendingValid = isCancelPendingState && pendingCancelOrders.length > 0;
 
   // Phone + address collection and re-confirmation operate on the server-side cart. A
   // legacy DETAILS:SKU:QTY encoding (in flight before this step existed) counts as collection.
@@ -311,17 +314,11 @@ export async function generateAndStoreAgentReply(
     awaitingContactDetails: isContactDetailsState,
     awaitingContactConfirmation: isContactConfirmState,
     contactOnFile: storedContact.phone || storedContact.address ? storedContact : undefined,
-    pendingCancelOrder:
-      cancelPendingValid
-        ? (() => {
-            const o = conversationOrders.find((ord) => ord.id === pendingCancelOrderId)!;
-            return {
-              id: o.id,
-              status: o.status === 'ON_THE_WAY' ? 'On the Way' : 'Processing',
-              total: Number(o.total),
-            };
-          })()
-        : null,
+    pendingCancelOrders: pendingCancelOrders.map((o) => ({
+      id: o.id,
+      status: o.status === 'ON_THE_WAY' ? 'On the Way' : 'Processing',
+      total: Number(o.total),
+    })),
     ongoingOrders: conversationOrders.map((o) => ({
       id: o.id,
       items: ((o.items as any[]) || []).map((i) => ({ name: i.name, quantity: i.quantity, price: Number(i.price) })),
@@ -341,6 +338,8 @@ export async function generateAndStoreAgentReply(
   );
 
   const result = await generateAgentReply({ message: customerText, history, persona, catalog, promptCatalog, orderState });
+  // Orders the model asked to cancel, resolved by #REF against this conversation's active orders only.
+  const requestedCancelOrders = conversationOrders.filter((o) => result.cancelOrderRefs.includes(orderRef(o.id)));
   const isAutopilot = conversation.status === 'AI_MANAGED';
   const autoFinalizeEligible = isAutopilot || !!store.autoFinalizeOrdersAlways;
 
@@ -520,64 +519,80 @@ export async function generateAndStoreAgentReply(
   }
 
   // === H3: Ongoing order cancellation requires explicit confirmation ===
-  // Never cancel from a single ambiguous keyword or raw LLM orderCancelled alone.
-  if (cancelPendingValid && pendingCancelOrderId) {
-    if (isAffirmativeMessage(customerText)) {
-      const orderToCancel = conversationOrders.find((o) => o.id === pendingCancelOrderId);
-      if (
-        orderToCancel &&
-        orderToCancel.storeId === conversation.storeId &&
-        orderToCancel.conversationId === conversation.id &&
-        orderToCancel.status !== 'CANCELLED' &&
-        orderToCancel.status !== 'DELIVERED'
-      ) {
-        try {
-          await prisma.$transaction(async (tx) => {
-            const items = (orderToCancel.items as any[]) || [];
-            for (const item of items) {
+  // The model's cancel_order call (or a cancel keyword) only ever leads to a confirmation
+  // question listing the exact orders; nothing is cancelled until the customer says yes.
+  const describeOrders = (orders: typeof conversationOrders) =>
+    orders
+      .map((o) => {
+        const items = ((o.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
+        return `• #${orderRef(o.id)} — ${items || '-'} ($${Number(o.total).toFixed(2)})`;
+      })
+      .join('\n');
+  const askToCancel = (orders: typeof conversationOrders) => {
+    conversationData.awaitingQuantityFor = encodeCancelPending(orders.map((o) => o.id));
+    setReply(texts.cancelAsk(describeOrders(orders), orders.length));
+    result.orderCancelled = false;
+  };
+
+  if (cancelPendingValid) {
+    const sameOrders =
+      requestedCancelOrders.length === pendingCancelOrders.length &&
+      requestedCancelOrders.every((o) => pendingCancelOrders.some((p) => p.id === o.id));
+    const declined = isCancelDeclineMessage(customerText) || (result.orderCancelled && requestedCancelOrders.length === 0) ||
+      /^(?:no|na|naa|nah|nope|না)(?![\p{L}])/iu.test(customerText.trim());
+    const agreed =
+      !declined &&
+      (isAffirmativeMessage(customerText) || isCheckoutAffirmative(customerText) || (result.orderConfirmed && !result.orderCancelled) || sameOrders);
+
+    if (requestedCancelOrders.length > 0 && !sameOrders) {
+      askToCancel(requestedCancelOrders);
+    } else if (agreed) {
+      const cancelled: string[] = [];
+      try {
+        await prisma.$transaction(async (tx) => {
+          for (const order of pendingCancelOrders) {
+            // Status predicate guards against double-cancel / cancelling a delivered order.
+            const updated = await tx.order.updateMany({
+              where: { id: order.id, storeId: conversation.storeId, conversationId: conversation.id, status: { in: ['PROCESSING', 'ON_THE_WAY'] } },
+              data: { status: 'CANCELLED' },
+            });
+            if (updated.count !== 1) continue;
+            for (const item of (order.items as any[]) || []) {
               const qty = Math.floor(Number(item.quantity));
               if (item.sku && Number.isFinite(qty) && qty > 0) {
                 await tx.product.updateMany({
-                  where: { storeId: orderToCancel.storeId, sku: item.sku },
+                  where: { storeId: order.storeId, sku: item.sku },
                   data: { inventory: { increment: qty } },
                 });
               }
             }
-            await tx.order.update({
-              where: { id: orderToCancel.id },
-              data: { status: 'CANCELLED' },
-            });
-          });
-          conversationData.awaitingQuantityFor = null;
-          setReply(texts.cancelOk(orderToCancel.id.slice(-8).toUpperCase()));
-        } catch {
-          console.error('[ORDER CANCEL] Failed to cancel confirmed order');
-          conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
-        }
-      } else {
+            cancelled.push(`#${orderRef(order.id)}`);
+          }
+        });
         conversationData.awaitingQuantityFor = null;
+        setReply(cancelled.length > 0 ? texts.cancelOk(cancelled) : texts.cancelFail());
+      } catch {
+        console.error('[ORDER CANCEL] Failed to cancel confirmed orders');
+        conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrders.map((o) => o.id));
         setReply(texts.cancelFail());
       }
-    } else if (isCancelDeclineMessage(customerText)) {
+    } else if (declined) {
       conversationData.awaitingQuantityFor = null;
+      setReply(texts.cancelKept(pendingCancelOrders.length));
     } else {
       // Stay in pending-cancel until a clear yes/no.
-      conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
+      conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrders.map((o) => o.id));
+      if (result.replyText === DEFAULT_REPLY_TEXT) setReply(texts.cancelAsk(describeOrders(pendingCancelOrders), pendingCancelOrders.length));
     }
   } else if (
     !inCheckoutFlow &&
     !currentConversation.orderConfirmationRequested &&
-    isOngoingOrderCancelIntent(customerText)
+    (requestedCancelOrders.length > 0 || result.cancelOrderRefs.length > 0 || isOngoingOrderCancelIntent(customerText))
   ) {
-    // First-turn cancel intent (server-detected): ask for confirmation; do not cancel yet.
-    // Do not trust raw LLM orderCancelled alone.
-    const orderToAsk = conversationOrders[0];
-    if (orderToAsk && orderToAsk.storeId === conversation.storeId) {
-      conversationData.awaitingQuantityFor = encodeCancelPending(orderToAsk.id);
-      const items = ((orderToAsk.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
-      setReply(texts.cancelAsk(orderToAsk.id.slice(-8).toUpperCase(), items || '-', Number(orderToAsk.total).toFixed(2)));
-      result.orderCancelled = false;
-    } else {
+    // Model-requested orders when it named valid ones; otherwise the most recent active order.
+    const ordersToAsk = requestedCancelOrders.length > 0 ? requestedCancelOrders : conversationOrders.slice(0, 1);
+    if (ordersToAsk.length > 0) askToCancel(ordersToAsk);
+    else {
       setReply(texts.noOrderToCancel());
       result.orderCancelled = false;
     }

@@ -5,7 +5,7 @@
 // generateAndStoreAgentReply, which simply don't match for channels with no push API (WIDGET).
 import { prisma } from './db';
 import { decryptSecret } from './crypto';
-import { generateAgentReply } from './agent';
+import { generateAgentReply, DEFAULT_REPLY_TEXT } from './agent';
 import {
   sendMessengerMessage,
   sendMessengerImage,
@@ -19,15 +19,19 @@ import {
   sanitizeAskQuantityForSku,
   validateSkuAndQuantity,
   encodeConfirm,
-  encodeDetails,
   encodeCancelPending,
   isAffirmativeMessage,
   isCancelDeclineMessage,
+  isCheckoutAffirmative,
+  isCheckoutCancelIntent,
   isOngoingOrderCancelIntent,
   normalizeCheckoutQuantity,
   MAX_CHECKOUT_QUANTITY,
+  CONTACT_DETAILS_STATE,
+  CONTACT_CONFIRM_STATE,
 } from './checkoutSecurity';
 import { createOrderForConversation } from './orderCreation';
+import { extractPhone, splitContactDetails } from './contactDetails';
 import { recognizeCatalogImage } from './imageRecognition';
 import { formatKnowledgeForPrompt, selectRelevantKnowledge } from './knowledgeBase';
 
@@ -145,7 +149,7 @@ export async function generateAndStoreAgentReply(
   if (!isProduction) {
     console.log('[AGENT REPLY] generateAndStoreAgentReply — conversationId:', conversation.id, '| storeId:', conversation.storeId);
   }
-  const [store, products, knowledgeDocuments, recentMessages, currentConversation, conversationOrders] = await Promise.all([
+  const [store, products, knowledgeDocuments, recentMessages, currentConversation, conversationOrders, lastOrder] = await Promise.all([
     prisma.store.findUnique({ where: { id: conversation.storeId } }),
     prisma.product.findMany({ where: { storeId: conversation.storeId } }),
     loadEnabledKnowledgeDocuments(conversation.storeId),
@@ -166,6 +170,11 @@ export async function generateAndStoreAgentReply(
         status: { in: ['PROCESSING', 'ON_THE_WAY'] },
       },
       orderBy: { createdAt: 'desc' },
+    }),
+    prisma.order.findFirst({
+      where: { storeId: conversation.storeId, conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' },
+      select: { address: true, customerPhone: true },
     }),
   ]);
   if (!store || !currentConversation) return;
@@ -247,6 +256,27 @@ export async function generateAndStoreAgentReply(
     (isConfirmState || isDetailsState) && !!pendingProduct && pendingEncodedQty > 0;
   const cancelPendingValid = isCancelPendingState && !!pendingCancelOrderId;
 
+  // Phone + address collection and re-confirmation operate on the server-side cart. A
+  // legacy DETAILS:SKU:QTY encoding (in flight before this step existed) counts as collection.
+  const contactFlowCart: { sku: string; quantity: number }[] =
+    isDetailsState && confirmDetailsValid ? [{ sku: pendingEncodedSku!, quantity: pendingEncodedQty }] : existingCart;
+  const isContactDetailsState =
+    (isDetailsState && confirmDetailsValid) || (parsedAWQ.kind === 'contact_details' && existingCart.length > 0);
+  const isContactConfirmState = parsedAWQ.kind === 'contact_confirm' && existingCart.length > 0;
+  const inContactFlow = isContactDetailsState || isContactConfirmState;
+  const inCheckoutFlow = isConfirmState || isDetailsState || inContactFlow;
+
+  // Contact details on file: this conversation's saved phone/address, falling back to the
+  // customer's most recent order. Never used to order silently — always re-confirmed first.
+  const conversationContact = splitContactDetails({ phone: currentConversation.detectedPhone, address: currentConversation.detectedAddress });
+  const lastOrderContact = lastOrder
+    ? splitContactDetails({ phone: lastOrder.customerPhone, address: lastOrder.address })
+    : { phone: '', address: '' };
+  const storedContact = {
+    phone: conversationContact.phone || lastOrderContact.phone,
+    address: conversationContact.address || lastOrderContact.address,
+  };
+
   const orderState = {
     // Pass null to the model when in CONFIRM/DETAILS/CANCEL_PENDING so it doesn't think
     // we're still waiting for a plain quantity answer.
@@ -258,7 +288,8 @@ export async function generateAndStoreAgentReply(
           : null,
     orderConfirmationRequested: currentConversation.orderConfirmationRequested,
     hasCartItems: existingCart.length > 0,
-    hasAddress: !!currentConversation.detectedAddress,
+    hasAddress: !!storedContact.address,
+    hasPhone: !!storedContact.phone,
     cartItems: existingCart.map((item) => ({
       sku: item.sku,
       name: products.find((p) => p.sku === item.sku)?.name || item.sku,
@@ -274,7 +305,9 @@ export async function generateAndStoreAgentReply(
             lineTotal: Number(pendingProduct.price) * pendingEncodedQty,
           }
         : undefined,
-    awaitingContactDetails: isDetailsState && confirmDetailsValid,
+    awaitingContactDetails: isContactDetailsState,
+    awaitingContactConfirmation: isContactConfirmState,
+    contactOnFile: storedContact.phone || storedContact.address ? storedContact : undefined,
     pendingCancelOrder:
       cancelPendingValid
         ? (() => {
@@ -307,15 +340,20 @@ export async function generateAndStoreAgentReply(
   const result = await generateAgentReply({ message: customerText, history, persona, catalog, promptCatalog, orderState });
   const isAutopilot = conversation.status === 'AI_MANAGED';
   const autoFinalizeEligible = isAutopilot || !!store.autoFinalizeOrdersAlways;
-  let orderCreatedThisTurn = false;
+
+  // Every server-side override of the model's reply goes through setReply. The final text
+  // is written to the inbox message and delivered to the customer from the same variable,
+  // so what the merchant sees in the Unified Inbox always matches what the customer got.
+  const setReply = (text: string) => {
+    result.replyText = text;
+  };
 
   // CART-ADD INTERCEPTION: If the agent returned cartAction='add', redirect through the
   // confirmation-first flow after validating SKU/qty against this store's catalog.
   if (
     result.cartAction?.action === 'add' &&
     result.cartAction.sku &&
-    !isConfirmState &&
-    !isDetailsState &&
+    !inCheckoutFlow &&
     !isCancelPendingState &&
     !currentConversation.orderConfirmationRequested
   ) {
@@ -324,7 +362,7 @@ export async function generateAndStoreAgentReply(
     if (validated.ok) {
       const price = Number(validated.product.price);
       const total = price * validated.qty;
-      result.replyText = `You'd like ${validated.qty}x ${validated.product.name} at $${price.toFixed(2)} each — total $${total.toFixed(2)}. Would you like to confirm this order?`;
+      setReply(`You'd like ${validated.qty}x ${validated.product.name} at $${price.toFixed(2)} each — total $${total.toFixed(2)}. Would you like to confirm this order?`);
       result.cartAction = { action: 'none', sku: '', quantity: 0 };
       result.askQuantityForSku = encodeConfirm(validated.sku, validated.qty);
       result.orderConfirmationRequested = false;
@@ -336,21 +374,23 @@ export async function generateAndStoreAgentReply(
       result.cartAction = { action: 'none', sku: '', quantity: 0 };
       if (failReason === 'insufficient_inventory') {
         const p = products.find((x) => x.sku === requestedSku);
-        result.replyText = p
-          ? `Sorry, we only have ${p.inventory} unit(s) of ${p.name} available. How many would you like (up to ${Math.min(p.inventory, MAX_CHECKOUT_QUANTITY)})?`
-          : `Sorry, that quantity isn't available. Please choose another amount.`;
+        setReply(
+          p
+            ? `Sorry, we only have ${p.inventory} unit(s) of ${p.name} available. How many would you like (up to ${Math.min(p.inventory, MAX_CHECKOUT_QUANTITY)})?`
+            : `Sorry, that quantity isn't available. Please choose another amount.`,
+        );
         if (p && p.inventory > 0) result.askQuantityForSku = p.sku;
       } else if (failReason === 'invalid_qty') {
-        result.replyText = `Please choose a quantity between 1 and ${MAX_CHECKOUT_QUANTITY}.`;
+        setReply(`Please choose a quantity between 1 and ${MAX_CHECKOUT_QUANTITY}.`);
       } else {
-        result.replyText = `Sorry, I couldn't find that product in our catalog. Which item would you like?`;
+        setReply(`Sorry, I couldn't find that product in our catalog. Which item would you like?`);
         result.askQuantityForSku = '';
       }
     }
   }
 
   const imageProduct = result.showImageForSku ? products.find((p) => p.sku === result.showImageForSku) : undefined;
-  const resolvedImageUrl = imageProduct?.imageUrl || undefined;
+  let resolvedImageUrl = imageProduct?.imageUrl || undefined;
 
   // Captured by id (not by text) so every later correction below targets exactly this
   // message — matching by {conversationId, sender, text} instead would silently rewrite
@@ -387,6 +427,7 @@ export async function generateAndStoreAgentReply(
     conversationData.cart = [];
     conversationData.awaitingQuantityFor = null;
     conversationData.detectedAddress = null;
+    conversationData.detectedPhone = null;
     conversationData.orderConfirmationRequested = false;
     conversationData.orderConfirmed = false;
     conversationData.orderSummaryShown = false;
@@ -394,21 +435,21 @@ export async function generateAndStoreAgentReply(
     // The model's own reply (generated before this reset was detected) doesn't know the
     // cart/address/confirmation state just got wiped — replace it so the customer sees an
     // acknowledgment of the reset instead of a stale, unrelated reply.
-    const freshText = `Done! I've cleared your cart and we're starting fresh. What would you like to shop for?`;
-    await prisma.message.update({ where: { id: aiMessage.id }, data: { text: freshText } });
+    setReply(`Done! I've cleared your cart and we're starting fresh. What would you like to shop for?`);
+    await prisma.message.update({ where: { id: aiMessage.id }, data: { text: result.replyText, imageUrl: null } });
+    if (isAutopilot) await deliverAgentReply(conversation, result.replyText);
     return;
   }
 
   let updatedCart = existingCart;
 
-  // SERVER-SIDE CART GUARD: legacy direct-cart-add paths only; CONFIRM/DETAILS write cart server-side.
+  // SERVER-SIDE CART GUARD: legacy direct-cart-add paths only; checkout states write cart server-side.
   const cartAddQty = normalizeCheckoutQuantity(result.cartAction?.quantity);
   const cartAddAllowed =
     result.cartAction?.action === 'add' &&
     !!result.cartAction.sku &&
     cartAddQty !== null &&
-    !isConfirmState &&
-    !isDetailsState &&
+    !inCheckoutFlow &&
     !isCancelPendingState &&
     (currentConversation.awaitingQuantityFor === result.cartAction.sku ||
       (currentConversation.awaitingQuantityFor === null && !currentConversation.orderConfirmationRequested));
@@ -434,11 +475,26 @@ export async function generateAndStoreAgentReply(
     conversationData.awaitingQuantityFor = currentConversation.awaitingQuantityFor;
   }
 
-  let updatedAddress = currentConversation.detectedAddress;
-  if (result.extractedAddress && result.extractedAddress.trim()) {
-    updatedAddress = result.extractedAddress.trim();
-    conversationData.detectedAddress = updatedAddress;
-  }
+  // Contact details shared this turn. Phone and address are always stored separately, even
+  // if the model packed both into one field; while collecting details, a phone number typed
+  // in the customer's own message is picked up even if the model missed it.
+  // A plain "yes" to the confirmation can't carry new details — ignore any the model
+  // re-captured from history, so the confirmed phone/address are exactly what was shown.
+  const plainYesToContactConfirm = isContactConfirmState && isCheckoutAffirmative(customerText);
+  const extractedContact = plainYesToContactConfirm
+    ? { phone: '', address: '' }
+    : splitContactDetails({ phone: result.extractedPhone, address: result.extractedAddress });
+  if (!extractedContact.phone && inContactFlow) extractedContact.phone = extractPhone(customerText);
+  if (extractedContact.phone) conversationData.detectedPhone = extractedContact.phone;
+  if (extractedContact.address) conversationData.detectedAddress = extractedContact.address;
+  const contact = {
+    phone: extractedContact.phone || storedContact.phone,
+    address: extractedContact.address || storedContact.address,
+  };
+  const sharedContactThisTurn = !!(extractedContact.phone || extractedContact.address);
+  const contactChanged =
+    (!!extractedContact.phone && extractedContact.phone !== storedContact.phone) ||
+    (!!extractedContact.address && extractedContact.address !== storedContact.address);
 
   if (result.orderConfirmationRequested) {
     conversationData.orderConfirmationRequested = true;
@@ -446,10 +502,9 @@ export async function generateAndStoreAgentReply(
   }
 
   // Only trust a customer's "yes" as a real confirmation if the AI actually asked for
-  // one in a previous turn or we are in the multi-step checkout state machine.
+  // one in a previous turn (legacy order-summary flow, outside the checkout state machine).
   const customerConfirmedForReal =
-    result.orderConfirmed &&
-    (currentConversation.orderConfirmationRequested || (isConfirmState && confirmDetailsValid) || (isDetailsState && confirmDetailsValid));
+    result.orderConfirmed && currentConversation.orderConfirmationRequested && !inCheckoutFlow && !isCancelPendingState;
   if (customerConfirmedForReal) {
     conversationData.orderConfirmed = true;
   }
@@ -491,24 +546,14 @@ export async function generateAndStoreAgentReply(
             });
           });
           conversationData.awaitingQuantityFor = null;
-          const cancelOkText = `Your order (#${orderToCancel.id.slice(-8).toUpperCase()}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`;
-          await prisma.message.update({
-            where: { id: aiMessage.id },
-            data: { text: cancelOkText },
-          });
-          result.replyText = cancelOkText;
+          setReply(`Your order (#${orderToCancel.id.slice(-8).toUpperCase()}) has been cancelled successfully. Inventory for those items has been restored. Thank you!`);
         } catch {
           console.error('[ORDER CANCEL] Failed to cancel confirmed order');
           conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
         }
       } else {
         conversationData.awaitingQuantityFor = null;
-        const cancelFailText = `I couldn't safely cancel that order. Please contact the store for help.`;
-        await prisma.message.update({
-          where: { id: aiMessage.id },
-          data: { text: cancelFailText },
-        });
-        result.replyText = cancelFailText;
+        setReply(`I couldn't safely cancel that order. Please contact the store for help.`);
       }
     } else if (isCancelDeclineMessage(customerText)) {
       conversationData.awaitingQuantityFor = null;
@@ -517,8 +562,7 @@ export async function generateAndStoreAgentReply(
       conversationData.awaitingQuantityFor = encodeCancelPending(pendingCancelOrderId);
     }
   } else if (
-    !isConfirmState &&
-    !isDetailsState &&
+    !inCheckoutFlow &&
     !currentConversation.orderConfirmationRequested &&
     isOngoingOrderCancelIntent(customerText)
   ) {
@@ -528,20 +572,10 @@ export async function generateAndStoreAgentReply(
     if (orderToAsk && orderToAsk.storeId === conversation.storeId) {
       conversationData.awaitingQuantityFor = encodeCancelPending(orderToAsk.id);
       const items = ((orderToAsk.items as any[]) || []).map((i: any) => `${i.quantity}x ${i.name}`).join(', ');
-      const askText = `I found your active order #${orderToAsk.id.slice(-8).toUpperCase()} — ${items || 'items'}, total $${Number(orderToAsk.total).toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`;
-      await prisma.message.update({
-        where: { id: aiMessage.id },
-        data: { text: askText },
-      });
-      result.replyText = askText;
+      setReply(`I found your active order #${orderToAsk.id.slice(-8).toUpperCase()} — ${items || 'items'}, total $${Number(orderToAsk.total).toFixed(2)}. Do you want me to cancel this order? Reply "yes, cancel it" to confirm, or "no" to keep it.`);
       result.orderCancelled = false;
     } else {
-      const noneText = `I couldn't find an active order to cancel in this conversation. Please share more details if you still need help.`;
-      await prisma.message.update({
-        where: { id: aiMessage.id },
-        data: { text: noneText },
-      });
-      result.replyText = noneText;
+      setReply(`I couldn't find an active order to cancel in this conversation. Please share more details if you still need help.`);
       result.orderCancelled = false;
     }
   } else if (isCancelPendingState && !cancelPendingValid) {
@@ -549,28 +583,57 @@ export async function generateAndStoreAgentReply(
     conversationData.awaitingQuantityFor = null;
   }
 
-  // === CHECKOUT STATE MACHINE (CONFIRM → DETAILS) — server-validated only ===
+  // === CHECKOUT STATE MACHINE — server-validated only ===
+  // CONFIRM (items) → CONTACT_DETAILS (collect phone + address) → CONTACT_CONFIRM (customer
+  // re-confirms phone + address, even when they were already on file) → order.
+  const cartSummary = (cart: { sku: string; quantity: number }[]) => {
+    const lines = cart
+      .map((line) => ({ line, product: products.find((p) => p.sku === line.sku) }))
+      .filter((x) => !!x.product);
+    if (lines.length === 0) return '';
+    const total = lines.reduce((sum, x) => sum + Number(x.product!.price) * x.line.quantity, 0);
+    return `${lines.map((x) => `${x.line.quantity}x ${x.product!.name}`).join(', ')} — total $${total.toFixed(2)}`;
+  };
+  const contactConfirmText = (cart: { sku: string; quantity: number }[]) => {
+    const summary = cartSummary(cart);
+    return `Before I place your order${summary ? ` (${summary})` : ''}, please confirm your delivery details:\n• Phone: ${contact.phone}\n• Address: ${contact.address}\nIs this your phone number and address, and would you like your order delivered here? Reply "yes" to place the order, or send the correct phone number/address.`;
+  };
+  const contactMissingText = () => {
+    if (!contact.phone && !contact.address) return `Great! To place your order, please share your phone number and full delivery address.`;
+    if (!contact.phone) return `Thanks! I have your delivery address as: ${contact.address}. Please also share your phone number.`;
+    if (!contact.address) return `Thanks! I have your phone number as: ${contact.phone}. Please also share your full delivery address.`;
+    return `No problem! Please send the correct phone number and delivery address for this order.`;
+  };
+  const promptForContact = (cart: { sku: string; quantity: number }[]) => {
+    if (contact.phone && contact.address) {
+      conversationData.awaitingQuantityFor = CONTACT_CONFIRM_STATE;
+      setReply(contactConfirmText(cart));
+    } else {
+      conversationData.awaitingQuantityFor = CONTACT_DETAILS_STATE;
+      setReply(contactMissingText());
+    }
+  };
+  const customerSaidYes = (result.orderConfirmed && !result.orderCancelled) || isCheckoutAffirmative(customerText);
+  const customerSaidNo = result.orderCancelled || /^(?:no|na|nah|nope|wrong|incorrect|না|ভুল)(?![\p{L}])/iu.test(customerText.trim());
+  let finalizeCart: { sku: string; quantity: number }[] | null = null;
+
   if (isConfirmState && confirmDetailsValid) {
-    if (result.orderConfirmed && pendingEncodedSku && pendingEncodedQty > 0) {
+    if (customerSaidYes && pendingEncodedSku && pendingEncodedQty > 0) {
       // Re-validate inventory at transition time.
       const recheck = validateSkuAndQuantity(products, pendingEncodedSku, pendingEncodedQty);
       if (recheck.ok) {
-        conversationData.awaitingQuantityFor = encodeDetails(recheck.sku, recheck.qty);
         conversationData.cart = [{ sku: recheck.sku, quantity: recheck.qty }];
         updatedCart = conversationData.cart;
+        promptForContact(updatedCart);
       } else {
         const failReason = (recheck as { ok: false; reason: 'invalid_sku' | 'invalid_qty' | 'insufficient_inventory' }).reason;
         conversationData.awaitingQuantityFor = null;
         conversationData.cart = [];
-        const failText =
+        setReply(
           failReason === 'insufficient_inventory'
             ? `Sorry, that quantity is no longer available. Please choose a different quantity.`
-            : `Sorry, we couldn't continue checkout for that item. Please try again.`;
-        await prisma.message.update({
-          where: { id: aiMessage.id },
-          data: { text: failText },
-        });
-        result.replyText = failText;
+            : `Sorry, we couldn't continue checkout for that item. Please try again.`,
+        );
       }
     } else if (result.orderCancelled) {
       conversationData.awaitingQuantityFor = null;
@@ -578,22 +641,44 @@ export async function generateAndStoreAgentReply(
     } else {
       conversationData.awaitingQuantityFor = encodeConfirm(pendingEncodedSku!, pendingEncodedQty);
     }
-  } else if (isDetailsState && confirmDetailsValid) {
-    const detailsContactInfo = result.extractedAddress || currentConversation.detectedAddress || '';
-    if (detailsContactInfo && pendingEncodedSku && pendingEncodedQty > 0) {
+  } else if (inContactFlow) {
+    conversationData.cart = contactFlowCart;
+    updatedCart = contactFlowCart;
+    if (isCheckoutCancelIntent(customerText) && !sharedContactThisTurn) {
       conversationData.awaitingQuantityFor = null;
-      conversationData.orderConfirmed = true;
-      conversationData.cart = [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }];
-      updatedCart = conversationData.cart;
-      if (result.extractedAddress) {
-        conversationData.detectedAddress = result.extractedAddress;
+      conversationData.cart = [];
+      conversationData.orderConfirmationRequested = false;
+      setReply(`Okay, I've cancelled this checkout — no order was placed. Let me know if you'd like anything else!`);
+    } else if (isContactDetailsState) {
+      if (contact.phone && contact.address && (sharedContactThisTurn || customerSaidYes)) {
+        conversationData.awaitingQuantityFor = CONTACT_CONFIRM_STATE;
+        setReply(contactConfirmText(contactFlowCart));
+      } else {
+        conversationData.awaitingQuantityFor = CONTACT_DETAILS_STATE;
+        if (sharedContactThisTurn || result.replyText === DEFAULT_REPLY_TEXT) setReply(contactMissingText());
       }
+    } else if (contactChanged) {
+      promptForContact(contactFlowCart);
+    } else if (customerSaidYes) {
+      if (contact.phone && contact.address) finalizeCart = contactFlowCart;
+      else promptForContact(contactFlowCart);
+    } else if (customerSaidNo) {
+      conversationData.awaitingQuantityFor = CONTACT_DETAILS_STATE;
+      setReply(`No problem! Please send the correct phone number and delivery address for this order.`);
     } else {
-      conversationData.awaitingQuantityFor = encodeDetails(pendingEncodedSku!, pendingEncodedQty);
+      conversationData.awaitingQuantityFor = CONTACT_CONFIRM_STATE;
+      if (result.replyText === DEFAULT_REPLY_TEXT) setReply(contactConfirmText(contactFlowCart));
     }
   } else if ((isConfirmState || isDetailsState) && !confirmDetailsValid) {
     // Corrupt encoded state — clear rather than acting on it.
     conversationData.awaitingQuantityFor = null;
+  } else if (parsedAWQ.kind === 'contact_details' || parsedAWQ.kind === 'contact_confirm') {
+    // Contact step with an empty cart (e.g. merchant cleared it) — nothing left to order.
+    conversationData.awaitingQuantityFor = null;
+  } else if (customerConfirmedForReal && updatedCart.length > 0) {
+    // Legacy order-summary confirmation — still route through phone/address confirmation.
+    conversationData.orderConfirmationRequested = false;
+    promptForContact(updatedCart);
   }
 
   await prisma.conversation.update({
@@ -601,56 +686,30 @@ export async function generateAndStoreAgentReply(
     data: conversationData,
   });
 
-  // Auto-finalize (H1): DETAILS / confirmation paths create a real Order only when the
-  // merchant is eligible (AI Managed, or autoFinalizeOrdersAlways). Otherwise preserve
-  // cart + address for the merchant "Generate Order" workflow and correct the customer reply.
-  const detailsContactInfo =
-    (isDetailsState && confirmDetailsValid
-      ? result.extractedAddress || currentConversation.detectedAddress || ''
-      : '') || '';
-  const shouldAttemptFinalize =
-    !orderCreatedThisTurn &&
-    ((isDetailsState && confirmDetailsValid && !!detailsContactInfo) ||
-      (customerConfirmedForReal && !!updatedAddress));
-
-  if (shouldAttemptFinalize) {
-    const finalizeAddress = (detailsContactInfo || updatedAddress || '').trim();
-    const finalizeCart: { sku: string; quantity: number }[] =
-      updatedCart.length > 0
-        ? updatedCart
-        : pendingEncodedSku && pendingEncodedQty > 0
-          ? [{ sku: pendingEncodedSku, quantity: pendingEncodedQty }]
-          : [];
-
-    // Validate every cart line against this store before ordering.
+  // Auto-finalize (H1): only after the customer re-confirmed phone + address. Creates a real
+  // Order only when the merchant is eligible (AI Managed, or autoFinalizeOrdersAlways).
+  // Otherwise preserve cart + contact details for the merchant "Generate Order" workflow.
+  if (finalizeCart) {
+    const contactLines = `• Phone: ${contact.phone}\n• Address: ${contact.address}`;
     const cartValid =
       finalizeCart.length > 0 &&
       finalizeCart.every((line) => validateSkuAndQuantity(products, line.sku, line.quantity).ok);
 
-    if (!finalizeAddress || !cartValid) {
-      if (isDetailsState && detailsContactInfo && !cartValid) {
-        const errText = `Sorry, we couldn't place that order with the requested items/quantity. Please adjust and try again.`;
-        await prisma.message.update({
-          where: { id: aiMessage.id },
-          data: { text: errText },
-        });
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { awaitingQuantityFor: null },
-        });
-      }
-    } else if (!autoFinalizeEligible) {
-      // H1: not eligible — keep cart/address for merchant review; do not create Order / decrement stock.
-      const pendingText = `Thank you! I've saved your order details and notified the store. A team member will finalize your order shortly. Delivery info on file: ${finalizeAddress}`;
-      await prisma.message.update({
-        where: { id: aiMessage.id },
-        data: { text: pendingText },
+    if (!cartValid) {
+      setReply(`Sorry, we couldn't place that order with the requested items/quantity. Please adjust and try again.`);
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { awaitingQuantityFor: null },
       });
+    } else if (!autoFinalizeEligible) {
+      // H1: not eligible — keep cart/contact for merchant review; do not create Order / decrement stock.
+      setReply(`Thank you! I've saved your order details and notified the store. A team member will finalize your order shortly.\n${contactLines}`);
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
           cart: finalizeCart,
-          detectedAddress: finalizeAddress,
+          detectedAddress: contact.address,
+          detectedPhone: contact.phone,
           awaitingQuantityFor: null,
           orderConfirmed: true,
           orderConfirmationRequested: false,
@@ -661,68 +720,76 @@ export async function generateAndStoreAgentReply(
         await createOrderForConversation(
           { id: conversation.id, storeId: conversation.storeId, customerName: currentConversation.customerName },
           finalizeCart,
-          finalizeAddress,
+          contact,
         );
-        orderCreatedThisTurn = true;
-        const placedText = `Thank you! Your order has been placed. We'll deliver to: ${finalizeAddress}. Thank you for shopping with us!`;
-        await prisma.message.update({
-          where: { id: aiMessage.id },
-          data: { text: placedText },
-        });
-        // The order is now a real, separate Order row — the conversation's own cart/
-        // confirmation state must be cleared, otherwise the next message is treated as
-        // still answering a "confirm this order?" question about items already ordered.
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { cart: [], orderConfirmationRequested: false, awaitingQuantityFor: null },
-        });
+        setReply(`Thank you! Your order has been placed.\n${contactLines}\nWe'll deliver to this address. Thank you for shopping with us!`);
       } catch (err: any) {
         console.error('Auto-finalize order failed for conversation:', conversation.id);
         if (err?.code === 'INSUFFICIENT_STOCK') {
-          const errText = `Sorry, we don't have enough stock to complete that order right now. Please adjust your quantity and try again.`;
-          await prisma.message.update({
-            where: { id: aiMessage.id },
-            data: { text: errText },
-          });
+          setReply(`Sorry, we don't have enough stock to complete that order right now. Please adjust your quantity and try again.`);
           await prisma.conversation.update({
             where: { id: conversation.id },
             data: { awaitingQuantityFor: null },
           });
+        } else {
+          setReply(`Sorry, something went wrong while placing your order. Please reply "yes" to try again, or a team member will follow up shortly.`);
         }
       }
     }
   }
 
-  if (isAutopilot && conversation.channelType === 'FACEBOOK' && conversation.externalUserId) {
+  // A server-side override replaced the model's reply — the product photo it chose no
+  // longer belongs with this text, so it isn't sent or shown either.
+  if (result.replyText !== aiMessage.text) {
+    resolvedImageUrl = undefined;
+    await prisma.message.update({
+      where: { id: aiMessage.id },
+      data: { text: result.replyText, imageUrl: resolvedImageUrl ?? null },
+    });
+  }
+
+  if (isAutopilot) await deliverAgentReply(conversation, result.replyText, resolvedImageUrl);
+}
+
+// Pushes a finalized AI reply out to the customer's channel. Channels with no push API
+// (WIDGET) simply don't match any branch.
+async function deliverAgentReply(
+  conversation: { storeId: string; channelType: string; externalUserId: string | null },
+  text: string,
+  imageUrl?: string,
+) {
+  if (!conversation.externalUserId) return;
+
+  if (conversation.channelType === 'FACEBOOK') {
     const pageAccessToken = await getPageAccessTokenForStore(conversation.storeId);
     if (pageAccessToken) {
       try {
-        await sendMessengerMessage(pageAccessToken, conversation.externalUserId, result.replyText);
-        if (resolvedImageUrl) await sendMessengerImage(pageAccessToken, conversation.externalUserId, resolvedImageUrl);
+        await sendMessengerMessage(pageAccessToken, conversation.externalUserId, text);
+        if (imageUrl) await sendMessengerImage(pageAccessToken, conversation.externalUserId, imageUrl);
       } catch (err) {
         console.error('Failed to deliver AI reply to Messenger:', err);
       }
     }
   }
 
-  if (isAutopilot && conversation.channelType === 'WHATSAPP' && conversation.externalUserId) {
+  if (conversation.channelType === 'WHATSAPP') {
     const waCreds = await getWhatsAppCredentialsForStore(conversation.storeId);
     if (waCreds) {
       try {
-        await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, result.replyText);
-        if (resolvedImageUrl) await sendWhatsAppImage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, resolvedImageUrl);
+        await sendWhatsAppMessage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, text);
+        if (imageUrl) await sendWhatsAppImage(waCreds.phoneNumberId, waCreds.accessToken, conversation.externalUserId, imageUrl);
       } catch (err) {
         console.error('Failed to deliver AI reply to WhatsApp:', err);
       }
     }
   }
 
-  if (isAutopilot && conversation.channelType === 'INSTAGRAM' && conversation.externalUserId) {
+  if (conversation.channelType === 'INSTAGRAM') {
     const igCreds = await getInstagramCredentialsForStore(conversation.storeId);
     if (igCreds) {
       try {
-        await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, result.replyText);
-        if (resolvedImageUrl) await sendInstagramImage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, resolvedImageUrl);
+        await sendInstagramMessage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, text);
+        if (imageUrl) await sendInstagramImage(igCreds.igAccountId, igCreds.accessToken, conversation.externalUserId, imageUrl);
       } catch (err) {
         console.error('Failed to deliver AI reply to Instagram:', err);
       }

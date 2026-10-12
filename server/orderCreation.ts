@@ -1,5 +1,6 @@
 import { prisma } from './db';
 import { MAX_CHECKOUT_QUANTITY } from './checkoutSecurity';
+import { splitContactDetails } from './contactDetails';
 
 // Creates a real Order from a conversation's current AI-built cart. A deliberate
 // merchant action (not automatic) — the AI can build a cart, but committing it to a
@@ -12,9 +13,10 @@ import { MAX_CHECKOUT_QUANTITY } from './checkoutSecurity';
 export async function createOrderForConversation(
   conversation: { id: string; storeId: string; customerName: string | null },
   cart: { sku: string; quantity: number }[],
-  address: string,
+  contactInput: { address: string; phone?: string | null },
   customerNameOverride?: string
 ) {
+  const contact = splitContactDetails(contactInput);
   const insufficientStock = (message: string) => {
     const err = new Error(message) as Error & { code: string };
     err.code = 'INSUFFICIENT_STOCK';
@@ -82,7 +84,8 @@ export async function createOrderForConversation(
         conversationId: conversation.id,
         items,
         customerName: customerNameOverride || conversation.customerName || 'Customer',
-        address,
+        customerPhone: contact.phone || null,
+        address: contact.address,
         status: 'PROCESSING',
         total,
       },
@@ -94,6 +97,8 @@ export async function createOrderForConversation(
       where: { id: conversation.id },
       data: {
         cart: null,
+        detectedAddress: contact.address,
+        ...(contact.phone ? { detectedPhone: contact.phone } : {}),
         orderConfirmationRequested: false,
         orderConfirmed: false,
         orderSummaryShown: false,

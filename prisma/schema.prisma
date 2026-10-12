@@ -185,6 +185,8 @@ model Conversation {
   // Shipping address the AI has extracted from the conversation, if the customer
   // mentioned one — pre-fills (but doesn't auto-submit) the Generate Order form.
   detectedAddress String?
+  // Customer's phone number, kept separate from detectedAddress.
+  detectedPhone   String?
   // Added directly against the shared DB from another machine (order-confirmation flow
   // in progress there as of 2026-07-30) — field meanings inferred from name/type only,
   // since the corresponding server.ts logic hasn't been pushed to git yet.
@@ -253,6 +255,7 @@ model Order {
   conversationId String?
   items          Json
   customerName   String
+  customerPhone  String?
   address        String
   status         OrderStatus @default(PROCESSING)
   total          Decimal

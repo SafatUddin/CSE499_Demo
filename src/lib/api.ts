@@ -311,6 +311,7 @@ export interface ApiConversation {
   isSpam?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
+  detectedPhone?: string;
   orderConfirmed?: boolean;
   orderConfirmationRequested?: boolean;
 }
@@ -508,6 +509,7 @@ export interface ApiOrder {
   conversationId: string | null;
   items: ApiOrderItem[];
   customerName: string;
+  customerPhone: string | null;
   address: string;
   status: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled';
   total: number;
@@ -561,7 +563,7 @@ export function updateAppointmentStatus(id: string, status: ApiAppointment['stat
   return request<ApiAppointment>(`/api/appointments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
 }
 
-export function createOrderFromConversation(conversationId: string, input: { customerName?: string; address: string }) {
+export function createOrderFromConversation(conversationId: string, input: { customerName?: string; customerPhone?: string; address: string }) {
   return request<ApiOrder>(`/api/conversations/${conversationId}/orders`, {
     method: 'POST',
     body: JSON.stringify(input),

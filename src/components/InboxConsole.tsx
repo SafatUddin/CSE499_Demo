@@ -252,7 +252,10 @@ export default function InboxConsole({
     if (activeChat?.detectedAddress && !orderAddress.trim()) {
       setOrderAddress(activeChat.detectedAddress);
     }
-  }, [activeChat?.id, activeChat?.detectedAddress]);
+    if (activeChat?.detectedPhone && !orderPhone.trim()) {
+      setOrderPhone(activeChat.detectedPhone);
+    }
+  }, [activeChat?.id, activeChat?.detectedAddress, activeChat?.detectedPhone]);
 
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || !activeChat) return;
@@ -351,11 +354,11 @@ export default function InboxConsole({
     }
     setOrderError('');
     setIsCreatingOrder(true);
-    const combinedAddress = orderPhone.trim()
-      ? `Phone: ${orderPhone.trim()} | Address: ${orderAddress.trim()}`
-      : orderAddress.trim();
     try {
-      await createOrderFromConversation(activeChat.id, { address: combinedAddress });
+      await createOrderFromConversation(activeChat.id, {
+        address: orderAddress.trim(),
+        customerPhone: orderPhone.trim() || undefined,
+      });
       onUpdateConversation(activeChat.id, { cart: undefined });
       setOrderAddress('');
       setOrderPhone('');

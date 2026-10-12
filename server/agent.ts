@@ -38,6 +38,7 @@ export interface AgentReply {
   cartAction: { action: string; sku: string; quantity: number };
   suggestedProductsSKUs: string[];
   extractedAddress: string;
+  extractedPhone: string;
   askQuantityForSku: string;
   orderConfirmationRequested: boolean;
   orderConfirmed: boolean;
@@ -85,12 +86,19 @@ export interface AgentOrderState {
   orderConfirmationRequested?: boolean;
   hasCartItems?: boolean;
   hasAddress?: boolean;
+  hasPhone?: boolean;
   cartItems?: { sku: string; name: string; quantity: number }[];
   pendingItem?: { sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number };
   awaitingContactDetails?: boolean;
+  awaitingContactConfirmation?: boolean;
+  contactOnFile?: { phone: string; address: string };
   pendingCancelOrder?: { id: string; status: string; total: number } | null;
   ongoingOrders?: { id: string; items: { name: string; quantity: number; price: number }[]; status: string; createdAt: string; total: number }[];
 }
+
+// Used when the model returns only tool calls with no text — callers may replace it
+// with a more specific, state-aware reply.
+export const DEFAULT_REPLY_TEXT = 'How can I help you?';
 
 // --- Tool Definitions ---
 const tools: FunctionDeclaration[] = [
@@ -132,17 +140,17 @@ const tools: FunctionDeclaration[] = [
   },
   {
     name: 'capture_contact_details',
-    description: 'Capture and save customer contact information for order delivery. Use this when the customer provides their phone number and/or delivery address.',
+    description: 'Capture and save customer contact information for order delivery. Use this when the customer provides their phone number and/or delivery address. Phone and address are SEPARATE fields — never put the phone number inside the address or vice versa.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         phone: {
           type: Type.STRING,
-          description: 'Customer phone number (if provided)',
+          description: 'ONLY the customer phone number digits (e.g. "01712345678"), if provided. No words, no address.',
         },
         address: {
           type: Type.STRING,
-          description: 'Customer delivery address (if provided)',
+          description: 'ONLY the delivery address (e.g. "House 12, Road 5, Dhanmondi, Dhaka"), if provided. Never include the phone number or filler words like "my address is".',
         },
       },
       required: [],
@@ -362,7 +370,10 @@ export async function generateAgentReply({
     orderStateDescription.push(`Customer wants ${orderState.pendingItem.quantity}x "${orderState.pendingItem.name}" at $${orderState.pendingItem.unitPrice.toFixed(2)} each (total $${orderState.pendingItem.lineTotal.toFixed(2)}). Waiting for their confirmation.`);
   }
   if (orderState.awaitingContactDetails) {
-    orderStateDescription.push(`Customer confirmed order. Now collect their phone number and delivery address.`);
+    orderStateDescription.push(`Customer confirmed the items. Now collect BOTH their phone number and delivery address (both are required). When they share either, call capture_contact_details with the phone and address in their separate fields. Do NOT say the order is placed.`);
+  }
+  if (orderState.awaitingContactConfirmation && orderState.contactOnFile) {
+    orderStateDescription.push(`Waiting for the customer to confirm the delivery details — Phone: ${orderState.contactOnFile.phone}, Address: ${orderState.contactOnFile.address}. If they say yes, call confirm_order(true). If they give a different phone number or address, call capture_contact_details. Do NOT say the order is placed — the system confirms that.`);
   }
   if (orderState.pendingCancelOrder) {
     orderStateDescription.push(`Waiting for customer to confirm cancelling order #${orderState.pendingCancelOrder.id.slice(-8).toUpperCase()}.`);
@@ -425,6 +436,11 @@ UNDERSTANDING INTENT (Most Important):
 - Simple greetings ("hi", "hello", "hey", "আসসালামু আলাইকুম") = respond warmly, DO NOT flag
 - Frustration words ("hotasho", "deri hoyeche", "birokto", complaints) = use flag_for_human_review
 
+CHECKOUT RULES:
+- Never tell the customer their order has been placed — the system sends that message itself.
+- Before any order is placed, the customer's phone number and delivery address are always collected and re-confirmed, even if they were shared in an earlier conversation.
+- Phone number and address are separate pieces of information — always pass them in separate capture_contact_details fields.
+
 COMPLAINT DETECTION (Be Conservative):
 - DO flag: Clear complaints about product quality, service issues, refund requests, anger/frustration
 - DO NOT flag: Simple greetings, questions, casual conversation, or unclear messages
@@ -468,6 +484,7 @@ ${catalogText || 'No products available.'}`;
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress: '',
+      extractedPhone: '',
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
@@ -516,11 +533,12 @@ ${catalogText || 'No products available.'}`;
 
     // Process tool calls and build AgentReply
     const result: AgentReply = {
-      replyText: replyText.trim() || 'How can I help you?',
+      replyText: replyText.trim() || DEFAULT_REPLY_TEXT,
       isComplaint: false,
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress: '',
+      extractedPhone: '',
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,
@@ -569,12 +587,8 @@ ${catalogText || 'No products available.'}`;
           break;
 
         case 'capture_contact_details':
-          const parts = [];
-          if (args.phone) parts.push(`Phone: ${args.phone}`);
-          if (args.address) parts.push(`Address: ${args.address}`);
-          if (parts.length > 0) {
-            result.extractedAddress = parts.join(' | ');
-          }
+          if (typeof args.phone === 'string') result.extractedPhone = args.phone.trim();
+          if (typeof args.address === 'string') result.extractedAddress = args.address.trim();
           break;
 
         case 'confirm_order':
@@ -637,6 +651,7 @@ ${catalogText || 'No products available.'}`;
       cartAction: { action: 'none', sku: '', quantity: 0 },
       suggestedProductsSKUs: [],
       extractedAddress: '',
+      extractedPhone: '',
       askQuantityForSku: '',
       orderConfirmationRequested: false,
       orderConfirmed: false,

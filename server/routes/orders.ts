@@ -3,8 +3,9 @@ import { prisma } from '../db';
 import { requireAuth, AuthedRequest } from '../auth';
 import { requireProfileComplete } from '../profileCompletion';
 import { createOrderForConversation } from '../orderCreation';
+import { splitContactDetails } from '../contactDetails';
 
-const toPublicOrder = (o: { id: string; conversationId: string | null; items: any; customerName: string; address: string; status: string; total: any; createdAt: Date }) => {
+const toPublicOrder = (o: { id: string; conversationId: string | null; items: any; customerName: string; customerPhone: string | null; address: string; status: string; total: any; createdAt: Date }) => {
   let publicStatus: 'Processing' | 'On the Way' | 'Delivered' | 'Cancelled' = 'Processing';
   if (o.status === 'ON_THE_WAY') publicStatus = 'On the Way';
   else if (o.status === 'DELIVERED') publicStatus = 'Delivered';
@@ -14,6 +15,7 @@ const toPublicOrder = (o: { id: string; conversationId: string | null; items: an
     conversationId: o.conversationId,
     items: o.items,
     customerName: o.customerName,
+    customerPhone: o.customerPhone,
     address: o.address,
     status: publicStatus,
     total: Number(o.total),
@@ -99,12 +101,15 @@ export function createOrdersRouter(): express.Router {
         return res.status(400).json({ error: 'This conversation has no items in its cart yet' });
       }
 
-      const { address } = req.body;
-      if (!address || !address.trim()) {
+      const contact = splitContactDetails({
+        address: typeof req.body.address === 'string' ? req.body.address : '',
+        phone: typeof req.body.customerPhone === 'string' ? req.body.customerPhone : '',
+      });
+      if (!contact.address) {
         return res.status(400).json({ error: 'A shipping address is required' });
       }
 
-      const order = await createOrderForConversation(conversation, cart, address, req.body.customerName);
+      const order = await createOrderForConversation(conversation, cart, contact, req.body.customerName);
       res.status(201).json(toPublicOrder(order));
     } catch (err: any) {
       if (err?.code === 'INSUFFICIENT_STOCK') {

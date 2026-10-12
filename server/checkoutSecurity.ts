@@ -19,7 +19,14 @@ export type EncodedAwaitingState =
   | { kind: 'details'; sku: string; qty: number }
   | { kind: 'ask_qty'; sku: string }
   | { kind: 'cancel_pending'; orderId: string }
+  | { kind: 'contact_details' }
+  | { kind: 'contact_confirm' }
   | { kind: 'none' };
+
+// Payload-less checkout steps that operate on the conversation's server-side cart:
+// collecting phone + address, then re-confirming them with the customer before ordering.
+export const CONTACT_DETAILS_STATE = 'CONTACT_DETAILS';
+export const CONTACT_CONFIRM_STATE = 'CONTACT_CONFIRM';
 
 export type QtyValidationOk = { ok: true; sku: string; qty: number; product: CatalogProduct };
 export type QtyValidationErr = { ok: false; reason: 'invalid_sku' | 'invalid_qty' | 'insufficient_inventory' };
@@ -29,6 +36,8 @@ export function parseAwaitingQuantityFor(raw: string | null | undefined): Encode
   if (!raw || typeof raw !== 'string') return { kind: 'none' };
   const trimmed = raw.trim();
   if (!trimmed) return { kind: 'none' };
+  if (trimmed === CONTACT_DETAILS_STATE) return { kind: 'contact_details' };
+  if (trimmed === CONTACT_CONFIRM_STATE) return { kind: 'contact_confirm' };
 
   if (trimmed.startsWith('CANCEL_PENDING:')) {
     const orderId = trimmed.slice('CANCEL_PENDING:'.length).trim();
@@ -104,8 +113,13 @@ export function sanitizeAskQuantityForSku(
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  // Model must never author DETAILS / CANCEL_PENDING encodings.
-  if (trimmed.startsWith('DETAILS:') || trimmed.startsWith('CANCEL_PENDING:')) {
+  // Model must never author DETAILS / CANCEL_PENDING / CONTACT_* encodings.
+  if (
+    trimmed.startsWith('DETAILS:') ||
+    trimmed.startsWith('CANCEL_PENDING:') ||
+    trimmed === CONTACT_DETAILS_STATE ||
+    trimmed === CONTACT_CONFIRM_STATE
+  ) {
     return null;
   }
 
@@ -165,6 +179,40 @@ export function isCancelDeclineMessage(text: string): boolean {
     lower.includes('keep it') ||
     lower.includes('keep my order') ||
     lower.includes('do not cancel')
+  );
+}
+
+const CHECKOUT_YES = new Set([
+  'yes', 'y', 'yes please', 'yeah', 'yep', 'ha', 'haa', 'haan', 'hae', 'ji', 'jee', 'ok', 'okay', 'sure',
+  'confirm', 'confirmed', 'proceed', 'correct', 'right', 'place it', 'place the order', 'place order',
+  'thik ache', 'thik', 'ঠিক আছে', 'হ্যাঁ', 'হ্যা', 'হা', 'জি', 'জ্বি', 'ঠিক', 'কনফার্ম',
+]);
+
+/** Plain "yes" to a checkout question — never matches anything mentioning cancel/no. */
+export function isCheckoutAffirmative(text: string): boolean {
+  const lower = text.toLowerCase().trim().replace(/[.!,?।\s]+$/u, '');
+  if (!lower || /cancel|\bno\b|\bna\b|\bnah?\b|না/u.test(lower)) return false;
+  return CHECKOUT_YES.has(lower) || /^(?:yes|ha+|ji|ok(?:ay)?|sure|হ্যাঁ|জি)[\s,]+(?:please|correct|thik ache|place (?:it|the order)|confirm|ঠিক আছে)$/u.test(lower);
+}
+
+/** Customer abandoning an in-progress checkout (before an order exists). */
+export function isCheckoutCancelIntent(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return false;
+  return (
+    lower === 'cancel' ||
+    lower.includes('cancel order') ||
+    lower.includes('cancel the order') ||
+    lower.includes('cancel my order') ||
+    lower.includes("don't want") ||
+    lower.includes('dont want') ||
+    lower.includes('lagbe na') ||
+    lower.includes('dorkar nai') ||
+    lower.includes('nibo na') ||
+    lower.includes('লাগবে না') ||
+    lower.includes('দরকার নেই') ||
+    lower.includes('নিব না') ||
+    lower.includes('বাতিল')
   );
 }
 

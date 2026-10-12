@@ -30,6 +30,7 @@ export default function OrdersPage() {
   const filteredOrders = orders.filter((o) =>
     o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     o.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (o.customerPhone || '').includes(searchTerm) ||
     o.items.some((i) => i.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -81,17 +82,8 @@ export default function OrdersPage() {
                         order.status === 'Cancelled' ? 'status-danger' :
                         order.status === 'On the Way' ? 'status-info' : 'status-warning';
 
-                      // Parse phone and address from the combined address field
-                      const parseAddress = (addr: string) => {
-                        const phoneMatch = addr.match(/Phone:\s*([^|]+)/i);
-                        const addressMatch = addr.match(/Address:\s*(.+)/i);
-                        return {
-                          phone: phoneMatch ? phoneMatch[1].trim() : '',
-                          address: addressMatch ? addressMatch[1].trim() : addr
-                        };
-                      };
-
-                      const { phone, address } = parseAddress(order.address);
+                      const phone = order.customerPhone || '';
+                      const address = order.address;
 
                       return (
                         <tr key={order.id} className="hover:bg-white/[0.03] transition-colors">

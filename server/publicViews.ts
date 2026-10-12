@@ -105,6 +105,7 @@ export function toPublicConversation(c: any) {
     isSpam: !!c.isSpam,
     cart: c.cart || undefined,
     detectedAddress: c.detectedAddress || undefined,
+    detectedPhone: c.detectedPhone || undefined,
     orderConfirmed: !!c.orderConfirmed,
     orderConfirmationRequested: !!c.orderConfirmationRequested,
   };

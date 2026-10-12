@@ -55,6 +55,7 @@ export interface Conversation {
   isSpam?: boolean;
   cart?: { sku: string; quantity: number }[];
   detectedAddress?: string;
+  detectedPhone?: string;
   orderConfirmed?: boolean;
   orderConfirmationRequested?: boolean;
   suggestedProducts?: string[];
